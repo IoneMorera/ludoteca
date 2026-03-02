@@ -412,10 +412,6 @@ function estadoClase(estado) {
   height: 72px;
 }
 
-.actions {
-  /* celda de acciones */
-}
-
 .actions-inner {
   display: inline-flex;
   gap: 0.5rem;
