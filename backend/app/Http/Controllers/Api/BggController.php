@@ -18,12 +18,20 @@ class BggController extends Controller
 
     public function collection(string $username): JsonResponse
     {
+        $apiKey = config('services.bgg.api_key');
+        if (empty($apiKey)) {
+            return response()->json([
+                'message' => 'BGG_API_KEY no configurada. Regístrate en boardgamegeek.com/applications y añade el token en .env',
+            ], 500);
+        }
+
         $response = null;
 
         for ($attempt = 0; $attempt < self::MAX_RETRIES; $attempt++) {
-            $response = Http::withHeaders([
+            $response = Http::timeout(30)->withHeaders([
                 'Accept' => 'application/xml',
-                'Authorization' => 'Bearer ' . config('services.bgg.api_key'),
+                'Authorization' => 'Bearer ' . $apiKey,
+                'User-Agent' => 'Ludoteca/1.0 (BoardGameGeek Integration)',
             ])->get(self::BGG_API_URL . '/collection', [
                 'username' => $username,
                 'own' => 1,
@@ -131,11 +139,19 @@ class BggController extends Controller
 
     public function plays(string $username): JsonResponse
     {
+        $apiKey = config('services.bgg.api_key');
+        if (empty($apiKey)) {
+            return response()->json([
+                'message' => 'BGG_API_KEY no configurada. Regístrate en boardgamegeek.com/applications y añade el token en .env',
+            ], 500);
+        }
+
         $page = request()->input('page', 1);
 
-        $response = Http::withHeaders([
+        $response = Http::timeout(30)->withHeaders([
             'Accept' => 'application/xml',
-            'Authorization' => 'Bearer ' . config('services.bgg.api_key'),
+            'Authorization' => 'Bearer ' . $apiKey,
+            'User-Agent' => 'Ludoteca/1.0 (BoardGameGeek Integration)',
         ])->get(self::BGG_API_URL . '/plays', [
             'username' => $username,
             'page' => $page,

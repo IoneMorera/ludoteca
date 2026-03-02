@@ -19,6 +19,7 @@ class Juego extends Model
         'num_jugadores_min',
         'num_jugadores_max',
         'categoria_id',
+        'ubicacion_id',
         'estado',
         'imagen',
         'bgg_id',
@@ -35,6 +36,11 @@ class Juego extends Model
     public function categoria()
     {
         return $this->belongsTo(Categoria::class);
+    }
+
+    public function ubicacion()
+    {
+        return $this->belongsTo(Ubicacion::class);
     }
 
     public function prestamos()

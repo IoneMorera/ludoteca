@@ -12,23 +12,4 @@ import AppNavbar from './components/AppNavbar.vue'
 </template>
 
 <style scoped>
-.app-layout {
-  display: flex;
-  min-height: 100vh;
-}
-
-.main-content {
-  flex: 1;
-  margin-left: 260px;
-  padding: 2rem;
-  background-color: #f5f7fa;
-}
-
-@media (max-width: 768px) {
-  .main-content {
-    margin-left: 0;
-    padding: 1rem;
-    padding-top: 4rem;
-  }
-}
 </style>

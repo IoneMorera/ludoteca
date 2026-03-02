@@ -1,6 +1,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import LoadingState from '../components/LoadingState.vue'
 
 const stats = ref({
   totalJuegos: 0,
@@ -27,9 +29,13 @@ onMounted(async () => {
 
 <template>
   <div class="dashboard">
-    <h1 class="page-title">Panel de Control</h1>
+    <PageHeader title="Panel de Control" />
 
-    <div v-if="loading" class="loading">Cargando estadísticas...</div>
+    <LoadingState
+      v-if="loading"
+      text="Cargando estadísticas..."
+      :spinner="true"
+    />
 
     <div v-else class="stats-grid">
       <div class="stat-card stat-juegos">
@@ -82,18 +88,6 @@ onMounted(async () => {
   max-width: 1200px;
 }
 
-.page-title {
-  font-size: 1.8rem;
-  color: #1e3a5f;
-  margin-bottom: 1.5rem;
-}
-
-.loading {
-  text-align: center;
-  padding: 2rem;
-  color: #666;
-}
-
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -102,13 +96,14 @@ onMounted(async () => {
 }
 
 .stat-card {
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 12px;
   padding: 1.5rem;
   display: flex;
   align-items: center;
   gap: 1rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-soft);
   border-left: 4px solid;
 }
 
@@ -134,17 +129,17 @@ onMounted(async () => {
 .stat-value {
   font-size: 2rem;
   font-weight: 700;
-  color: #1e3a5f;
+  color: var(--text-main);
 }
 
 .stat-label {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .quick-actions h2 {
   font-size: 1.3rem;
-  color: #1e3a5f;
+  color: var(--primary);
   margin-bottom: 1rem;
 }
 
@@ -155,7 +150,7 @@ onMounted(async () => {
 }
 
 .action-card {
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 12px;
   padding: 1.5rem;
   display: flex;
@@ -163,9 +158,10 @@ onMounted(async () => {
   align-items: center;
   gap: 0.75rem;
   text-decoration: none;
-  color: #1e3a5f;
+  color: var(--text-main);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-soft);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 

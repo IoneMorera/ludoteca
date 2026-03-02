@@ -2,6 +2,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
+import LoadingState from '../components/LoadingState.vue'
+import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,11 +18,14 @@ const buscar = ref('')
 const importing = ref(false)
 const importResult = ref(null)
 const username = computed(() => route.params.username)
+const subtitle = computed(
+  () => `Juegos del usuario ${username.value} en BoardGameGeek`,
+)
 
 const juegosFiltrados = computed(() => {
   if (!buscar.value) return games.value
   const query = buscar.value.toLowerCase()
-  return games.value.filter(g => g.name.toLowerCase().includes(query))
+  return games.value.filter((g) => g.name.toLowerCase().includes(query))
 })
 
 async function fetchCollection() {
@@ -64,12 +72,8 @@ onMounted(fetchCollection)
 
 <template>
   <div class="bgg-view">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Colección BGG</h1>
-        <p class="page-subtitle">Juegos del usuario <strong>{{ username }}</strong> en BoardGameGeek</p>
-      </div>
-      <div class="header-actions">
+    <PageHeader :title="'Colección BGG'" :subtitle="subtitle">
+      <template #actions>
         <button class="btn btn-secondary" @click="changeUser">← Cambiar usuario</button>
         <button
           v-if="!loading && !error && games.length > 0"
@@ -79,10 +83,14 @@ onMounted(fetchCollection)
         >
           {{ importing ? 'Importando...' : 'Añadir juegos a la BBDD' }}
         </button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
-    <div v-if="importResult" class="import-feedback" :class="importResult.error ? 'import-error' : 'import-success'">
+    <div
+      v-if="importResult"
+      class="import-feedback"
+      :class="importResult.error ? 'import-error' : 'import-success'"
+    >
       <template v-if="importResult.error">{{ importResult.error }}</template>
       <template v-else>
         ✔ {{ importResult.imported }} juego(s) importado(s), {{ importResult.skipped }} ya existían en la BBDD
@@ -90,7 +98,7 @@ onMounted(fetchCollection)
       <button class="dismiss-btn" @click="importResult = null">✕</button>
     </div>
 
-    <div v-if="!loading && !error" class="filters">
+    <FilterBar v-if="!loading && !error">
       <input
         v-model="buscar"
         type="text"
@@ -98,23 +106,25 @@ onMounted(fetchCollection)
         class="input"
       />
       <span class="result-count">{{ juegosFiltrados.length }} juegos</span>
-    </div>
+    </FilterBar>
 
-    <div v-if="loading" class="loading">
-      <div class="spinner"></div>
-      <p>Cargando colección de BGG...</p>
-      <p class="loading-hint">La primera carga puede tardar unos segundos</p>
-    </div>
+    <LoadingState
+      v-if="loading"
+      text="Cargando colección de BGG..."
+      :spinner="true"
+      hint="La primera carga puede tardar unos segundos"
+    />
 
-    <div v-else-if="error" class="error-state">
-      <p class="error-icon">⚠️</p>
-      <p>{{ error }}</p>
-      <button class="btn btn-primary" @click="fetchCollection">Reintentar</button>
-    </div>
+    <ErrorState
+      v-else-if="error"
+      :message="error"
+      @retry="fetchCollection"
+    />
 
-    <div v-else-if="juegosFiltrados.length === 0" class="empty">
-      No se encontraron juegos.
-    </div>
+    <EmptyState
+      v-else-if="juegosFiltrados.length === 0"
+      text="No se encontraron juegos."
+    />
 
     <div v-else class="games-grid">
       <div v-for="game in juegosFiltrados" :key="game.bgg_id" class="game-card">
@@ -175,40 +185,6 @@ onMounted(fetchCollection)
   display: flex;
   gap: 0.75rem;
   flex-shrink: 0;
-}
-
-.btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s, opacity 0.2s;
-  white-space: nowrap;
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: #1e3a5f;
-  color: #fff;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #16304f;
-}
-
-.btn-secondary {
-  background: #e8ecf1;
-  color: #1e3a5f;
-}
-
-.btn-secondary:hover {
-  background: #dce1e8;
 }
 
 .import-feedback {

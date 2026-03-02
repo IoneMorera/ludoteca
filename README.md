@@ -203,6 +203,8 @@ El frontend estará disponible en `http://localhost:5173`
 - `GET    /api/bgg/plays/{username}` - Partidas registradas de un usuario BGG
 - `POST   /api/bgg/import` - Importar juegos de BGG a la BBDD local
 
+**Nota:** La API de BGG requiere un token de aplicación. Regístrate en [boardgamegeek.com/applications](https://boardgamegeek.com/applications), crea un token y configúralo como `BGG_API_KEY` en el archivo `.env`.
+
 ## Tecnologías
 
 ### Backend

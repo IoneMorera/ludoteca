@@ -2,6 +2,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
+import LoadingState from '../components/LoadingState.vue'
+import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,11 +19,14 @@ const buscar = ref('')
 const page = ref(1)
 
 const username = computed(() => route.params.username)
+const subtitle = computed(
+  () => `Partidas registradas por ${username.value} en BoardGameGeek`,
+)
 
 const partidasFiltradas = computed(() => {
   if (!buscar.value) return plays.value
   const query = buscar.value.toLowerCase()
-  return plays.value.filter(p => p.game_name.toLowerCase().includes(query))
+  return plays.value.filter((p) => p.game_name.toLowerCase().includes(query))
 })
 
 async function fetchPlays() {
@@ -58,42 +66,38 @@ onMounted(fetchPlays)
 
 <template>
   <div class="plays-view">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Partidas BGG</h1>
-        <p class="page-subtitle">
-          Partidas registradas por <strong>{{ username }}</strong> en BoardGameGeek
-          <span v-if="total > 0" class="total-badge">{{ total }} total</span>
-        </p>
-      </div>
-      <div class="header-actions">
+    <PageHeader :title="'Partidas BGG'" :subtitle="subtitle">
+      <template #actions>
         <button class="btn btn-secondary" @click="changeUser">← Cambiar usuario</button>
-      </div>
-    </div>
+        <span v-if="total > 0" class="total-badge">{{ total }} total</span>
+      </template>
+    </PageHeader>
 
-    <div v-if="!loading && !error" class="filters">
+    <FilterBar v-if="!loading && !error">
       <input
         v-model="buscar"
         type="text"
         placeholder="Buscar por nombre de juego..."
         class="input"
       />
-    </div>
+    </FilterBar>
 
-    <div v-if="loading" class="loading">
-      <div class="spinner"></div>
-      <p>Cargando partidas...</p>
-    </div>
+    <LoadingState
+      v-if="loading"
+      text="Cargando partidas..."
+      :spinner="true"
+    />
 
-    <div v-else-if="error" class="error-state">
-      <p class="error-icon">⚠️</p>
-      <p>{{ error }}</p>
-      <button class="btn btn-primary" @click="fetchPlays">Reintentar</button>
-    </div>
+    <ErrorState
+      v-else-if="error"
+      :message="error"
+      @retry="fetchPlays"
+    />
 
-    <div v-else-if="partidasFiltradas.length === 0" class="empty">
-      No se encontraron partidas.
-    </div>
+    <EmptyState
+      v-else-if="partidasFiltradas.length === 0"
+      text="No se encontraron partidas."
+    />
 
     <div v-else class="plays-list">
       <div v-for="play in partidasFiltradas" :key="play.id" class="play-card">
@@ -174,40 +178,6 @@ onMounted(fetchPlays)
 
 .filters {
   margin-bottom: 1.5rem;
-}
-
-.btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s, opacity 0.2s;
-  white-space: nowrap;
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: #1e3a5f;
-  color: #fff;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #16304f;
-}
-
-.btn-secondary {
-  background: #e8ecf1;
-  color: #1e3a5f;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #dce1e8;
 }
 
 .spinner {

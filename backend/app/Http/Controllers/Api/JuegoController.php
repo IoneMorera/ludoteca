@@ -11,7 +11,7 @@ class JuegoController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Juego::with('categoria');
+        $query = Juego::with(['categoria', 'ubicacion.mueble.habitacion']);
 
         if ($request->has('categoria_id')) {
             $query->where('categoria_id', $request->categoria_id);
@@ -19,6 +19,13 @@ class JuegoController extends Controller
 
         if ($request->has('estado')) {
             $query->where('estado', $request->estado);
+        }
+
+        if ($request->has('habitacion_id')) {
+            $habitacionId = (int) $request->habitacion_id;
+            $query->whereHas('ubicacion.mueble', function ($q) use ($habitacionId) {
+                $q->where('habitacion_id', $habitacionId);
+            });
         }
 
         if ($request->has('buscar')) {
@@ -40,19 +47,20 @@ class JuegoController extends Controller
             'num_jugadores_min' => 'nullable|integer|min:1',
             'num_jugadores_max' => 'nullable|integer|min:1',
             'categoria_id' => 'required|exists:categorias,id',
+            'ubicacion_id' => 'nullable|exists:ubicaciones,id',
             'estado' => 'in:disponible,prestado,reparacion,baja',
             'imagen' => 'nullable|string',
         ]);
 
         $juego = Juego::create($validated);
-        $juego->load('categoria');
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion']);
 
         return response()->json($juego, 201);
     }
 
     public function show(Juego $juego): JsonResponse
     {
-        $juego->load('categoria', 'prestamos.socio');
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'prestamos']);
 
         return response()->json($juego);
     }
@@ -67,12 +75,13 @@ class JuegoController extends Controller
             'num_jugadores_min' => 'nullable|integer|min:1',
             'num_jugadores_max' => 'nullable|integer|min:1',
             'categoria_id' => 'required|exists:categorias,id',
+            'ubicacion_id' => 'nullable|exists:ubicaciones,id',
             'estado' => 'in:disponible,prestado,reparacion,baja',
             'imagen' => 'nullable|string',
         ]);
 
         $juego->update($validated);
-        $juego->load('categoria');
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion']);
 
         return response()->json($juego);
     }

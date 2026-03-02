@@ -2,6 +2,12 @@
 import { ref, onMounted } from 'vue'
 import { usePrestamosStore } from '../stores/prestamos'
 import { useJuegosStore } from '../stores/juegos'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
+import LoadingState from '../components/LoadingState.vue'
+import EmptyState from '../components/EmptyState.vue'
+import FormModal from '../components/FormModal.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 
 const prestamosStore = usePrestamosStore()
 const juegosStore = useJuegosStore()
@@ -72,25 +78,27 @@ function estadoClase(estado) {
 
 <template>
   <div class="prestamos-view">
-    <div class="page-header">
-      <h1 class="page-title">Préstamos</h1>
-      <button class="btn btn-primary" @click="abrirFormulario">+ Nuevo Préstamo</button>
-    </div>
+    <PageHeader title="Préstamos">
+      <template #actions>
+        <button class="btn btn-primary" @click="abrirFormulario">+ Nuevo Préstamo</button>
+      </template>
+    </PageHeader>
 
-    <div class="filters">
+    <FilterBar>
       <select v-model="filtroEstado" class="input" @change="filtrar">
         <option value="">Todos los estados</option>
         <option value="activo">Activos</option>
         <option value="devuelto">Devueltos</option>
         <option value="retrasado">Retrasados</option>
       </select>
-    </div>
+    </FilterBar>
 
-    <div v-if="prestamosStore.loading" class="loading">Cargando préstamos...</div>
+    <LoadingState v-if="prestamosStore.loading" text="Cargando préstamos..." />
 
-    <div v-else-if="prestamosStore.prestamos.length === 0" class="empty">
-      No se encontraron préstamos.
-    </div>
+    <EmptyState
+      v-else-if="prestamosStore.prestamos.length === 0"
+      text="No se encontraron préstamos."
+    />
 
     <div v-else class="table-container">
       <table class="table">
@@ -112,7 +120,9 @@ function estadoClase(estado) {
             <td>{{ p.fecha_prestamo }}</td>
             <td>{{ p.fecha_devolucion_prevista }}</td>
             <td>{{ p.fecha_devolucion_real || '-' }}</td>
-            <td><span class="badge" :class="estadoClase(p.estado)">{{ p.estado }}</span></td>
+            <td>
+              <StatusBadge :value="p.estado" type="prestamo" />
+            </td>
             <td>
               <button
                 v-if="p.estado === 'activo'"
@@ -127,10 +137,12 @@ function estadoClase(estado) {
       </table>
     </div>
 
-    <div v-if="mostrarFormulario" class="modal-overlay" @click.self="mostrarFormulario = false">
-      <div class="modal">
-        <h2>Nuevo Préstamo</h2>
-        <form @submit.prevent="crearPrestamo">
+    <FormModal
+      :visible="mostrarFormulario"
+      title="Nuevo Préstamo"
+      @close="mostrarFormulario = false"
+    >
+      <form @submit.prevent="crearPrestamo">
           <div class="form-group">
             <label>Juego</label>
             <select v-model="form.juego_id" class="input" required>
@@ -169,35 +181,12 @@ function estadoClase(estado) {
             <button type="submit" class="btn btn-primary">Crear Préstamo</button>
           </div>
         </form>
-      </div>
-    </div>
+    </FormModal>
   </div>
 </template>
 
 <style scoped>
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.page-title {
-  font-size: 1.8rem;
-  color: #1e3a5f;
-}
-
 .filters {
-  margin-bottom: 1.5rem;
-  max-width: 300px;
-}
-
-.form-row {
-  display: flex;
-  gap: 1rem;
-}
-
-.form-row .form-group {
-  flex: 1;
+  max-width: 1024px;
 }
 </style>

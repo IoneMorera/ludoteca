@@ -1,5 +1,6 @@
 <script setup>
 import { useRouter } from 'vue-router'
+import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
 
@@ -19,10 +20,10 @@ function goPlays(username) {
 
 <template>
   <div class="bgg-select">
-    <div class="page-header">
-      <h1 class="page-title">BoardGameGeek</h1>
-      <p class="page-subtitle">Selecciona un usuario y qué quieres consultar</p>
-    </div>
+    <PageHeader
+      title="BoardGameGeek"
+      subtitle="Selecciona un usuario y qué quieres consultar"
+    />
 
     <div class="users-grid">
       <div v-for="user in users" :key="user.username" class="user-card">
@@ -41,21 +42,6 @@ function goPlays(username) {
 <style scoped>
 .bgg-select {
   max-width: 800px;
-}
-
-.page-header {
-  margin-bottom: 2rem;
-}
-
-.page-title {
-  font-size: 1.8rem;
-  color: #1e3a5f;
-}
-
-.page-subtitle {
-  color: #888;
-  font-size: 0.9rem;
-  margin-top: 0.25rem;
 }
 
 .users-grid {
@@ -102,34 +88,6 @@ function goPlays(username) {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
-}
-
-.btn {
-  padding: 0.5rem 1.25rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.btn-primary {
-  background: #1e3a5f;
-  color: #fff;
-}
-
-.btn-primary:hover {
-  background: #16304f;
-}
-
-.btn-secondary {
-  background: #e8ecf1;
-  color: #1e3a5f;
-}
-
-.btn-secondary:hover {
-  background: #dce1e8;
 }
 
 @media (max-width: 600px) {

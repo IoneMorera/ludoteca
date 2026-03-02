@@ -6,11 +6,57 @@
   padding: 0;
 }
 
+/* Theming */
+:root {
+  --bg-body: #f5f7fa;
+  --bg-surface: #ffffff;
+  --bg-surface-soft: #f5f7fa;
+  --text-main: #333333;
+  --text-muted: #666666;
+  --primary: #1e3a5f;
+  --primary-soft: #2d5a87;
+  --border-soft: #dddddd;
+  --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] {
+  --bg-body: #0f172a;
+  --bg-surface: #111827;
+  --bg-surface-soft: #1f2937;
+  --text-main: #e5e7eb;
+  --text-muted: #9ca3af;
+  --primary: #38bdf8;
+  --primary-soft: #0ea5e9;
+  --border-soft: #374151;
+  --shadow-soft: 0 2px 12px rgba(15, 23, 42, 0.8);
+}
+
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background-color: #f5f7fa;
-  color: #333;
+  background-color: var(--bg-body);
+  color: var(--text-main);
   line-height: 1.6;
+}
+
+/* Layout */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main-content {
+  flex: 1;
+  margin-left: 260px;
+  padding: 2rem;
+  background-color: var(--bg-body);
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+    padding-top: 4rem;
+  }
 }
 
 /* Buttons */
@@ -32,17 +78,17 @@ body {
 }
 
 .btn-primary {
-  background: #1e3a5f;
+  background: var(--primary);
   color: #fff;
 }
 
 .btn-primary:hover {
-  background: #2d5a87;
+  background: var(--primary-soft);
 }
 
 .btn-secondary {
   background: #e0e0e0;
-  color: #333;
+  color: var(--text-main);
 }
 
 .btn-secondary:hover {
@@ -61,6 +107,11 @@ body {
 .btn-sm {
   padding: 0.35rem 0.8rem;
   font-size: 0.8rem;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Inputs */
@@ -96,10 +147,10 @@ textarea.input {
 .table {
   width: 100%;
   border-collapse: collapse;
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-soft);
 }
 
 .table th,
@@ -109,7 +160,7 @@ textarea.input {
 }
 
 .table th {
-  background: #1e3a5f;
+  background: var(--primary);
   color: #fff;
   font-weight: 600;
   font-size: 0.85rem;
@@ -118,12 +169,20 @@ textarea.input {
 }
 
 .table tbody tr {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-soft);
   transition: background 0.15s;
 }
 
 .table tbody tr:hover {
-  background: #f8f9fa;
+  background: var(--bg-surface-soft);
+}
+
+@media (max-width: 768px) {
+  .table th,
+  .table td {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.8rem;
+  }
 }
 
 /* Badges */
@@ -165,7 +224,7 @@ textarea.input {
   display: block;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #555;
+  color: var(--text-muted);
   margin-bottom: 0.3rem;
 }
 
@@ -188,7 +247,7 @@ textarea.input {
 }
 
 .modal {
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 16px;
   padding: 2rem;
   width: 90%;
@@ -199,7 +258,7 @@ textarea.input {
 }
 
 .modal h2 {
-  color: #1e3a5f;
+  color: var(--primary);
   margin-bottom: 1.5rem;
   font-size: 1.3rem;
 }
@@ -208,16 +267,185 @@ textarea.input {
 .loading {
   text-align: center;
   padding: 3rem;
-  color: #888;
+  color: var(--text-muted);
   font-size: 1.1rem;
 }
 
 .empty {
   text-align: center;
   padding: 3rem;
-  color: #aaa;
+  color: var(--text-muted);
   font-size: 1rem;
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Page layout helpers */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.page-title {
+  font-size: 1.8rem;
+  color: var(--primary);
+}
+
+.filters {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.filters .input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+@media (min-width: 901px) {
+  .filters {
+    max-width: 1024px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+/* Card grids */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.card-info h3 {
+  margin: 0 0 0.5rem;
+  color: var(--primary);
+}
+
+.card-subtext {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.card-count {
+  font-size: 0.8rem;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+}
+
+.card-count-success {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.pagination-pages {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.pagination-ellipsis {
+  padding: 0 0.35rem;
+  color: #6b7280;
+}
+
+.pagination-info {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+/* Dark theme fine-tuning */
+[data-theme='dark'] .input {
+  background: #020617;
+  border-color: #4b5563;
+  color: var(--text-main);
+}
+
+[data-theme='dark'] .input::placeholder {
+  color: #6b7280;
+}
+
+[data-theme='dark'] .btn-secondary {
+  background: #374151;
+  color: var(--text-main);
+}
+
+[data-theme='dark'] .btn-secondary:hover {
+  background: #4b5563;
+}
+
+[data-theme='dark'] .badge-success {
+  background: #064e3b;
+  color: #6ee7b7;
+}
+
+[data-theme='dark'] .badge-warning {
+  background: #78350f;
+  color: #fed7aa;
+}
+
+[data-theme='dark'] .badge-danger {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+[data-theme='dark'] .badge-info {
+  background: #0b2e4a;
+  color: #bfdbfe;
+}
+
+[data-theme='dark'] .card-count {
+  background: #1d4ed8;
+  color: #e5e7eb;
+}
+
+[data-theme='dark'] .card-count-success {
+  background: #15803d;
+  color: #bbf7d0;
+}
+
+[data-theme='dark'] .pagination-info {
+  color: var(--text-muted);
 }

@@ -1,6 +1,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useCategoriasStore } from '../stores/categorias'
+import PageHeader from '../components/PageHeader.vue'
+import LoadingState from '../components/LoadingState.vue'
+import EmptyState from '../components/EmptyState.vue'
+import CardList from '../components/CardList.vue'
+import FormModal from '../components/FormModal.vue'
 
 const store = useCategoriasStore()
 const mostrarFormulario = ref(false)
@@ -47,100 +52,62 @@ async function eliminar(id) {
 
 <template>
   <div class="categorias-view">
-    <div class="page-header">
-      <h1 class="page-title">Categorías</h1>
-      <button class="btn btn-primary" @click="abrirFormulario()">+ Nueva Categoría</button>
-    </div>
+    <PageHeader title="Categorías">
+      <template #actions>
+        <button class="btn btn-primary" @click="abrirFormulario()">+ Nueva Categoría</button>
+      </template>
+    </PageHeader>
 
-    <div v-if="store.loading" class="loading">Cargando categorías...</div>
+    <LoadingState v-if="store.loading" text="Cargando categorías..." />
 
-    <div v-else class="cards-grid">
-      <div v-for="cat in store.categorias" :key="cat.id" class="category-card">
-        <div class="category-info">
+    <EmptyState
+      v-else-if="store.categorias.length === 0"
+      text="No se encontraron categorías."
+    />
+
+    <CardList
+      v-else
+      :items="store.categorias"
+      v-slot="{ item: cat }"
+    >
+      <div class="card">
+        <div class="card-info">
           <h3>{{ cat.nombre }}</h3>
-          <p>{{ cat.descripcion || 'Sin descripción' }}</p>
-          <span class="count">{{ cat.juegos_count || 0 }} juegos</span>
+          <p class="card-subtext">{{ cat.descripcion || 'Sin descripción' }}</p>
+          <span class="card-count">{{ cat.juegos_count || 0 }} juegos</span>
         </div>
-        <div class="category-actions">
+        <div class="card-actions">
           <button class="btn btn-sm btn-secondary" @click="abrirFormulario(cat)">Editar</button>
           <button class="btn btn-sm btn-danger" @click="eliminar(cat.id)">Eliminar</button>
         </div>
       </div>
-    </div>
+    </CardList>
 
-    <div v-if="mostrarFormulario" class="modal-overlay" @click.self="mostrarFormulario = false">
-      <div class="modal">
-        <h2>{{ editando ? 'Editar Categoría' : 'Nueva Categoría' }}</h2>
-        <form @submit.prevent="guardar">
-          <div class="form-group">
-            <label>Nombre</label>
-            <input v-model="form.nombre" type="text" class="input" required />
-          </div>
-          <div class="form-group">
-            <label>Descripción</label>
-            <textarea v-model="form.descripcion" class="input" rows="3"></textarea>
-          </div>
-          <div class="form-actions">
-            <button type="button" class="btn btn-secondary" @click="mostrarFormulario = false">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Guardar</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <FormModal
+      :visible="mostrarFormulario"
+      :title="editando ? 'Editar Categoría' : 'Nueva Categoría'"
+      @close="mostrarFormulario = false"
+    >
+      <form @submit.prevent="guardar">
+        <div class="form-group">
+          <label>Nombre</label>
+          <input v-model="form.nombre" type="text" class="input" required />
+        </div>
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea v-model="form.descripcion" class="input" rows="3"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" @click="mostrarFormulario = false">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </FormModal>
   </div>
 </template>
 
 <style scoped>
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.page-title {
-  font-size: 1.8rem;
-  color: #1e3a5f;
-}
-
 .cards-grid {
-  display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1rem;
-}
-
-.category-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.category-info h3 {
-  color: #1e3a5f;
-  margin: 0 0 0.25rem;
-}
-
-.category-info p {
-  color: #666;
-  font-size: 0.9rem;
-  margin: 0 0 0.5rem;
-}
-
-.count {
-  font-size: 0.8rem;
-  background: #e3f2fd;
-  color: #1565c0;
-  padding: 0.2rem 0.6rem;
-  border-radius: 12px;
-}
-
-.category-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 </style>

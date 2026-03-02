@@ -1,14 +1,30 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useJuegosStore } from '../stores/juegos'
 import { useCategoriasStore } from '../stores/categorias'
+import { useHabitacionesStore } from '../stores/habitaciones'
+import { useMueblesStore } from '../stores/muebles'
+import { useUbicacionesStore } from '../stores/ubicaciones'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
+import LoadingState from '../components/LoadingState.vue'
+import EmptyState from '../components/EmptyState.vue'
+import FormModal from '../components/FormModal.vue'
+import StatusBadge from '../components/StatusBadge.vue'
+import LocationPicker from '../components/LocationPicker.vue'
 
+const route = useRoute()
 const juegosStore = useJuegosStore()
 const categoriasStore = useCategoriasStore()
+const habitacionesStore = useHabitacionesStore()
+const mueblesStore = useMueblesStore()
+const ubicacionesStore = useUbicacionesStore()
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 const buscar = ref('')
 const categoriaFiltro = ref('')
+const habitacionFiltro = ref(route.query.habitacion_id || '')
 const mostrarFormulario = ref(false)
 const editando = ref(null)
 
@@ -21,17 +37,81 @@ const form = ref({
   num_jugadores_max: null,
   categoria_id: '',
   estado: 'disponible',
+  habitacion_id: '',
+  mueble_id: '',
+  ubicacion_id: '',
 })
 
-onMounted(() => {
-  juegosStore.fetchJuegos()
+const mueblesFiltrados = computed(() => {
+  if (!form.value.habitacion_id) return mueblesStore.muebles
+  return mueblesStore.muebles.filter(
+    (m) =>
+      m.habitacion_id === Number(form.value.habitacion_id) ||
+      m.habitacion?.id === Number(form.value.habitacion_id),
+  )
+})
+
+const ubicacionesFiltradas = computed(() => {
+  if (!form.value.mueble_id) return []
+  return ubicacionesStore.ubicaciones.filter(
+    (u) => u.mueble_id === Number(form.value.mueble_id),
+  )
+})
+
+const visiblePages = computed(() => {
+  const last = juegosStore.pagination.lastPage || 1
+  const current = juegosStore.pagination.currentPage || 1
+  const items = []
+
+  // Si hay pocas páginas, mostramos todas
+  if (last <= 18) {
+    for (let i = 1; i <= last; i++) items.push(i)
+    return items
+  }
+
+  // Hasta la página 15: 15 primeras, ..., 3 últimas
+  if (current <= 15) {
+    for (let i = 1; i <= 15; i++) items.push(i)
+    items.push('ellipsis-middle')
+    for (let i = last - 2; i <= last; i++) items.push(i)
+    return items
+  }
+
+  // A partir de la 15: 3 primeras, ..., 9 alrededor, ..., 3 últimas
+  items.push(1, 2, 3)
+  items.push('ellipsis-left')
+
+  let start = current - 4
+  let end = current + 4
+
+  if (start < 4) start = 4
+  if (end > last - 3) end = last - 3
+
+  for (let i = start; i <= end; i++) {
+    items.push(i)
+  }
+
+  items.push('ellipsis-right')
+  items.push(last - 2, last - 1, last)
+
+  return items
+})
+
+onMounted(async () => {
+  juegosStore.fetchJuegos(buildParams())
   categoriasStore.fetchCategorias()
+  await Promise.all([
+    habitacionesStore.fetchHabitaciones(),
+    mueblesStore.fetchMuebles(),
+    ubicacionesStore.fetchUbicaciones(),
+  ])
 })
 
 function buildParams(page = 1) {
   const params = { page }
   if (buscar.value) params.buscar = buscar.value
   if (categoriaFiltro.value) params.categoria_id = categoriaFiltro.value
+   if (habitacionFiltro.value) params.habitacion_id = habitacionFiltro.value
   return params
 }
 
@@ -46,7 +126,19 @@ function irAPagina(page) {
 function abrirFormulario(juego = null) {
   if (juego) {
     editando.value = juego.id
-    form.value = { ...juego }
+    form.value = {
+      nombre: juego.nombre,
+      descripcion: juego.descripcion,
+      edad_minima: juego.edad_minima,
+      edad_maxima: juego.edad_maxima,
+      num_jugadores_min: juego.num_jugadores_min,
+      num_jugadores_max: juego.num_jugadores_max,
+      categoria_id: juego.categoria_id,
+      estado: juego.estado,
+      habitacion_id: juego.ubicacion?.mueble?.habitacion?.id || '',
+      mueble_id: juego.ubicacion?.mueble?.id || '',
+      ubicacion_id: juego.ubicacion?.id || '',
+    }
   } else {
     editando.value = null
     form.value = {
@@ -58,9 +150,21 @@ function abrirFormulario(juego = null) {
       num_jugadores_max: null,
       categoria_id: '',
       estado: 'disponible',
+      habitacion_id: '',
+      mueble_id: '',
+      ubicacion_id: '',
     }
   }
   mostrarFormulario.value = true
+}
+
+function onHabitacionChange() {
+  form.value.mueble_id = ''
+  form.value.ubicacion_id = ''
+}
+
+function onMuebleChange() {
+  form.value.ubicacion_id = ''
 }
 
 async function guardar() {
@@ -99,12 +203,13 @@ function estadoClase(estado) {
 
 <template>
   <div class="juegos-view">
-    <div class="page-header">
-      <h1 class="page-title">Juegos</h1>
-      <button class="btn btn-primary" @click="abrirFormulario()">+ Nuevo Juego</button>
-    </div>
+    <PageHeader title="Juegos">
+      <template #actions>
+        <button class="btn btn-primary" @click="abrirFormulario()">+ Nuevo Juego</button>
+      </template>
+    </PageHeader>
 
-    <div class="filters">
+    <FilterBar>
       <input
         v-model="buscar"
         type="text"
@@ -118,54 +223,61 @@ function estadoClase(estado) {
           {{ cat.nombre }}
         </option>
       </select>
-    </div>
+    </FilterBar>
 
-    <div v-if="juegosStore.loading" class="loading">Cargando juegos...</div>
+    <LoadingState v-if="juegosStore.loading" text="Cargando juegos..." />
 
-    <div v-else-if="juegosStore.juegos.length === 0" class="empty">
-      No se encontraron juegos.
-    </div>
+    <EmptyState
+      v-else-if="juegosStore.juegos.length === 0"
+      text="No se encontraron juegos."
+    />
 
-    <div v-else class="table-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th class="th-imagen">Imagen</th>
-            <th>Nombre</th>
-            <th>Categoría</th>
-            <th>Jugadores</th>
-            <th>Edad</th>
-            <th>Estado</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="juego in juegosStore.juegos" :key="juego.id">
-            <td class="td-imagen">
-              <img
-                v-if="juego.imagen"
-                :src="backendUrl + juego.imagen"
-                :alt="juego.nombre"
-                class="juego-thumb"
-              />
-              <span v-else class="no-thumb">🎲</span>
-            </td>
-            <td>
-              <router-link :to="`/juegos/${juego.id}`" class="link">
-                {{ juego.nombre }}
-              </router-link>
-            </td>
-            <td>{{ juego.categoria?.nombre || '-' }}</td>
-            <td>{{ juego.num_jugadores_min }}–{{ juego.num_jugadores_max }}</td>
-            <td>{{ juego.edad_minima }}+</td>
-            <td><span class="badge" :class="estadoClase(juego.estado)">{{ juego.estado }}</span></td>
-            <td class="actions">
-              <button class="btn btn-sm btn-secondary" @click="abrirFormulario(juego)">Editar</button>
-              <button class="btn btn-sm btn-danger" @click="eliminar(juego.id)">Eliminar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="th-imagen">Imagen</th>
+              <th>Nombre</th>
+              <th>Categoría</th>
+              <th>Jugadores</th>
+              <th>Edad</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="juego in juegosStore.juegos" :key="juego.id">
+              <td class="td-imagen">
+                <img
+                  v-if="juego.imagen"
+                  :src="backendUrl + juego.imagen"
+                  :alt="juego.nombre"
+                  class="juego-thumb"
+                />
+                <span v-else class="no-thumb">🎲</span>
+              </td>
+              <td>
+                <router-link :to="`/juegos/${juego.id}`" class="link">
+                  {{ juego.nombre }}
+                </router-link>
+              </td>
+              <td>{{ juego.categoria?.nombre || '-' }}</td>
+              <td>{{ juego.num_jugadores_min }}–{{ juego.num_jugadores_max }}</td>
+              <td>{{ juego.edad_minima }}+</td>
+              <td>
+                <StatusBadge :value="juego.estado" type="juego" />
+              </td>
+              <td class="actions">
+                <div class="actions-inner">
+                  <button class="btn btn-sm btn-secondary" @click="abrirFormulario(juego)">Editar</button>
+                  <button class="btn btn-sm btn-danger" @click="eliminar(juego.id)">Eliminar</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <div v-if="juegosStore.pagination.lastPage > 1" class="pagination">
         <button
@@ -177,15 +289,17 @@ function estadoClase(estado) {
         </button>
 
         <div class="pagination-pages">
-          <button
-            v-for="page in juegosStore.pagination.lastPage"
-            :key="page"
-            class="btn btn-sm"
-            :class="page === juegosStore.pagination.currentPage ? 'btn-primary' : 'btn-secondary'"
-            @click="irAPagina(page)"
-          >
-            {{ page }}
-          </button>
+          <template v-for="item in visiblePages" :key="`page-${item}`">
+            <button
+              v-if="typeof item === 'number'"
+              class="btn btn-sm"
+              :class="item === juegosStore.pagination.currentPage ? 'btn-primary' : 'btn-secondary'"
+              @click="irAPagina(item)"
+            >
+              {{ item }}
+            </button>
+            <span v-else class="pagination-ellipsis">...</span>
+          </template>
         </div>
 
         <button
@@ -202,10 +316,12 @@ function estadoClase(estado) {
       </div>
     </div>
 
-    <div v-if="mostrarFormulario" class="modal-overlay" @click.self="mostrarFormulario = false">
-      <div class="modal">
-        <h2>{{ editando ? 'Editar Juego' : 'Nuevo Juego' }}</h2>
-        <form @submit.prevent="guardar">
+    <FormModal
+      :visible="mostrarFormulario"
+      :title="editando ? 'Editar Juego' : 'Nuevo Juego'"
+      @close="mostrarFormulario = false"
+    >
+      <form @submit.prevent="guardar">
           <div class="form-group">
             <label>Nombre</label>
             <input v-model="form.nombre" type="text" class="input" required />
@@ -234,6 +350,7 @@ function estadoClase(estado) {
               </select>
             </div>
           </div>
+          <LocationPicker v-model="form.ubicacion_id" />
           <div class="form-row">
             <div class="form-group">
               <label>Jugadores mín.</label>
@@ -253,34 +370,11 @@ function estadoClase(estado) {
             <button type="submit" class="btn btn-primary">Guardar</button>
           </div>
         </form>
-      </div>
-    </div>
+    </FormModal>
   </div>
 </template>
 
 <style scoped>
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.page-title {
-  font-size: 1.8rem;
-  color: #1e3a5f;
-}
-
-.filters {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.filters .input {
-  flex: 1;
-}
-
 .th-imagen,
 .td-imagen {
   width: 60px;
@@ -309,36 +403,95 @@ function estadoClase(estado) {
   text-decoration: underline;
 }
 
+.juegos-view .table th,
+.juegos-view .table td {
+  vertical-align: middle;
+}
+
+.juegos-view .table tbody tr {
+  height: 72px;
+}
+
 .actions {
-  display: flex;
+  /* celda de acciones */
+}
+
+.actions-inner {
+  display: inline-flex;
   gap: 0.5rem;
-}
-
-.pagination {
-  display: flex;
+  white-space: nowrap;
   align-items: center;
-  gap: 0.75rem;
-  margin-top: 1.25rem;
-  flex-wrap: wrap;
 }
 
-.pagination-pages {
-  display: flex;
-  gap: 0.25rem;
+/* Centrar y limitar el ancho de la tabla en escritorio */
+@media (min-width: 901px) {
+  .juegos-view .table {
+    width: 100%;
+    max-width: none;
+  }
 }
 
-.pagination-info {
-  margin-left: auto;
-  font-size: 0.85rem;
-  color: #888;
+/* Ajustes de ancho de columnas en escritorio */
+@media (min-width: 901px) {
+  .juegos-view .table th:nth-child(2),
+  .juegos-view .table td:nth-child(2) {
+    /* Nombre */
+    max-width: 200px;
+  }
+
+  .juegos-view .table th:nth-child(3),
+  .juegos-view .table td:nth-child(3) {
+    /* Categoría */
+    width: 18%;
+  }
+
+  .juegos-view .table th:nth-child(4),
+  .juegos-view .table td:nth-child(4) {
+    /* Jugadores */
+    width: 90px;
+    white-space: nowrap;
+  }
+
+  .juegos-view .table th:nth-child(5),
+  .juegos-view .table td:nth-child(5) {
+    /* Edad */
+    width: 70px;
+    white-space: nowrap;
+  }
+
+  .juegos-view .table th:nth-child(6),
+  .juegos-view .table td:nth-child(6) {
+    /* Estado */
+    width: 110px;
+    white-space: nowrap;
+  }
+
+  .juegos-view .table th:nth-child(7),
+  .juegos-view .table td:nth-child(7) {
+    /* Acciones */
+    width: 210px;
+    white-space: nowrap;
+  }
 }
 
-.form-row {
-  display: flex;
-  gap: 1rem;
+@media (max-width: 900px) {
+  .juegos-view .table {
+    min-width: 800px;
+  }
+
+  .th-imagen,
+  .td-imagen {
+    display: none;
+  }
 }
 
-.form-row .form-group {
-  flex: 1;
+@media (max-width: 700px) {
+  /* Ocultar columnas de Jugadores y Edad para que la tabla quepa mejor */
+  .juegos-view .table th:nth-child(4),
+  .juegos-view .table td:nth-child(4),
+  .juegos-view .table th:nth-child(5),
+  .juegos-view .table td:nth-child(5) {
+    display: none;
+  }
 }
 </style>

@@ -32,6 +32,24 @@ const routes = [
     meta: { title: 'Préstamos' },
   },
   {
+    path: '/habitaciones',
+    name: 'habitaciones',
+    component: () => import('../views/HabitacionesView.vue'),
+    meta: { title: 'Habitaciones' },
+  },
+  {
+    path: '/muebles',
+    name: 'muebles',
+    component: () => import('../views/MueblesView.vue'),
+    meta: { title: 'Muebles' },
+  },
+  {
+    path: '/ubicaciones',
+    name: 'ubicaciones',
+    component: () => import('../views/UbicacionesView.vue'),
+    meta: { title: 'Ubicaciones' },
+  },
+  {
     path: '/bgg',
     name: 'bgg',
     component: () => import('../views/BggUserSelectView.vue'),

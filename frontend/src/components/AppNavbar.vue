@@ -4,19 +4,41 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const mobileOpen = ref(false)
+const casaOpen = ref(true)
+const theme = ref(localStorage.getItem('theme') || 'light')
 
 const menuItems = [
-  { name: 'Panel de Control', path: '/', icon: '📊' },
-  { name: 'Juegos', path: '/juegos', icon: '🎲' },
-  { name: 'Categorías', path: '/categorias', icon: '📂' },
-  { name: 'Préstamos', path: '/prestamos', icon: '📋' },
-  { name: 'Colección BGG', path: '/bgg', icon: '🌐' },
+  { type: 'item', name: 'Panel de Control', path: '/', icon: '📊' },
+  { type: 'item', name: 'Juegos', path: '/juegos', icon: '🎲' },
+  { type: 'item', name: 'Categorías', path: '/categorias', icon: '📂' },
+  { type: 'item', name: 'Préstamos', path: '/prestamos', icon: '📋' },
+  {
+    type: 'group',
+    name: 'Casa',
+    icon: '🏠',
+    children: [
+      { name: 'Habitaciones', path: '/habitaciones', icon: '🛋️' },
+      { name: 'Muebles', path: '/muebles', icon: '🗄️' },
+      { name: 'Ubicaciones', path: '/ubicaciones', icon: '📍' },
+    ],
+  },
+  { type: 'item', name: 'Colección BGG', path: '/bgg', icon: '🌐' },
 ]
 
 function isActive(path) {
+  if (!path) return false
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)
 }
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  localStorage.setItem('theme', theme.value)
+  document.documentElement.setAttribute('data-theme', theme.value)
+}
+
+// inicializar atributo al cargar
+document.documentElement.setAttribute('data-theme', theme.value)
 </script>
 
 <template>
@@ -28,20 +50,55 @@ function isActive(path) {
     </div>
 
     <ul class="nav-list">
-      <li v-for="item in menuItems" :key="item.path">
-        <router-link
-          :to="item.path"
-          class="nav-link"
-          :class="{ active: isActive(item.path) }"
-          @click="mobileOpen = false"
-        >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span class="nav-text">{{ item.name }}</span>
-        </router-link>
+      <li v-for="item in menuItems" :key="item.name">
+        <template v-if="item.type === 'item'">
+          <router-link
+            :to="item.path"
+            class="nav-link"
+            :class="{ active: isActive(item.path) }"
+            @click="mobileOpen = false"
+          >
+            <span class="nav-icon">{{ item.icon }}</span>
+            <span class="nav-text">{{ item.name }}</span>
+          </router-link>
+        </template>
+
+        <template v-else-if="item.type === 'group'">
+          <button
+            class="nav-link nav-group"
+            :class="{ active: item.children.some((child) => isActive(child.path)), open: casaOpen }"
+            type="button"
+            @click="casaOpen = !casaOpen"
+          >
+            <span class="nav-icon">{{ item.icon }}</span>
+            <span class="nav-text">{{ item.name }}</span>
+            <span class="nav-chevron">{{ casaOpen ? '▾' : '▸' }}</span>
+          </button>
+
+          <ul v-if="casaOpen" class="nav-sublist">
+            <li v-for="child in item.children" :key="child.path">
+              <router-link
+                :to="child.path"
+                class="nav-link nav-subitem"
+                :class="{ active: isActive(child.path) }"
+                @click="mobileOpen = false"
+              >
+                <span class="nav-icon">{{ child.icon }}</span>
+                <span class="nav-text">{{ child.name }}</span>
+              </router-link>
+            </li>
+          </ul>
+        </template>
       </li>
     </ul>
 
     <div class="sidebar-footer">
+      <div class="theme-toggle">
+        <button class="theme-button" type="button" @click="toggleTheme">
+          <span class="theme-icon">{{ theme === 'light' ? '🌞' : '🌙' }}</span>
+          <span class="theme-label">{{ theme === 'light' ? 'Claro' : 'Oscuro' }}</span>
+        </button>
+      </div>
       <p>Ludoteca v1.0</p>
     </div>
   </nav>
@@ -114,11 +171,61 @@ function isActive(path) {
   font-size: 0.95rem;
 }
 
+.nav-group {
+  width: 100%;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-chevron {
+  margin-left: auto;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.nav-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.25rem;
+}
+
+.nav-subitem {
+  padding-left: 2.5rem;
+  font-size: 0.9rem;
+}
+
 .sidebar-footer {
   padding: 1rem 1.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 0.8rem;
   opacity: 0.5;
+}
+
+.theme-toggle {
+  margin-bottom: 0.5rem;
+}
+
+.theme-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.theme-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.theme-icon {
+  font-size: 1rem;
 }
 
 .mobile-toggle {

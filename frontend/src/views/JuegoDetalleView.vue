@@ -50,6 +50,21 @@ onMounted(() => {
           <span class="info-label">Estado</span>
           <span class="info-value">{{ juegosStore.juego.estado }}</span>
         </div>
+        <div class="info-item">
+          <span class="info-label">Ubicación</span>
+          <span class="info-value">
+            <template v-if="juegosStore.juego.ubicacion">
+              {{ juegosStore.juego.ubicacion.mueble?.habitacion?.nombre || 'Sin habitación' }}
+              ›
+              {{ juegosStore.juego.ubicacion.mueble?.nombre || 'Sin mueble' }}
+              ›
+              {{ juegosStore.juego.ubicacion.nombre }}
+            </template>
+            <template v-else>
+              Sin ubicación asignada
+            </template>
+          </span>
+        </div>
       </div>
 
       <div v-if="juegosStore.juego.prestamos?.length" class="prestamos-section">
@@ -81,15 +96,16 @@ onMounted(() => {
 
 <style scoped>
 .detalle-view {
-  max-width: 900px;
+  max-width: 1024px;
 }
 
 .detalle-card {
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 12px;
   padding: 2rem;
   margin-top: 1rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-soft);
 }
 
 .detalle-header {
@@ -104,17 +120,17 @@ onMounted(() => {
   height: 140px;
   object-fit: contain;
   border-radius: 10px;
-  background: #f0f2f5;
+  background: var(--bg-surface-soft);
   flex-shrink: 0;
 }
 
 .detalle-header h1 {
-  color: #1e3a5f;
+  color: var(--primary);
   margin-bottom: 0.5rem;
 }
 
 .descripcion {
-  color: #666;
+  color: var(--text-muted);
 }
 
 .info-grid {
@@ -125,7 +141,7 @@ onMounted(() => {
 }
 
 .info-item {
-  background: #f5f7fa;
+  background: var(--bg-surface-soft);
   padding: 1rem;
   border-radius: 8px;
 }
@@ -133,14 +149,14 @@ onMounted(() => {
 .info-label {
   display: block;
   font-size: 0.8rem;
-  color: #888;
+  color: var(--text-muted);
   margin-bottom: 0.25rem;
 }
 
 .info-value {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #1e3a5f;
+  color: var(--text-main);
 }
 
 .prestamos-section {
@@ -149,7 +165,7 @@ onMounted(() => {
 
 .prestamos-section h2 {
   font-size: 1.2rem;
-  color: #1e3a5f;
+  color: var(--primary);
   margin-bottom: 0.75rem;
 }
 </style>
