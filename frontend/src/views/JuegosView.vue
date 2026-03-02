@@ -37,6 +37,7 @@ const form = ref({
   num_jugadores_max: null,
   categoria_id: '',
   estado: 'disponible',
+  fecha_compra: '',
   habitacion_id: '',
   mueble_id: '',
   ubicacion_id: '',
@@ -135,6 +136,7 @@ function abrirFormulario(juego = null) {
       num_jugadores_max: juego.num_jugadores_max,
       categoria_id: juego.categoria_id,
       estado: juego.estado,
+      fecha_compra: juego.fecha_compra || '',
       habitacion_id: juego.ubicacion?.mueble?.habitacion?.id || '',
       mueble_id: juego.ubicacion?.mueble?.id || '',
       ubicacion_id: juego.ubicacion?.id || '',
@@ -150,6 +152,7 @@ function abrirFormulario(juego = null) {
       num_jugadores_max: null,
       categoria_id: '',
       estado: 'disponible',
+      fecha_compra: '',
       habitacion_id: '',
       mueble_id: '',
       ubicacion_id: '',
@@ -242,6 +245,7 @@ function estadoClase(estado) {
               <th>Categoría</th>
               <th>Jugadores</th>
               <th>Edad</th>
+              <th>Fecha compra</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
@@ -265,6 +269,7 @@ function estadoClase(estado) {
               <td>{{ juego.categoria?.nombre || '-' }}</td>
               <td>{{ juego.num_jugadores_min }}–{{ juego.num_jugadores_max }}</td>
               <td>{{ juego.edad_minima }}+</td>
+              <td>{{ juego.fecha_compra || '-' }}</td>
               <td>
                 <StatusBadge :value="juego.estado" type="juego" />
               </td>
@@ -351,6 +356,10 @@ function estadoClase(estado) {
             </div>
           </div>
           <LocationPicker v-model="form.ubicacion_id" />
+          <div class="form-group">
+            <label>Fecha de compra</label>
+            <input v-model="form.fecha_compra" type="date" class="input" />
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label>Jugadores mín.</label>
@@ -457,13 +466,20 @@ function estadoClase(estado) {
 
   .juegos-view .table th:nth-child(6),
   .juegos-view .table td:nth-child(6) {
-    /* Estado */
+    /* Fecha compra */
     width: 110px;
     white-space: nowrap;
   }
 
   .juegos-view .table th:nth-child(7),
   .juegos-view .table td:nth-child(7) {
+    /* Estado */
+    width: 110px;
+    white-space: nowrap;
+  }
+
+  .juegos-view .table th:nth-child(8),
+  .juegos-view .table td:nth-child(8) {
     /* Acciones */
     width: 210px;
     white-space: nowrap;

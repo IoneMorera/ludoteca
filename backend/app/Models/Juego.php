@@ -21,6 +21,7 @@ class Juego extends Model
         'categoria_id',
         'ubicacion_id',
         'estado',
+        'fecha_compra',
         'imagen',
         'bgg_id',
     ];
@@ -30,6 +31,7 @@ class Juego extends Model
         'edad_maxima' => 'integer',
         'num_jugadores_min' => 'integer',
         'num_jugadores_max' => 'integer',
+        'fecha_compra' => 'date:Y-m-d',
         'bgg_id' => 'integer',
     ];
 

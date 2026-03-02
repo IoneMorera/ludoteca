@@ -49,6 +49,7 @@ class JuegoController extends Controller
             'categoria_id' => 'required|exists:categorias,id',
             'ubicacion_id' => 'nullable|exists:ubicaciones,id',
             'estado' => 'in:disponible,prestado,reparacion,baja',
+            'fecha_compra' => 'nullable|date',
             'imagen' => 'nullable|string',
         ]);
 
@@ -77,6 +78,7 @@ class JuegoController extends Controller
             'categoria_id' => 'required|exists:categorias,id',
             'ubicacion_id' => 'nullable|exists:ubicaciones,id',
             'estado' => 'in:disponible,prestado,reparacion,baja',
+            'fecha_compra' => 'nullable|date',
             'imagen' => 'nullable|string',
         ]);
 

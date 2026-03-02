@@ -51,6 +51,10 @@ onMounted(() => {
           <span class="info-value">{{ juegosStore.juego.estado }}</span>
         </div>
         <div class="info-item">
+          <span class="info-label">Fecha de compra</span>
+          <span class="info-value">{{ juegosStore.juego.fecha_compra || '-' }}</span>
+        </div>
+        <div class="info-item">
           <span class="info-label">Ubicación</span>
           <span class="info-value">
             <template v-if="juegosStore.juego.ubicacion">
