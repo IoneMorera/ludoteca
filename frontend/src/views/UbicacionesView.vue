@@ -126,23 +126,35 @@ async function guardar() {
       text="No hay ubicaciones registradas."
     />
 
-    <div v-else class="table-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Habitación</th>
-            <th>Mueble</th>
-            <th>Ubicación</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in ubicacionesFiltradas" :key="u.id">
-            <td>{{ u.mueble?.habitacion?.nombre || '-' }}</td>
-            <td>{{ u.mueble?.nombre || '-' }}</td>
-            <td>{{ u.nombre }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Habitación</th>
+              <th>Mueble</th>
+              <th>Ubicación</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in ubicacionesFiltradas" :key="u.id">
+              <td>{{ u.mueble?.habitacion?.nombre || '-' }}</td>
+              <td>{{ u.mueble?.nombre || '-' }}</td>
+              <td>{{ u.nombre }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="cards-mobile">
+        <div v-for="u in ubicacionesFiltradas" :key="'card-' + u.id" class="ubicacion-card">
+          <div class="ubicacion-card__nombre">{{ u.nombre }}</div>
+          <div class="ubicacion-card__ruta">
+            {{ u.mueble?.habitacion?.nombre || '-' }} ›
+            {{ u.mueble?.nombre || '-' }}
+          </div>
+        </div>
+      </div>
     </div>
 
     <FormModal
@@ -213,5 +225,24 @@ async function guardar() {
 </template>
 
 <style scoped>
+.ubicacion-card {
+  background: var(--bg-surface);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-soft);
+}
+
+.ubicacion-card__nombre {
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 0.95rem;
+}
+
+.ubicacion-card__ruta {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
 </style>
 

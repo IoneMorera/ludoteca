@@ -100,41 +100,73 @@ function estadoClase(estado) {
       text="No se encontraron préstamos."
     />
 
-    <div v-else class="table-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Juego</th>
-            <th>Persona</th>
-            <th>Fecha Préstamo</th>
-            <th>Dev. Prevista</th>
-            <th>Dev. Real</th>
-            <th>Estado</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="p in prestamosStore.prestamos" :key="p.id">
-            <td>{{ p.juego?.nombre }}</td>
-            <td>{{ p.persona }}</td>
-            <td>{{ p.fecha_prestamo }}</td>
-            <td>{{ p.fecha_devolucion_prevista }}</td>
-            <td>{{ p.fecha_devolucion_real || '-' }}</td>
-            <td>
-              <StatusBadge :value="p.estado" type="prestamo" />
-            </td>
-            <td>
-              <button
-                v-if="p.estado === 'activo'"
-                class="btn btn-sm btn-primary"
-                @click="devolver(p.id)"
-              >
-                Devolver
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Juego</th>
+              <th>Persona</th>
+              <th>Fecha Préstamo</th>
+              <th>Dev. Prevista</th>
+              <th>Dev. Real</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in prestamosStore.prestamos" :key="p.id">
+              <td>{{ p.juego?.nombre }}</td>
+              <td>{{ p.persona }}</td>
+              <td>{{ p.fecha_prestamo }}</td>
+              <td>{{ p.fecha_devolucion_prevista }}</td>
+              <td>{{ p.fecha_devolucion_real || '-' }}</td>
+              <td>
+                <StatusBadge :value="p.estado" type="prestamo" />
+              </td>
+              <td>
+                <button
+                  v-if="p.estado === 'activo'"
+                  class="btn btn-sm btn-primary"
+                  @click="devolver(p.id)"
+                >
+                  Devolver
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="cards-mobile">
+        <div v-for="p in prestamosStore.prestamos" :key="'card-' + p.id" class="prestamo-card">
+          <div class="prestamo-card__header">
+            <span class="prestamo-card__juego">{{ p.juego?.nombre }}</span>
+            <StatusBadge :value="p.estado" type="prestamo" />
+          </div>
+          <div class="prestamo-card__body">
+            <div class="prestamo-card__row">
+              <span class="prestamo-card__label">Persona</span>
+              <span>{{ p.persona }}</span>
+            </div>
+            <div class="prestamo-card__row">
+              <span class="prestamo-card__label">Préstamo</span>
+              <span>{{ p.fecha_prestamo }}</span>
+            </div>
+            <div class="prestamo-card__row">
+              <span class="prestamo-card__label">Dev. prevista</span>
+              <span>{{ p.fecha_devolucion_prevista }}</span>
+            </div>
+            <div v-if="p.fecha_devolucion_real" class="prestamo-card__row">
+              <span class="prestamo-card__label">Dev. real</span>
+              <span>{{ p.fecha_devolucion_real }}</span>
+            </div>
+          </div>
+          <div v-if="p.estado === 'activo'" class="prestamo-card__actions">
+            <button class="btn btn-sm btn-primary" @click="devolver(p.id)">Devolver</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <FormModal
@@ -188,5 +220,55 @@ function estadoClase(estado) {
 <style scoped>
 .filters {
   max-width: 1024px;
+}
+
+.prestamo-card {
+  background: var(--bg-surface);
+  border-radius: 10px;
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.prestamo-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--bg-surface-soft);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.prestamo-card__juego {
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 0.95rem;
+}
+
+.prestamo-card__body {
+  padding: 0.65rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.prestamo-card__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.88rem;
+}
+
+.prestamo-card__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.prestamo-card__actions {
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-surface-soft);
 }
 </style>

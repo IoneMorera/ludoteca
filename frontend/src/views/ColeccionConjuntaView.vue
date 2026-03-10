@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader.vue'
 import LoadingState from '../components/LoadingState.vue'
 import EmptyState from '../components/EmptyState.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import GameCardMobile from '../components/GameCardMobile.vue'
 
 const store = usePropietariosStore()
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
@@ -163,6 +164,17 @@ function tituloColeccion() {
           </tbody>
         </table>
       </div>
+
+      <div class="cards-mobile">
+        <GameCardMobile
+          v-for="juego in juegos"
+          :key="'card-' + juego.id"
+          :juego="juego"
+          :backend-url="backendUrl"
+          :show-ubicacion="true"
+          :show-expansiones="true"
+        />
+      </div>
     </template>
   </div>
 </template>
@@ -280,21 +292,4 @@ function tituloColeccion() {
   padding-left: 2rem !important;
 }
 
-@media (max-width: 900px) {
-  .th-imagen,
-  .td-imagen {
-    display: none;
-  }
-}
-
-@media (max-width: 700px) {
-  .coleccion-conjunta-view :deep(.table) th:nth-child(4),
-  .coleccion-conjunta-view :deep(.table) td:nth-child(4),
-  .coleccion-conjunta-view :deep(.table) th:nth-child(6),
-  .coleccion-conjunta-view :deep(.table) td:nth-child(6),
-  .coleccion-conjunta-view :deep(.table) th:nth-child(7),
-  .coleccion-conjunta-view :deep(.table) td:nth-child(7) {
-    display: none;
-  }
-}
 </style>

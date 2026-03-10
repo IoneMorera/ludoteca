@@ -14,6 +14,7 @@ import EmptyState from '../components/EmptyState.vue'
 import FormModal from '../components/FormModal.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import LocationPicker from '../components/LocationPicker.vue'
+import GameCardMobile from '../components/GameCardMobile.vue'
 
 const route = useRoute()
 const juegosStore = useJuegosStore()
@@ -313,6 +314,22 @@ function estadoClase(estado) {
         </table>
       </div>
 
+      <div class="cards-mobile">
+        <GameCardMobile
+          v-for="juego in juegosStore.juegos"
+          :key="'card-' + juego.id"
+          :juego="juego"
+          :backend-url="backendUrl"
+          :show-jugadores="true"
+          :show-fecha-compra="true"
+        >
+          <template #actions>
+            <button class="btn btn-sm btn-secondary" @click="abrirFormulario(juego)">Editar</button>
+            <button class="btn btn-sm btn-danger" @click="eliminar(juego.id)">Eliminar</button>
+          </template>
+        </GameCardMobile>
+      </div>
+
       <div v-if="juegosStore.pagination.lastPage > 1" class="pagination">
         <button
           class="btn btn-sm btn-secondary"
@@ -573,24 +590,4 @@ function estadoClase(estado) {
   }
 }
 
-@media (max-width: 900px) {
-  .juegos-view .table {
-    min-width: 800px;
-  }
-
-  .th-imagen,
-  .td-imagen {
-    display: none;
-  }
-}
-
-@media (max-width: 700px) {
-  /* Ocultar columnas de Jugadores y Edad para que la tabla quepa mejor */
-  .juegos-view .table th:nth-child(4),
-  .juegos-view .table td:nth-child(4),
-  .juegos-view .table th:nth-child(5),
-  .juegos-view .table td:nth-child(5) {
-    display: none;
-  }
-}
 </style>

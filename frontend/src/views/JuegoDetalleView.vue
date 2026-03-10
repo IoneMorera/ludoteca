@@ -165,26 +165,52 @@ async function guardar() {
 
       <div v-if="juego.prestamos?.length" class="prestamos-section">
         <h2>Historial de Préstamos</h2>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Persona</th>
-              <th>Fecha Préstamo</th>
-              <th>Devolución Prevista</th>
-              <th>Devolución Real</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="p in juego.prestamos" :key="p.id">
-              <td>{{ p.persona }}</td>
-              <td>{{ p.fecha_prestamo }}</td>
-              <td>{{ p.fecha_devolucion_prevista }}</td>
-              <td>{{ p.fecha_devolucion_real || '-' }}</td>
-              <td>{{ p.estado }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-container">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Persona</th>
+                <th>Fecha Préstamo</th>
+                <th>Devolución Prevista</th>
+                <th>Devolución Real</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in juego.prestamos" :key="p.id">
+                <td>{{ p.persona }}</td>
+                <td>{{ p.fecha_prestamo }}</td>
+                <td>{{ p.fecha_devolucion_prevista }}</td>
+                <td>{{ p.fecha_devolucion_real || '-' }}</td>
+                <td>{{ p.estado }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="cards-mobile">
+          <div v-for="p in juego.prestamos" :key="'card-' + p.id" class="historial-card">
+            <div class="historial-card__header">
+              <span class="historial-card__persona">{{ p.persona }}</span>
+              <span class="badge" :class="p.estado === 'devuelto' ? 'badge-success' : 'badge-warning'">
+                {{ p.estado }}
+              </span>
+            </div>
+            <div class="historial-card__body">
+              <div class="historial-card__row">
+                <span class="historial-card__label">Préstamo</span>
+                <span>{{ p.fecha_prestamo }}</span>
+              </div>
+              <div class="historial-card__row">
+                <span class="historial-card__label">Dev. prevista</span>
+                <span>{{ p.fecha_devolucion_prevista }}</span>
+              </div>
+              <div class="historial-card__row">
+                <span class="historial-card__label">Dev. real</span>
+                <span>{{ p.fecha_devolucion_real || '-' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -435,5 +461,47 @@ async function guardar() {
   font-size: 1.2rem;
   color: var(--primary);
   margin-bottom: 0.75rem;
+}
+
+.historial-card {
+  background: var(--bg-surface-soft);
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.historial-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.historial-card__persona {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text-main);
+}
+
+.historial-card__body {
+  padding: 0.5rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.historial-card__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.historial-card__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 </style>

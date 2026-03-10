@@ -13,3 +13,6 @@ Thumbs.db
 
 # Docker volumes data
 ludoteca-mysql-data/
+
+# Production secrets
+#.env.production

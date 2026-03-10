@@ -410,6 +410,23 @@ textarea.input {
   color: #888;
 }
 
+/* Mobile cards (table -> card switch) */
+.cards-mobile {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .table-container {
+    display: none;
+  }
+
+  .cards-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
+
 /* Dark theme fine-tuning */
 [data-theme='dark'] .input {
   background: #020617;
