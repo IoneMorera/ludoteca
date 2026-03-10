@@ -1,5 +1,6 @@
 <script setup>
 import StatusBadge from './StatusBadge.vue'
+import { formatDate } from '../utils/format'
 
 const props = defineProps({
   juego: { type: Object, required: true },
@@ -71,7 +72,7 @@ function esCompartido(juego) {
 
       <div v-if="showFechaCompra && juego.fecha_compra" class="gcm__row">
         <span class="gcm__label">Fecha compra</span>
-        <span class="gcm__value">{{ juego.fecha_compra }}</span>
+        <span class="gcm__value">{{ formatDate(juego.fecha_compra) }}</span>
       </div>
 
       <div v-if="showUbicacion && juego.ubicacion" class="gcm__row">

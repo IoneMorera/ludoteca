@@ -438,6 +438,10 @@ textarea.input {
   color: #6b7280;
 }
 
+[data-theme='dark'] .input::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
+
 [data-theme='dark'] .btn-secondary {
   background: #374151;
   color: var(--text-main);

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { formatDate } from '../utils/format'
 import { usePrestamosStore } from '../stores/prestamos'
 import { useJuegosStore } from '../stores/juegos'
 import PageHeader from '../components/PageHeader.vue'
@@ -118,9 +119,9 @@ function estadoClase(estado) {
             <tr v-for="p in prestamosStore.prestamos" :key="p.id">
               <td>{{ p.juego?.nombre }}</td>
               <td>{{ p.persona }}</td>
-              <td>{{ p.fecha_prestamo }}</td>
-              <td>{{ p.fecha_devolucion_prevista }}</td>
-              <td>{{ p.fecha_devolucion_real || '-' }}</td>
+              <td>{{ formatDate(p.fecha_prestamo) }}</td>
+              <td>{{ formatDate(p.fecha_devolucion_prevista) }}</td>
+              <td>{{ formatDate(p.fecha_devolucion_real) }}</td>
               <td>
                 <StatusBadge :value="p.estado" type="prestamo" />
               </td>
@@ -151,15 +152,15 @@ function estadoClase(estado) {
             </div>
             <div class="prestamo-card__row">
               <span class="prestamo-card__label">Préstamo</span>
-              <span>{{ p.fecha_prestamo }}</span>
+              <span>{{ formatDate(p.fecha_prestamo) }}</span>
             </div>
             <div class="prestamo-card__row">
               <span class="prestamo-card__label">Dev. prevista</span>
-              <span>{{ p.fecha_devolucion_prevista }}</span>
+              <span>{{ formatDate(p.fecha_devolucion_prevista) }}</span>
             </div>
             <div v-if="p.fecha_devolucion_real" class="prestamo-card__row">
               <span class="prestamo-card__label">Dev. real</span>
-              <span>{{ p.fecha_devolucion_real }}</span>
+              <span>{{ formatDate(p.fecha_devolucion_real) }}</span>
             </div>
           </div>
           <div v-if="p.estado === 'activo'" class="prestamo-card__actions">

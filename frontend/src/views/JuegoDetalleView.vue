@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { formatDate } from '../utils/format'
 import { useJuegosStore } from '../stores/juegos'
 import { useCategoriasStore } from '../stores/categorias'
 import { usePropietariosStore } from '../stores/propietarios'
@@ -117,7 +118,7 @@ async function guardar() {
         </div>
         <div class="info-item">
           <span class="info-label">Fecha de compra</span>
-          <span class="info-value">{{ juego.fecha_compra || '-' }}</span>
+          <span class="info-value">{{ formatDate(juego.fecha_compra) }}</span>
         </div>
         <div class="info-item">
           <span class="info-label">Ubicación</span>
@@ -179,9 +180,9 @@ async function guardar() {
             <tbody>
               <tr v-for="p in juego.prestamos" :key="p.id">
                 <td>{{ p.persona }}</td>
-                <td>{{ p.fecha_prestamo }}</td>
-                <td>{{ p.fecha_devolucion_prevista }}</td>
-                <td>{{ p.fecha_devolucion_real || '-' }}</td>
+                <td>{{ formatDate(p.fecha_prestamo) }}</td>
+                <td>{{ formatDate(p.fecha_devolucion_prevista) }}</td>
+                <td>{{ formatDate(p.fecha_devolucion_real) }}</td>
                 <td>{{ p.estado }}</td>
               </tr>
             </tbody>
@@ -198,15 +199,15 @@ async function guardar() {
             <div class="historial-card__body">
               <div class="historial-card__row">
                 <span class="historial-card__label">Préstamo</span>
-                <span>{{ p.fecha_prestamo }}</span>
+                <span>{{ formatDate(p.fecha_prestamo) }}</span>
               </div>
               <div class="historial-card__row">
                 <span class="historial-card__label">Dev. prevista</span>
-                <span>{{ p.fecha_devolucion_prevista }}</span>
+                <span>{{ formatDate(p.fecha_devolucion_prevista) }}</span>
               </div>
               <div class="historial-card__row">
                 <span class="historial-card__label">Dev. real</span>
-                <span>{{ p.fecha_devolucion_real || '-' }}</span>
+                <span>{{ formatDate(p.fecha_devolucion_real) }}</span>
               </div>
             </div>
           </div>

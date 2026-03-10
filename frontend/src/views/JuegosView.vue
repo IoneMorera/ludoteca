@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { formatDate } from '../utils/format'
 import { useJuegosStore } from '../stores/juegos'
 import { useCategoriasStore } from '../stores/categorias'
 import { useHabitacionesStore } from '../stores/habitaciones'
@@ -299,7 +300,7 @@ function estadoClase(estado) {
               <td>{{ juego.categoria?.nombre || '-' }}</td>
               <td>{{ juego.num_jugadores_min }}–{{ juego.num_jugadores_max }}</td>
               <td>{{ juego.edad_minima }}+</td>
-              <td>{{ juego.fecha_compra || '-' }}</td>
+              <td>{{ formatDate(juego.fecha_compra) }}</td>
               <td>
                 <StatusBadge :value="juego.estado" type="juego" />
               </td>
