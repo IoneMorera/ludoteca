@@ -8,6 +8,7 @@ const stats = ref({
   totalJuegos: 0,
   juegosDisponibles: 0,
   prestamosActivos: 0,
+  totalExpansiones: 0,
 })
 const loading = ref(true)
 
@@ -18,6 +19,7 @@ onMounted(async () => {
       totalJuegos: data.totalJuegos || 0,
       juegosDisponibles: data.juegosDisponibles || 0,
       prestamosActivos: data.prestamosActivos || 0,
+      totalExpansiones: data.totalExpansiones || 0,
     }
   } catch {
     // Stats will remain at 0
@@ -54,6 +56,14 @@ onMounted(async () => {
         </div>
       </div>
 
+      <div class="stat-card stat-expansiones">
+        <div class="stat-icon">🧩</div>
+        <div class="stat-info">
+          <span class="stat-value">{{ stats.totalExpansiones }}</span>
+          <span class="stat-label">Expansiones</span>
+        </div>
+      </div>
+
       <div class="stat-card stat-prestamos">
         <div class="stat-icon">📋</div>
         <div class="stat-info">
@@ -78,6 +88,10 @@ onMounted(async () => {
           <span class="action-icon">📂</span>
           <span>Ver Categorías</span>
         </router-link>
+        <router-link to="/propietarios" class="action-card">
+          <span class="action-icon">👥</span>
+          <span>Propietarios</span>
+        </router-link>
       </div>
     </div>
   </div>
@@ -90,7 +104,7 @@ onMounted(async () => {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1.5rem;
   margin-bottom: 2rem;
 }
@@ -112,6 +126,9 @@ onMounted(async () => {
 }
 .stat-disponibles {
   border-left-color: #66bb6a;
+}
+.stat-expansiones {
+  border-left-color: #ff9800;
 }
 .stat-prestamos {
   border-left-color: #ab47bc;

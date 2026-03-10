@@ -1,10 +1,13 @@
 <script setup>
 import { ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
 const mobileOpen = ref(false)
-const casaOpen = ref(true)
+const groupOpen = ref({ casa: true, colecciones: true })
 const theme = ref(localStorage.getItem('theme') || 'light')
 
 const menuItems = [
@@ -12,10 +15,21 @@ const menuItems = [
   { type: 'item', name: 'Juegos', path: '/juegos', icon: '🎲' },
   { type: 'item', name: 'Categorías', path: '/categorias', icon: '📂' },
   { type: 'item', name: 'Préstamos', path: '/prestamos', icon: '📋' },
+  { type: 'item', name: 'Propietarios', path: '/propietarios', icon: '👥' },
+  {
+    type: 'group',
+    name: 'Colecciones',
+    icon: '📚',
+    groupKey: 'colecciones',
+    children: [
+      { name: 'Colección Conjunta', path: '/colecciones/conjunta', icon: '🤝' },
+    ],
+  },
   {
     type: 'group',
     name: 'Casa',
     icon: '🏠',
+    groupKey: 'casa',
     children: [
       { name: 'Habitaciones', path: '/habitaciones', icon: '🛋️' },
       { name: 'Muebles', path: '/muebles', icon: '🗄️' },
@@ -37,7 +51,11 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', theme.value)
 }
 
-// inicializar atributo al cargar
+async function handleLogout() {
+  await authStore.logout()
+  router.push('/login')
+}
+
 document.documentElement.setAttribute('data-theme', theme.value)
 </script>
 
@@ -66,16 +84,16 @@ document.documentElement.setAttribute('data-theme', theme.value)
         <template v-else-if="item.type === 'group'">
           <button
             class="nav-link nav-group"
-            :class="{ active: item.children.some((child) => isActive(child.path)), open: casaOpen }"
+            :class="{ active: item.children.some((child) => isActive(child.path)), open: groupOpen[item.groupKey] }"
             type="button"
-            @click="casaOpen = !casaOpen"
+            @click="groupOpen[item.groupKey] = !groupOpen[item.groupKey]"
           >
             <span class="nav-icon">{{ item.icon }}</span>
             <span class="nav-text">{{ item.name }}</span>
-            <span class="nav-chevron">{{ casaOpen ? '▾' : '▸' }}</span>
+            <span class="nav-chevron">{{ groupOpen[item.groupKey] ? '▾' : '▸' }}</span>
           </button>
 
-          <ul v-if="casaOpen" class="nav-sublist">
+          <ul v-if="groupOpen[item.groupKey]" class="nav-sublist">
             <li v-for="child in item.children" :key="child.path">
               <router-link
                 :to="child.path"
@@ -93,6 +111,12 @@ document.documentElement.setAttribute('data-theme', theme.value)
     </ul>
 
     <div class="sidebar-footer">
+      <div v-if="authStore.user" class="user-info">
+        <span class="user-name">{{ authStore.user.name }}</span>
+        <button class="logout-button" type="button" @click="handleLogout">
+          Cerrar sesión
+        </button>
+      </div>
       <div class="theme-toggle">
         <button class="theme-button" type="button" @click="toggleTheme">
           <span class="theme-icon">{{ theme === 'light' ? '🌞' : '🌙' }}</span>
@@ -200,7 +224,40 @@ document.documentElement.setAttribute('data-theme', theme.value)
   padding: 1rem 1.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 0.8rem;
+}
+
+.sidebar-footer > p {
   opacity: 0.5;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.user-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.logout-button {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: all 0.2s;
+}
+
+.logout-button:hover {
+  background: rgba(229, 57, 53, 0.7);
+  opacity: 1;
 }
 
 .theme-toggle {

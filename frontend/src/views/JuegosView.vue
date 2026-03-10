@@ -6,6 +6,7 @@ import { useCategoriasStore } from '../stores/categorias'
 import { useHabitacionesStore } from '../stores/habitaciones'
 import { useMueblesStore } from '../stores/muebles'
 import { useUbicacionesStore } from '../stores/ubicaciones'
+import { usePropietariosStore } from '../stores/propietarios'
 import PageHeader from '../components/PageHeader.vue'
 import FilterBar from '../components/FilterBar.vue'
 import LoadingState from '../components/LoadingState.vue'
@@ -20,13 +21,19 @@ const categoriasStore = useCategoriasStore()
 const habitacionesStore = useHabitacionesStore()
 const mueblesStore = useMueblesStore()
 const ubicacionesStore = useUbicacionesStore()
+const propietariosStore = usePropietariosStore()
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 const buscar = ref('')
 const categoriaFiltro = ref('')
 const habitacionFiltro = ref(route.query.habitacion_id || '')
+const propietarioFiltro = ref('')
 const mostrarFormulario = ref(false)
 const editando = ref(null)
+
+const juegosBase = computed(() => {
+  return juegosStore.juegos.filter((j) => !j.juego_base_id)
+})
 
 const form = ref({
   nombre: '',
@@ -41,6 +48,8 @@ const form = ref({
   habitacion_id: '',
   mueble_id: '',
   ubicacion_id: '',
+  propietario_ids: [],
+  juego_base_id: '',
 })
 
 const mueblesFiltrados = computed(() => {
@@ -101,6 +110,7 @@ const visiblePages = computed(() => {
 onMounted(async () => {
   juegosStore.fetchJuegos(buildParams())
   categoriasStore.fetchCategorias()
+  propietariosStore.fetchPropietarios()
   await Promise.all([
     habitacionesStore.fetchHabitaciones(),
     mueblesStore.fetchMuebles(),
@@ -112,7 +122,8 @@ function buildParams(page = 1) {
   const params = { page }
   if (buscar.value) params.buscar = buscar.value
   if (categoriaFiltro.value) params.categoria_id = categoriaFiltro.value
-   if (habitacionFiltro.value) params.habitacion_id = habitacionFiltro.value
+  if (habitacionFiltro.value) params.habitacion_id = habitacionFiltro.value
+  if (propietarioFiltro.value) params.propietario_id = propietarioFiltro.value
   return params
 }
 
@@ -140,6 +151,8 @@ function abrirFormulario(juego = null) {
       habitacion_id: juego.ubicacion?.mueble?.habitacion?.id || '',
       mueble_id: juego.ubicacion?.mueble?.id || '',
       ubicacion_id: juego.ubicacion?.id || '',
+      propietario_ids: juego.propietarios?.map((p) => p.id) || [],
+      juego_base_id: juego.juego_base_id || '',
     }
   } else {
     editando.value = null
@@ -156,6 +169,8 @@ function abrirFormulario(juego = null) {
       habitacion_id: '',
       mueble_id: '',
       ubicacion_id: '',
+      propietario_ids: [],
+      juego_base_id: '',
     }
   }
   mostrarFormulario.value = true
@@ -226,6 +241,12 @@ function estadoClase(estado) {
           {{ cat.nombre }}
         </option>
       </select>
+      <select v-model="propietarioFiltro" class="input" @change="filtrar">
+        <option value="">Todos los propietarios</option>
+        <option v-for="prop in propietariosStore.propietarios" :key="prop.id" :value="prop.id">
+          {{ prop.nombre }}
+        </option>
+      </select>
     </FilterBar>
 
     <LoadingState v-if="juegosStore.loading" text="Cargando juegos..." />
@@ -242,6 +263,7 @@ function estadoClase(estado) {
             <tr>
               <th class="th-imagen">Imagen</th>
               <th>Nombre</th>
+              <th>Propietarios</th>
               <th>Categoría</th>
               <th>Jugadores</th>
               <th>Edad</th>
@@ -265,6 +287,13 @@ function estadoClase(estado) {
                 <router-link :to="`/juegos/${juego.id}`" class="link">
                   {{ juego.nombre }}
                 </router-link>
+                <span v-if="juego.juego_base_id" class="expansion-tag">Expansión</span>
+              </td>
+              <td>
+                <template v-if="juego.propietarios?.length">
+                  {{ juego.propietarios.map(p => p.nombre).join(', ') }}
+                </template>
+                <template v-else>-</template>
               </td>
               <td>{{ juego.categoria?.nombre || '-' }}</td>
               <td>{{ juego.num_jugadores_min }}–{{ juego.num_jugadores_max }}</td>
@@ -355,6 +384,36 @@ function estadoClase(estado) {
               </select>
             </div>
           </div>
+          <div class="form-group">
+            <label>Propietarios</label>
+            <div class="propietarios-checkboxes">
+              <label
+                v-for="prop in propietariosStore.propietarios"
+                :key="prop.id"
+                class="checkbox-label"
+              >
+                <input
+                  type="checkbox"
+                  :value="prop.id"
+                  v-model="form.propietario_ids"
+                />
+                {{ prop.nombre }}
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Juego base (si es expansión)</label>
+            <select v-model="form.juego_base_id" class="input">
+              <option value="">No es expansión</option>
+              <option
+                v-for="j in juegosBase"
+                :key="j.id"
+                :value="j.id"
+              >
+                {{ j.nombre }}
+              </option>
+            </select>
+          </div>
           <LocationPicker v-model="form.ubicacion_id" />
           <div class="form-group">
             <label>Fecha de compra</label>
@@ -410,6 +469,34 @@ function estadoClase(estado) {
 
 .link:hover {
   text-decoration: underline;
+}
+
+.expansion-tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+
+.propietarios-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-weight: normal;
+  color: var(--text-main);
 }
 
 .juegos-view .table th,

@@ -1,6 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('../views/LoginView.vue'),
+    meta: { title: 'Iniciar Sesión', guest: true },
+  },
+  {
+    path: '/register',
+    name: 'register',
+    component: () => import('../views/RegisterView.vue'),
+    meta: { title: 'Registro', guest: true },
+  },
   {
     path: '/',
     name: 'dashboard',
@@ -30,6 +43,24 @@ const routes = [
     name: 'prestamos',
     component: () => import('../views/PrestamosView.vue'),
     meta: { title: 'Préstamos' },
+  },
+  {
+    path: '/propietarios',
+    name: 'propietarios',
+    component: () => import('../views/PropietariosView.vue'),
+    meta: { title: 'Propietarios' },
+  },
+  {
+    path: '/colecciones/personal/:id',
+    name: 'coleccion-personal',
+    component: () => import('../views/ColeccionPersonalView.vue'),
+    meta: { title: 'Colección Personal' },
+  },
+  {
+    path: '/colecciones/conjunta',
+    name: 'coleccion-conjunta',
+    component: () => import('../views/ColeccionConjuntaView.vue'),
+    meta: { title: 'Colección Conjunta' },
   },
   {
     path: '/habitaciones',
@@ -74,8 +105,26 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   document.title = `${to.meta.title || 'Ludoteca'} | Ludoteca`
+
+  const authStore = useAuthStore()
+
+  if (!authStore.user && !to.meta.guest) {
+    try {
+      await authStore.fetchUser()
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!authStore.isAuthenticated && !to.meta.guest) {
+    return { name: 'login' }
+  }
+
+  if (authStore.isAuthenticated && to.meta.guest) {
+    return { name: 'dashboard' }
+  }
 })
 
 export default router

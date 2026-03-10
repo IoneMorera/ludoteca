@@ -11,7 +11,7 @@ class JuegoController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Juego::with(['categoria', 'ubicacion.mueble.habitacion']);
+        $query = Juego::with(['categoria', 'ubicacion.mueble.habitacion', 'propietarios']);
 
         if ($request->has('categoria_id')) {
             $query->where('categoria_id', $request->categoria_id);
@@ -26,6 +26,21 @@ class JuegoController extends Controller
             $query->whereHas('ubicacion.mueble', function ($q) use ($habitacionId) {
                 $q->where('habitacion_id', $habitacionId);
             });
+        }
+
+        if ($request->has('propietario_id')) {
+            $propietarioId = (int) $request->propietario_id;
+            $query->whereHas('propietarios', function ($q) use ($propietarioId) {
+                $q->where('propietario_id', $propietarioId);
+            });
+        }
+
+        if ($request->has('solo_base')) {
+            $query->whereNull('juego_base_id');
+        }
+
+        if ($request->has('juego_base_id')) {
+            $query->where('juego_base_id', $request->juego_base_id);
         }
 
         if ($request->has('buscar')) {
@@ -51,17 +66,36 @@ class JuegoController extends Controller
             'estado' => 'in:disponible,prestado,reparacion,baja',
             'fecha_compra' => 'nullable|date',
             'imagen' => 'nullable|string',
+            'juego_base_id' => 'nullable|exists:juegos,id',
+            'propietario_ids' => 'nullable|array',
+            'propietario_ids.*' => 'exists:propietarios,id',
         ]);
 
+        $propietarioIds = $validated['propietario_ids'] ?? [];
+        unset($validated['propietario_ids']);
+
         $juego = Juego::create($validated);
-        $juego->load(['categoria', 'ubicacion.mueble.habitacion']);
+
+        if (!empty($propietarioIds)) {
+            $juego->propietarios()->sync($propietarioIds);
+        }
+
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'propietarios']);
 
         return response()->json($juego, 201);
     }
 
     public function show(Juego $juego): JsonResponse
     {
-        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'prestamos']);
+        $juego->load([
+            'categoria',
+            'ubicacion.mueble.habitacion',
+            'prestamos',
+            'propietarios',
+            'juegoBase',
+            'expansiones.propietarios',
+            'expansiones.ubicacion.mueble.habitacion',
+        ]);
 
         return response()->json($juego);
     }
@@ -80,10 +114,21 @@ class JuegoController extends Controller
             'estado' => 'in:disponible,prestado,reparacion,baja',
             'fecha_compra' => 'nullable|date',
             'imagen' => 'nullable|string',
+            'juego_base_id' => 'nullable|exists:juegos,id',
+            'propietario_ids' => 'nullable|array',
+            'propietario_ids.*' => 'exists:propietarios,id',
         ]);
 
+        $propietarioIds = $validated['propietario_ids'] ?? null;
+        unset($validated['propietario_ids']);
+
         $juego->update($validated);
-        $juego->load(['categoria', 'ubicacion.mueble.habitacion']);
+
+        if ($propietarioIds !== null) {
+            $juego->propietarios()->sync($propietarioIds);
+        }
+
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'propietarios']);
 
         return response()->json($juego);
     }

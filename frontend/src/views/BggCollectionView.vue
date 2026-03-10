@@ -17,6 +17,8 @@ const error = ref(null)
 const buscar = ref('')
 const importing = ref(false)
 const importResult = ref(null)
+const importingExpansions = ref(false)
+const expansionResult = ref(null)
 const username = computed(() => route.params.username)
 const subtitle = computed(
   () => `Juegos del usuario ${username.value} en BoardGameGeek`,
@@ -47,12 +49,31 @@ async function importGames() {
   importing.value = true
   importResult.value = null
   try {
-    const { data } = await api.post('/bgg/import', { games: games.value })
+    const { data } = await api.post('/bgg/import', { games: games.value, bgg_username: username.value })
     importResult.value = data
   } catch {
     importResult.value = { error: 'Error al importar los juegos' }
   } finally {
     importing.value = false
+  }
+}
+
+async function importExpansions() {
+  if (importingExpansions.value) return
+  importingExpansions.value = true
+  expansionResult.value = null
+  try {
+    const { data: expData } = await api.get(`/bgg/expansions/${username.value}`)
+    if (!expData.expansions || expData.expansions.length === 0) {
+      expansionResult.value = { imported: 0, skipped: 0, omitted: [], omitted_count: 0, noExpansions: true }
+      return
+    }
+    const { data } = await api.post('/bgg/import-expansions', { expansions: expData.expansions, bgg_username: username.value })
+    expansionResult.value = data
+  } catch {
+    expansionResult.value = { error: 'Error al importar expansiones' }
+  } finally {
+    importingExpansions.value = false
   }
 }
 
@@ -81,7 +102,15 @@ onMounted(fetchCollection)
           :disabled="importing"
           @click="importGames"
         >
-          {{ importing ? 'Importando...' : 'Añadir juegos a la BBDD' }}
+          {{ importing ? 'Importando...' : 'Importar Juegos' }}
+        </button>
+        <button
+          v-if="!loading && !error && games.length > 0"
+          class="btn btn-secondary"
+          :disabled="importingExpansions"
+          @click="importExpansions"
+        >
+          {{ importingExpansions ? 'Importando...' : 'Importar Expansiones' }}
         </button>
       </template>
     </PageHeader>
@@ -96,6 +125,29 @@ onMounted(fetchCollection)
         ✔ {{ importResult.imported }} juego(s) importado(s), {{ importResult.skipped }} ya existían en la BBDD
       </template>
       <button class="dismiss-btn" @click="importResult = null">✕</button>
+    </div>
+
+    <div
+      v-if="expansionResult"
+      class="import-feedback"
+      :class="expansionResult.error ? 'import-error' : 'import-success'"
+    >
+      <div>
+        <template v-if="expansionResult.error">{{ expansionResult.error }}</template>
+        <template v-else-if="expansionResult.noExpansions">
+          No se encontraron expansiones en la colección BGG.
+        </template>
+        <template v-else>
+          ✔ {{ expansionResult.imported }} expansión(es) importada(s), {{ expansionResult.skipped }} ya existían
+          <template v-if="expansionResult.omitted_count > 0">
+            <br/>⚠ {{ expansionResult.omitted_count }} omitida(s) por no tener juego base en la ludoteca:
+            <ul class="omitted-list">
+              <li v-for="(name, idx) in expansionResult.omitted" :key="idx">{{ name }}</li>
+            </ul>
+          </template>
+        </template>
+      </div>
+      <button class="dismiss-btn" @click="expansionResult = null">✕</button>
     </div>
 
     <FilterBar v-if="!loading && !error">
@@ -220,6 +272,17 @@ onMounted(fetchCollection)
 
 .dismiss-btn:hover {
   opacity: 1;
+}
+
+.omitted-list {
+  margin: 0.4rem 0 0 1.2rem;
+  padding: 0;
+  font-size: 0.83rem;
+  font-weight: 400;
+}
+
+.omitted-list li {
+  margin-bottom: 0.15rem;
 }
 
 .page-title {

@@ -1,7 +1,8 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useJuegosStore } from '../stores/juegos'
+import StatusBadge from '../components/StatusBadge.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +12,16 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 onMounted(() => {
   juegosStore.fetchJuego(route.params.id)
 })
+
+const juego = computed(() => juegosStore.juego)
+
+const propietariosTexto = computed(() => {
+  if (!juego.value?.propietarios?.length) return 'Sin propietarios'
+  return juego.value.propietarios.map((p) => p.nombre).join(', ')
+})
+
+const esExpansion = computed(() => !!juego.value?.juego_base_id)
+const tieneExpansiones = computed(() => juego.value?.expansiones?.length > 0)
 </script>
 
 <template>
@@ -19,59 +30,97 @@ onMounted(() => {
 
     <div v-if="juegosStore.loading" class="loading">Cargando...</div>
 
-    <div v-else-if="juegosStore.juego" class="detalle-card">
+    <div v-else-if="juego" class="detalle-card">
       <div class="detalle-header">
         <img
-          v-if="juegosStore.juego.imagen"
-          :src="backendUrl + juegosStore.juego.imagen"
-          :alt="juegosStore.juego.nombre"
+          v-if="juego.imagen"
+          :src="backendUrl + juego.imagen"
+          :alt="juego.nombre"
           class="detalle-cover"
         />
         <div>
-          <h1>{{ juegosStore.juego.nombre }}</h1>
-          <p class="descripcion">{{ juegosStore.juego.descripcion || 'Sin descripción' }}</p>
+          <h1>
+            {{ juego.nombre }}
+            <span v-if="esExpansion" class="expansion-badge">Expansión</span>
+          </h1>
+          <p class="descripcion">{{ juego.descripcion || 'Sin descripción' }}</p>
+          <div v-if="esExpansion && juego.juego_base" class="juego-base-link">
+            Juego base:
+            <router-link :to="`/juegos/${juego.juego_base.id}`" class="link">
+              {{ juego.juego_base.nombre }}
+            </router-link>
+          </div>
         </div>
       </div>
 
       <div class="info-grid">
         <div class="info-item">
           <span class="info-label">Categoría</span>
-          <span class="info-value">{{ juegosStore.juego.categoria?.nombre || '-' }}</span>
+          <span class="info-value">{{ juego.categoria?.nombre || '-' }}</span>
         </div>
         <div class="info-item">
           <span class="info-label">Jugadores</span>
-          <span class="info-value">{{ juegosStore.juego.num_jugadores_min }} – {{ juegosStore.juego.num_jugadores_max }}</span>
+          <span class="info-value">{{ juego.num_jugadores_min }} – {{ juego.num_jugadores_max }}</span>
         </div>
         <div class="info-item">
           <span class="info-label">Edad mínima</span>
-          <span class="info-value">{{ juegosStore.juego.edad_minima }}+</span>
+          <span class="info-value">{{ juego.edad_minima }}+</span>
         </div>
         <div class="info-item">
           <span class="info-label">Estado</span>
-          <span class="info-value">{{ juegosStore.juego.estado }}</span>
+          <span class="info-value">
+            <StatusBadge :value="juego.estado" type="juego" />
+          </span>
         </div>
         <div class="info-item">
           <span class="info-label">Fecha de compra</span>
-          <span class="info-value">{{ juegosStore.juego.fecha_compra || '-' }}</span>
+          <span class="info-value">{{ juego.fecha_compra || '-' }}</span>
         </div>
         <div class="info-item">
           <span class="info-label">Ubicación</span>
           <span class="info-value">
-            <template v-if="juegosStore.juego.ubicacion">
-              {{ juegosStore.juego.ubicacion.mueble?.habitacion?.nombre || 'Sin habitación' }}
+            <template v-if="juego.ubicacion">
+              {{ juego.ubicacion.mueble?.habitacion?.nombre || 'Sin habitación' }}
               ›
-              {{ juegosStore.juego.ubicacion.mueble?.nombre || 'Sin mueble' }}
+              {{ juego.ubicacion.mueble?.nombre || 'Sin mueble' }}
               ›
-              {{ juegosStore.juego.ubicacion.nombre }}
+              {{ juego.ubicacion.nombre }}
             </template>
             <template v-else>
               Sin ubicación asignada
             </template>
           </span>
         </div>
+        <div class="info-item">
+          <span class="info-label">Propietarios</span>
+          <span class="info-value">{{ propietariosTexto }}</span>
+        </div>
       </div>
 
-      <div v-if="juegosStore.juego.prestamos?.length" class="prestamos-section">
+      <div v-if="tieneExpansiones" class="expansiones-section">
+        <h2>Expansiones</h2>
+        <div class="expansiones-grid">
+          <div v-for="exp in juego.expansiones" :key="exp.id" class="expansion-card">
+            <router-link :to="`/juegos/${exp.id}`" class="link">
+              {{ exp.nombre }}
+            </router-link>
+            <div class="expansion-meta">
+              <span v-if="exp.propietarios?.length" class="expansion-owners">
+                {{ exp.propietarios.map(p => p.nombre).join(', ') }}
+              </span>
+              <template v-if="exp.ubicacion">
+                <span class="expansion-location">
+                  {{ exp.ubicacion.mueble?.habitacion?.nombre }} ›
+                  {{ exp.ubicacion.mueble?.nombre }} ›
+                  {{ exp.ubicacion.nombre }}
+                </span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="juego.prestamos?.length" class="prestamos-section">
         <h2>Historial de Préstamos</h2>
         <table class="table">
           <thead>
@@ -84,7 +133,7 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in juegosStore.juego.prestamos" :key="p.id">
+            <tr v-for="p in juego.prestamos" :key="p.id">
               <td>{{ p.persona }}</td>
               <td>{{ p.fecha_prestamo }}</td>
               <td>{{ p.fecha_devolucion_prevista }}</td>
@@ -137,6 +186,34 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
+.expansion-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 0.15rem 0.6rem;
+  border-radius: 8px;
+  vertical-align: middle;
+  margin-left: 0.5rem;
+  font-weight: 600;
+}
+
+.juego-base-link {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.juego-base-link .link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.juego-base-link .link:hover {
+  text-decoration: underline;
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -161,6 +238,50 @@ onMounted(() => {
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-main);
+}
+
+.expansiones-section {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.expansiones-section h2 {
+  font-size: 1.2rem;
+  color: var(--primary);
+  margin-bottom: 0.75rem;
+}
+
+.expansiones-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.expansion-card {
+  background: var(--bg-surface-soft);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-soft);
+}
+
+.expansion-card .link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.expansion-card .link:hover {
+  text-decoration: underline;
+}
+
+.expansion-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .prestamos-section {

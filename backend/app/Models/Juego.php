@@ -24,6 +24,7 @@ class Juego extends Model
         'fecha_compra',
         'imagen',
         'bgg_id',
+        'juego_base_id',
     ];
 
     protected $casts = [
@@ -33,6 +34,7 @@ class Juego extends Model
         'num_jugadores_max' => 'integer',
         'fecha_compra' => 'date:Y-m-d',
         'bgg_id' => 'integer',
+        'juego_base_id' => 'integer',
     ];
 
     public function categoria()
@@ -48,5 +50,21 @@ class Juego extends Model
     public function prestamos()
     {
         return $this->hasMany(Prestamo::class);
+    }
+
+    public function propietarios()
+    {
+        return $this->belongsToMany(Propietario::class, 'juego_propietario')
+            ->withTimestamps();
+    }
+
+    public function juegoBase()
+    {
+        return $this->belongsTo(Juego::class, 'juego_base_id');
+    }
+
+    public function expansiones()
+    {
+        return $this->hasMany(Juego::class, 'juego_base_id');
     }
 }
