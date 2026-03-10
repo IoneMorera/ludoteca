@@ -7,7 +7,6 @@ import LoadingState from '../components/LoadingState.vue'
 const stats = ref({
   totalJuegos: 0,
   juegosDisponibles: 0,
-  prestamosActivos: 0,
   totalExpansiones: 0,
 })
 const loading = ref(true)
@@ -18,7 +17,6 @@ onMounted(async () => {
     stats.value = {
       totalJuegos: data.totalJuegos || 0,
       juegosDisponibles: data.juegosDisponibles || 0,
-      prestamosActivos: data.prestamosActivos || 0,
       totalExpansiones: data.totalExpansiones || 0,
     }
   } catch {
@@ -64,13 +62,6 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="stat-card stat-prestamos">
-        <div class="stat-icon">📋</div>
-        <div class="stat-info">
-          <span class="stat-value">{{ stats.prestamosActivos }}</span>
-          <span class="stat-label">Préstamos Activos</span>
-        </div>
-      </div>
     </div>
 
     <div class="quick-actions">
@@ -80,17 +71,13 @@ onMounted(async () => {
           <span class="action-icon">🎲</span>
           <span>Gestionar Juegos</span>
         </router-link>
-        <router-link to="/prestamos" class="action-card">
-          <span class="action-icon">📋</span>
-          <span>Nuevo Préstamo</span>
-        </router-link>
         <router-link to="/categorias" class="action-card">
           <span class="action-icon">📂</span>
           <span>Ver Categorías</span>
         </router-link>
         <router-link to="/propietarios" class="action-card">
           <span class="action-icon">👥</span>
-          <span>Propietarios</span>
+          <span>Colecciones</span>
         </router-link>
       </div>
     </div>
@@ -129,9 +116,6 @@ onMounted(async () => {
 }
 .stat-expansiones {
   border-left-color: #ff9800;
-}
-.stat-prestamos {
-  border-left-color: #ab47bc;
 }
 
 .stat-icon {

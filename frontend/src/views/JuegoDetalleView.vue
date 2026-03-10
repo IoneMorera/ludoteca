@@ -1,16 +1,27 @@
 <script setup>
-import { onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useJuegosStore } from '../stores/juegos'
+import { useCategoriasStore } from '../stores/categorias'
+import { usePropietariosStore } from '../stores/propietarios'
 import StatusBadge from '../components/StatusBadge.vue'
+import FormModal from '../components/FormModal.vue'
+import LocationPicker from '../components/LocationPicker.vue'
 
 const route = useRoute()
 const router = useRouter()
 const juegosStore = useJuegosStore()
+const categoriasStore = useCategoriasStore()
+const propietariosStore = usePropietariosStore()
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
-onMounted(() => {
-  juegosStore.fetchJuego(route.params.id)
+const mostrarFormulario = ref(false)
+const form = ref({})
+
+onMounted(async () => {
+  await juegosStore.fetchJuego(route.params.id)
+  categoriasStore.fetchCategorias()
+  propietariosStore.fetchPropietarios()
 })
 
 const juego = computed(() => juegosStore.juego)
@@ -22,11 +33,43 @@ const propietariosTexto = computed(() => {
 
 const esExpansion = computed(() => !!juego.value?.juego_base_id)
 const tieneExpansiones = computed(() => juego.value?.expansiones?.length > 0)
+
+function abrirEdicion() {
+  const j = juego.value
+  form.value = {
+    nombre: j.nombre,
+    descripcion: j.descripcion || '',
+    edad_minima: j.edad_minima,
+    edad_maxima: j.edad_maxima,
+    num_jugadores_min: j.num_jugadores_min,
+    num_jugadores_max: j.num_jugadores_max,
+    categoria_id: j.categoria_id,
+    estado: j.estado,
+    fecha_compra: j.fecha_compra || '',
+    ubicacion_id: j.ubicacion?.id || '',
+    propietario_ids: j.propietarios?.map((p) => p.id) || [],
+    juego_base_id: j.juego_base_id || '',
+  }
+  mostrarFormulario.value = true
+}
+
+async function guardar() {
+  try {
+    await juegosStore.actualizarJuego(juego.value.id, form.value)
+    mostrarFormulario.value = false
+    await juegosStore.fetchJuego(route.params.id)
+  } catch (e) {
+    alert(e.response?.data?.message || 'Error al guardar')
+  }
+}
 </script>
 
 <template>
   <div class="detalle-view">
-    <button class="btn btn-secondary" @click="router.back()">← Volver</button>
+    <div class="detalle-actions">
+      <button class="btn btn-secondary" @click="router.back()">← Volver</button>
+      <button v-if="juego" class="btn btn-primary" @click="abrirEdicion">Editar</button>
+    </div>
 
     <div v-if="juegosStore.loading" class="loading">Cargando...</div>
 
@@ -144,12 +187,112 @@ const tieneExpansiones = computed(() => juego.value?.expansiones?.length > 0)
         </table>
       </div>
     </div>
+
+    <FormModal
+      :visible="mostrarFormulario"
+      title="Editar Juego"
+      @close="mostrarFormulario = false"
+    >
+      <form @submit.prevent="guardar">
+        <div class="form-group">
+          <label>Nombre</label>
+          <input v-model="form.nombre" type="text" class="input" required />
+        </div>
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea v-model="form.descripcion" class="input" rows="3"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Categoría</label>
+            <select v-model="form.categoria_id" class="input" required>
+              <option value="" disabled>Seleccionar</option>
+              <option v-for="cat in categoriasStore.categorias" :key="cat.id" :value="cat.id">
+                {{ cat.nombre }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Estado</label>
+            <select v-model="form.estado" class="input">
+              <option value="disponible">Disponible</option>
+              <option value="prestado">Prestado</option>
+              <option value="reparacion">En reparación</option>
+              <option value="baja">Baja</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Propietarios</label>
+          <div class="propietarios-checkboxes">
+            <label
+              v-for="prop in propietariosStore.propietarios"
+              :key="prop.id"
+              class="checkbox-label"
+            >
+              <input
+                type="checkbox"
+                :value="prop.id"
+                v-model="form.propietario_ids"
+              />
+              {{ prop.nombre }}
+            </label>
+          </div>
+        </div>
+        <LocationPicker v-model="form.ubicacion_id" />
+        <div class="form-group">
+          <label>Fecha de compra</label>
+          <input v-model="form.fecha_compra" type="date" class="input" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Jugadores mín.</label>
+            <input v-model.number="form.num_jugadores_min" type="number" class="input" min="1" />
+          </div>
+          <div class="form-group">
+            <label>Jugadores máx.</label>
+            <input v-model.number="form.num_jugadores_max" type="number" class="input" min="1" />
+          </div>
+          <div class="form-group">
+            <label>Edad mínima</label>
+            <input v-model.number="form.edad_minima" type="number" class="input" min="0" />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" @click="mostrarFormulario = false">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </FormModal>
   </div>
 </template>
 
 <style scoped>
 .detalle-view {
   max-width: 1024px;
+}
+
+.detalle-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.propietarios-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-weight: normal;
+  color: var(--text-main);
 }
 
 .detalle-card {

@@ -8,7 +8,6 @@ use App\Models\Juego;
 use App\Models\Propietario;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -130,11 +129,12 @@ class BggController extends Controller
                 if ($localPath) {
                     $result->update(['imagen' => $localPath]);
                 }
-                if ($propietario) {
-                    $result->propietarios()->syncWithoutDetaching([$propietario->id]);
-                }
             } else {
                 $skipped++;
+            }
+
+            if ($propietario) {
+                $result->propietarios()->syncWithoutDetaching([$propietario->id]);
             }
         }
 
@@ -168,6 +168,9 @@ class BggController extends Controller
         foreach ($request->input('expansions') as $expansion) {
             $existingExpansion = Juego::where('bgg_id', $expansion['bgg_id'])->first();
             if ($existingExpansion) {
+                if ($propietario) {
+                    $existingExpansion->propietarios()->syncWithoutDetaching([$propietario->id]);
+                }
                 $skipped++;
                 continue;
             }
@@ -215,26 +218,13 @@ class BggController extends Controller
         ]);
     }
 
-    /**
-     * Si el username BGG consultado coincide con el del usuario logueado,
-     * devuelve su propietario principal (creado al registrarse).
-     */
     private function resolveOwner(?string $bggUsername): ?Propietario
     {
         if (!$bggUsername) {
             return null;
         }
 
-        $user = Auth::user();
-        if (!$user || !$user->bgg_username) {
-            return null;
-        }
-
-        if (strtolower($bggUsername) !== strtolower($user->bgg_username)) {
-            return null;
-        }
-
-        return Propietario::where('nombre', $user->name)->first();
+        return Propietario::whereRaw('LOWER(bgg_username) = ?', [strtolower($bggUsername)])->first();
     }
 
     private function findBaseGameBggId(int $expansionBggId, ?string $apiKey): ?int

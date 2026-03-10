@@ -7,24 +7,15 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const mobileOpen = ref(false)
-const groupOpen = ref({ casa: true, colecciones: true })
+const groupOpen = ref({ casa: true })
 const theme = ref(localStorage.getItem('theme') || 'light')
 
 const menuItems = [
-  { type: 'item', name: 'Panel de Control', path: '/', icon: '📊' },
+  { type: 'item', name: 'Home', path: '/', icon: '📊' },
+  { type: 'item', name: 'Colecciones', path: '/propietarios', icon: '👥' },
   { type: 'item', name: 'Juegos', path: '/juegos', icon: '🎲' },
   { type: 'item', name: 'Categorías', path: '/categorias', icon: '📂' },
-  { type: 'item', name: 'Préstamos', path: '/prestamos', icon: '📋' },
-  { type: 'item', name: 'Propietarios', path: '/propietarios', icon: '👥' },
-  {
-    type: 'group',
-    name: 'Colecciones',
-    icon: '📚',
-    groupKey: 'colecciones',
-    children: [
-      { name: 'Colección Conjunta', path: '/colecciones/conjunta', icon: '🤝' },
-    ],
-  },
+  { type: 'item', name: 'Colecciones Conjuntas', path: '/colecciones/conjunta', icon: '🤝' },
   {
     type: 'group',
     name: 'Casa',
@@ -36,7 +27,7 @@ const menuItems = [
       { name: 'Ubicaciones', path: '/ubicaciones', icon: '📍' },
     ],
   },
-  { type: 'item', name: 'Colección BGG', path: '/bgg', icon: '🌐' },
+  { type: 'item', name: 'BGG', path: '/bgg', icon: '🌐' },
 ]
 
 function isActive(path) {
@@ -64,7 +55,7 @@ document.documentElement.setAttribute('data-theme', theme.value)
 
   <nav class="sidebar" :class="{ open: mobileOpen }">
     <div class="sidebar-header">
-      <h1 class="sidebar-title">🎯 Ludoteca</h1>
+      <h1 class="sidebar-title">🎯 Ludoteca de {{ authStore.user?.name || '...' }}</h1>
     </div>
 
     <ul class="nav-list">
@@ -111,19 +102,14 @@ document.documentElement.setAttribute('data-theme', theme.value)
     </ul>
 
     <div class="sidebar-footer">
-      <div v-if="authStore.user" class="user-info">
-        <span class="user-name">{{ authStore.user.name }}</span>
-        <button class="logout-button" type="button" @click="handleLogout">
+      <div class="footer-actions">
+        <button class="theme-button" type="button" @click="toggleTheme">
+          <span class="theme-icon">{{ theme === 'light' ? '🌞' : '🌙' }}</span>
+        </button>
+        <button v-if="authStore.user" class="logout-button" type="button" @click="handleLogout">
           Cerrar sesión
         </button>
       </div>
-      <div class="theme-toggle">
-        <button class="theme-button" type="button" @click="toggleTheme">
-          <span class="theme-icon">{{ theme === 'light' ? '🌞' : '🌙' }}</span>
-          <span class="theme-label">{{ theme === 'light' ? 'Claro' : 'Oscuro' }}</span>
-        </button>
-      </div>
-      <p>Ludoteca v1.0</p>
     </div>
   </nav>
 
@@ -151,9 +137,10 @@ document.documentElement.setAttribute('data-theme', theme.value)
 }
 
 .sidebar-title {
-  font-size: 1.4rem;
+  font-size: 1.2rem;
   font-weight: 700;
   margin: 0;
+  line-height: 1.3;
 }
 
 .nav-list {
@@ -221,26 +208,14 @@ document.documentElement.setAttribute('data-theme', theme.value)
 }
 
 .sidebar-footer {
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 0.8rem;
 }
 
-.sidebar-footer > p {
-  opacity: 0.5;
-}
-
-.user-info {
+.footer-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.user-name {
-  font-weight: 600;
-  font-size: 0.9rem;
-  opacity: 0.9;
 }
 
 .logout-button {
@@ -248,7 +223,7 @@ document.documentElement.setAttribute('data-theme', theme.value)
   color: #fff;
   border: none;
   border-radius: 6px;
-  padding: 0.25rem 0.6rem;
+  padding: 0.3rem 0.7rem;
   font-size: 0.75rem;
   cursor: pointer;
   opacity: 0.8;
@@ -260,29 +235,23 @@ document.documentElement.setAttribute('data-theme', theme.value)
   opacity: 1;
 }
 
-.theme-toggle {
-  margin-bottom: 0.5rem;
-}
-
 .theme-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   border: none;
   border-radius: 999px;
-  padding: 0.25rem 0.7rem;
-  font-size: 0.8rem;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
   cursor: pointer;
+  transition: background 0.2s;
 }
 
 .theme-button:hover {
   background: rgba(255, 255, 255, 0.2);
-}
-
-.theme-icon {
-  font-size: 1rem;
 }
 
 .mobile-toggle {

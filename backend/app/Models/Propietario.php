@@ -13,6 +13,12 @@ class Propietario extends Model
 
     protected $fillable = [
         'nombre',
+        'bgg_username',
+        'es_principal',
+    ];
+
+    protected $casts = [
+        'es_principal' => 'boolean',
     ];
 
     public function juegos()

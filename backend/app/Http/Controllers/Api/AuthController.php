@@ -36,6 +36,8 @@ class AuthController extends Controller
         $tenant->run(function () use ($validated) {
             Propietario::create([
                 'nombre' => $validated['name'],
+                'bgg_username' => $validated['bgg_username'] ?? null,
+                'es_principal' => true,
             ]);
         });
 

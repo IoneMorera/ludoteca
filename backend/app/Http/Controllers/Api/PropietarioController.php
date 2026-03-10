@@ -22,6 +22,7 @@ class PropietarioController extends Controller
     {
         $validated = $request->validate([
             'nombre' => 'required|string|max:255|unique:propietarios,nombre',
+            'bgg_username' => 'nullable|string|max:255',
         ]);
 
         $propietario = Propietario::create($validated);
@@ -41,6 +42,7 @@ class PropietarioController extends Controller
     {
         $validated = $request->validate([
             'nombre' => 'required|string|max:255|unique:propietarios,nombre,' . $propietario->id,
+            'bgg_username' => 'nullable|string|max:255',
         ]);
 
         $propietario->update($validated);
@@ -50,6 +52,12 @@ class PropietarioController extends Controller
 
     public function destroy(Propietario $propietario): JsonResponse
     {
+        if ($propietario->es_principal) {
+            return response()->json([
+                'message' => 'No se puede eliminar el propietario principal.',
+            ], 403);
+        }
+
         $propietario->delete();
 
         return response()->json(null, 204);

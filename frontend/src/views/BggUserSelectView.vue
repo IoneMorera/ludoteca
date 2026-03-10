@@ -2,14 +2,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { usePropietariosStore } from '../stores/propietarios'
 import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const propietariosStore = usePropietariosStore()
 const customUsername = ref('')
+
+onMounted(() => {
+  propietariosStore.fetchPropietarios()
+})
 
 const userCards = computed(() => {
   const cards = []
+  const seen = new Set()
 
   if (authStore.user?.bgg_username) {
     cards.push({
@@ -17,6 +24,18 @@ const userCards = computed(() => {
       label: authStore.user.name,
       isSelf: true,
     })
+    seen.add(authStore.user.bgg_username.toLowerCase())
+  }
+
+  for (const prop of propietariosStore.propietarios) {
+    if (prop.bgg_username && !seen.has(prop.bgg_username.toLowerCase())) {
+      cards.push({
+        username: prop.bgg_username,
+        label: prop.nombre,
+        isSelf: false,
+      })
+      seen.add(prop.bgg_username.toLowerCase())
+    }
   }
 
   return cards
@@ -44,8 +63,8 @@ function goCustom() {
     />
 
     <div class="users-grid">
-      <div v-for="card in userCards" :key="card.username" class="user-card user-card-self">
-        <span class="user-avatar">🎲</span>
+      <div v-for="card in userCards" :key="card.username" class="user-card" :class="card.isSelf ? 'user-card-self' : 'user-card-owner'">
+        <span class="user-avatar">{{ card.isSelf ? '🎲' : '👤' }}</span>
         <span class="user-label">{{ card.label }}</span>
         <span class="user-name">@{{ card.username }}</span>
         <div class="user-actions">
@@ -118,6 +137,10 @@ function goCustom() {
 
 .user-card-self {
   border-color: var(--primary);
+}
+
+.user-card-owner {
+  border-color: #66bb6a;
 }
 
 .user-avatar {

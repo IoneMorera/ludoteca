@@ -175,4 +175,23 @@ function esCompartido(juego) {
 .expansion-nombre {
   padding-left: 2rem !important;
 }
+
+@media (max-width: 900px) {
+  .th-imagen,
+  .td-imagen {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  /* Ocultar Categoría (col 4), Ubicación (col 6) y Expansiones (col 7) */
+  .coleccion-view :deep(.table) th:nth-child(4),
+  .coleccion-view :deep(.table) td:nth-child(4),
+  .coleccion-view :deep(.table) th:nth-child(6),
+  .coleccion-view :deep(.table) td:nth-child(6),
+  .coleccion-view :deep(.table) th:nth-child(7),
+  .coleccion-view :deep(.table) td:nth-child(7) {
+    display: none;
+  }
+}
 </style>
