@@ -148,6 +148,8 @@ document.documentElement.setAttribute('data-theme', theme.value)
   padding: 1rem 0;
   margin: 0;
   flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .nav-link {

@@ -1,0 +1,219 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+
+import 'providers/auth_provider.dart';
+import 'providers/juegos_provider.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/juegos_list_screen.dart';
+import 'screens/juego_detail_screen.dart';
+import 'screens/scanner_screen.dart';
+import 'screens/quick_add_screen.dart';
+import 'screens/game_night_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/recognize_screen.dart';
+import 'screens/colecciones_screen.dart';
+import 'screens/ubicaciones_screen.dart';
+import 'screens/categorias_screen.dart';
+import 'screens/propietarios_screen.dart';
+import 'screens/bgg_screen.dart';
+import 'services/sync_service.dart';
+import 'config/api_config.dart';
+import 'services/api_service.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ApiConfig.init();
+  ApiService().updateBaseUrl(ApiConfig.serverUrl);
+  runApp(const LudotecaApp());
+}
+
+class LudotecaApp extends StatelessWidget {
+  const LudotecaApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => JuegosProvider()),
+      ],
+      child: MaterialApp(
+        title: 'Ludoteca',
+        debugShowCheckedModeBanner: false,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('es', 'ES'),
+          Locale('en', 'US'),
+        ],
+        locale: const Locale('es', 'ES'),
+        theme: ThemeData(
+          colorSchemeSeed: const Color(0xFF1E3A5F),
+          useMaterial3: true,
+          brightness: Brightness.light,
+        ),
+        darkTheme: ThemeData(
+          colorSchemeSeed: const Color(0xFF1E3A5F),
+          useMaterial3: true,
+          brightness: Brightness.dark,
+        ),
+        home: const AuthGate(),
+        onGenerateRoute: (settings) {
+          switch (settings.name) {
+            case '/login':
+              return MaterialPageRoute(
+                  builder: (_) => const LoginScreen());
+            case '/home':
+              return MaterialPageRoute(
+                  builder: (_) => const MainShell());
+            case '/juego':
+              final id = settings.arguments as int;
+              return MaterialPageRoute(
+                  builder: (_) => JuegoDetailScreen(juegoId: id));
+            case '/scanner':
+              return MaterialPageRoute(
+                  builder: (_) => const ScannerScreen());
+            case '/quick-add':
+              final game = settings.arguments as Map<String, dynamic>?;
+              return MaterialPageRoute(
+                  builder: (_) => QuickAddScreen(bggGame: game));
+            case '/game-night':
+              return MaterialPageRoute(
+                  builder: (_) => const GameNightScreen());
+            case '/recognize':
+              return MaterialPageRoute(
+                  builder: (_) => const RecognizeScreen());
+            case '/colecciones':
+              return MaterialPageRoute(
+                  builder: (_) => const ColeccionesScreen());
+            case '/ubicaciones':
+              return MaterialPageRoute(
+                  builder: (_) => const UbicacionesScreen());
+            case '/categorias':
+              return MaterialPageRoute(
+                  builder: (_) => const CategoriasScreen());
+            case '/propietarios':
+              return MaterialPageRoute(
+                  builder: (_) => const PropietariosScreen());
+            case '/bgg':
+              return MaterialPageRoute(
+                  builder: (_) => const BggScreen());
+            default:
+              return MaterialPageRoute(
+                  builder: (_) => const MainShell());
+          }
+        },
+      ),
+    );
+  }
+}
+
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _checking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final auth = context.read<AuthProvider>();
+    final loggedIn = await auth.checkAuth();
+
+    if (loggedIn) {
+      SyncService().syncJuegos();
+    }
+
+    setState(() => _checking = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final auth = context.watch<AuthProvider>();
+    return auth.isAuthenticated ? const MainShell() : const LoginScreen();
+  }
+}
+
+class MainShell extends StatefulWidget {
+  const MainShell({super.key});
+
+  @override
+  State<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<MainShell> {
+  int _currentIndex = 0;
+
+  final _screens = const [
+    HomeScreen(),
+    JuegosListScreen(),
+    SizedBox(), // placeholder for scanner (opens as full screen)
+    ColeccionesScreen(),
+    SettingsScreen(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) {
+          if (index == 2) {
+            Navigator.of(context).pushNamed('/scanner');
+            return;
+          }
+          setState(() => _currentIndex = index);
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.casino_outlined),
+            selectedIcon: Icon(Icons.casino),
+            label: 'Juegos',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.qr_code_scanner),
+            label: 'Escanear',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.collections_bookmark_outlined),
+            selectedIcon: Icon(Icons.collections_bookmark),
+            label: 'Colecciones',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Más',
+          ),
+        ],
+      ),
+    );
+  }
+}

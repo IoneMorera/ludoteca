@@ -47,7 +47,8 @@ class JuegoController extends Controller
             $query->where('nombre', 'like', '%' . $request->buscar . '%');
         }
 
-        $juegos = $query->orderBy('nombre')->paginate(15);
+        $perPage = min((int) $request->input('per_page', 15), 1000);
+        $juegos = $query->orderBy('nombre')->paginate($perPage);
 
         return response()->json($juegos);
     }

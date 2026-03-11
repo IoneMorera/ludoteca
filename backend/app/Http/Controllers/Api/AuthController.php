@@ -86,4 +86,34 @@ class AuthController extends Controller
             'user' => $request->user()->only('id', 'name', 'email', 'bgg_username'),
         ]);
     }
+
+    public function mobileLogin(Request $request): JsonResponse
+    {
+        $credentials = $request->validate([
+            'email' => 'required|email',
+            'password' => 'required',
+        ]);
+
+        if (!Auth::attempt($credentials)) {
+            return response()->json([
+                'message' => 'Credenciales incorrectas.',
+            ], 422);
+        }
+
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $token = $user->createToken('mobile')->plainTextToken;
+
+        return response()->json([
+            'user' => $user->only('id', 'name', 'email', 'bgg_username'),
+            'token' => $token,
+        ]);
+    }
+
+    public function mobileLogout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json(null, 204);
+    }
 }

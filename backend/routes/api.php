@@ -18,10 +18,12 @@ use Illuminate\Support\Facades\Route;
 // --- Rutas públicas (central) ---
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
+Route::post('mobile/login', [AuthController::class, 'mobileLogin']);
 
 // --- Rutas protegidas ---
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('logout', [AuthController::class, 'logout']);
+    Route::post('mobile/logout', [AuthController::class, 'mobileLogout']);
     Route::get('user', [AuthController::class, 'user']);
 
     // --- Rutas con tenancy (BBDD del usuario) ---
