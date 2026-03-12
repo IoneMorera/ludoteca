@@ -1,13 +1,13 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: ludoteca-mysql-prod
-    restart: unless-stopped
+    container_name: ludoteca-mysql
+    restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-LudotecaSecure2026!}
+      MYSQL_DATABASE: ludoteca
     volumes:
-      - mysql-data:/var/lib/mysql
+      - ludoteca-mysql-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -18,38 +18,46 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
-    container_name: ludoteca-backend-prod
-    restart: unless-stopped
-    env_file: .env.production
+    container_name: ludoteca-backend
+    restart: always
+    working_dir: /app
     volumes:
-      - backend-storage:/app/storage/app/public
+      - ./backend:/app
+      - backend-vendor:/app/vendor
+      - backend-bootstrap-cache:/app/bootstrap/cache
     depends_on:
       mysql:
         condition: service_healthy
 
-  caddy:
+  frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile.build
       args:
-        VITE_API_URL: ${VITE_API_URL}
-        VITE_BACKEND_URL: ${VITE_BACKEND_URL}
-    container_name: ludoteca-caddy-prod
-    restart: unless-stopped
+        VITE_API_URL: ${VITE_API_URL:-http://localhost/api}
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost}
+    container_name: ludoteca-frontend
+    restart: "no"
+    volumes:
+      - frontend-dist:/srv/frontend
+
+  nginx:
+    image: nginx:alpine
+    container_name: ludoteca-nginx
+    restart: always
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy-data:/data
-      - caddy-config:/config
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
+      - ./backend:/app
+      - ./backend/docker/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - backend-vendor:/app/vendor
+      - frontend-dist:/srv/frontend:ro
     depends_on:
       - backend
+      - frontend
 
 volumes:
-  mysql-data:
-  backend-storage:
-  caddy-data:
-  caddy-config:
+  ludoteca-mysql-data:
+  backend-vendor:
+  backend-bootstrap-cache:
+  frontend-dist:
