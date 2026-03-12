@@ -349,8 +349,141 @@ sudo certbot certonly --standalone -d tudominio.com --agree-tos -m tu@email.com
 
 ### 4. Actualizar Nginx para HTTPS
 
-Edita `backend/docker/nginx.prod.conf` para anadir el bloque HTTPS (443) y redireccion HTTP->HTTPS.
-Monta los certificados como volumenes en el contenedor Nginx del docker-compose.
+#### 4.1 - Montar los certificados en el contenedor Nginx
+
+Certbot guarda los certificados en `/etc/letsencrypt/` de la VM. Necesitamos que el contenedor
+Nginx pueda acceder a ellos. Para eso, anade estos volumenes al servicio `nginx` en
+`docker-compose.prod.yml`:
+
+```yaml
+  nginx:
+    image: nginx:alpine
+    container_name: ludoteca-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"    # <-- ANADIR este puerto
+    volumes:
+      - ./backend:/app
+      - ./backend/docker/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - backend-vendor:/app/vendor
+      - frontend-dist:/srv/frontend:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro          # <-- ANADIR: certificados SSL
+      - /var/lib/letsencrypt:/var/lib/letsencrypt:ro  # <-- ANADIR: datos de Certbot
+    depends_on:
+      - backend
+      - frontend
+```
+
+Los cambios son:
+- Anadir el puerto `443:443` en `ports`
+- Anadir dos volumenes que montan las carpetas de Certbot en modo solo-lectura (`:ro`)
+
+#### 4.2 - Actualizar la configuracion de Nginx
+
+Edita `backend/docker/nginx.prod.conf` y sustituye TODO el contenido por esto
+(reemplazando `tudominio.com` por tu dominio real):
+
+```nginx
+# Redireccion HTTP -> HTTPS
+server {
+    listen 80;
+    server_name tudominio.com;
+    return 301 https://$host$request_uri;
+}
+
+# Servidor HTTPS
+server {
+    listen 443 ssl;
+    server_name tudominio.com;
+
+    # Certificados SSL (Let's Encrypt)
+    ssl_certificate /etc/letsencrypt/live/tudominio.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tudominio.com/privkey.pem;
+
+    # Configuracion SSL recomendada
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    root /app/public;
+    index index.php;
+    client_max_body_size 20M;
+
+    # Frontend Vue.js
+    location / {
+        root /srv/frontend;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API Laravel
+    location /api {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Sanctum
+    location /sanctum {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Storage publico
+    location /storage {
+        alias /app/storage/app/public;
+        expires 30d;
+        access_log off;
+        try_files $uri =404;
+    }
+
+    # PHP-FPM
+    location ~ \.php$ {
+        root /app/public;
+        fastcgi_pass backend:9000;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+        fastcgi_read_timeout 300;
+    }
+
+    # Cache de assets
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|webp|woff|woff2|ttf|eot)$ {
+        root /srv/frontend;
+        expires 30d;
+        access_log off;
+        try_files $uri /app/public/$uri =404;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}
+```
+
+#### 4.3 - Reiniciar para aplicar
+
+```bash
+cd ~/ludoteca
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Verifica que funciona abriendo `https://tudominio.com` en el navegador.
+Deberia aparecer el candado verde de HTTPS.
+
+#### 4.4 - Renovacion automatica del certificado
+
+Los certificados de Let's Encrypt caducan cada 90 dias. Configura un cron para renovar automaticamente:
+
+```bash
+sudo crontab -e
+```
+
+Anade esta linea al final:
+```
+0 3 * * 1 certbot renew --pre-hook "docker compose -f /home/ubuntu/ludoteca/docker-compose.prod.yml stop nginx" --post-hook "docker compose -f /home/ubuntu/ludoteca/docker-compose.prod.yml start nginx" >> /var/log/certbot-renew.log 2>&1
+```
+
+Esto intenta renovar cada lunes a las 3:00 AM. Solo renueva si el certificado esta
+proximo a caducar (menos de 30 dias).
 
 ### 5. Actualizar variables
 
