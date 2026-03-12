@@ -47,6 +47,12 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Ludoteca necesita acceso a la camara para escanear codigos de barras y reconocer juegos</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ludoteca necesita acceso a la galeria para seleccionar fotos de juegos</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Ludoteca necesita guardar fotos en tu galeria</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

@@ -328,8 +328,10 @@ jobs:
 
 ## Permisos iOS necesarios (Info.plist)
 
-El fichero `mobile/ios/Runner/Info.plist` necesita estas descripciones de permisos
-para que Apple permita el uso de camara, galeria, etc. Si no estan, hay que anadirlas:
+El fichero `mobile/ios/Runner/Info.plist` necesita descripciones de permisos
+para que Apple permita el uso de camara, galeria, etc.
+
+Estos permisos ya estan configurados en el proyecto:
 
 ```xml
 <key>NSCameraUsageDescription</key>
@@ -340,5 +342,4 @@ para que Apple permita el uso de camara, galeria, etc. Si no estan, hay que anad
 <string>Ludoteca necesita guardar fotos en tu galeria</string>
 ```
 
-> Estos permisos se verificaran cuando compile el proyecto en el Mac. Si ya estan
-> configurados por los plugins de Flutter, no hace falta anadirlos manualmente.
+> No hace falta anadirlos manualmente, ya se incluyeron en `Info.plist`.
