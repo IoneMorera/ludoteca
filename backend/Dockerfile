@@ -25,7 +25,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Extensiones PHP
-RUN docker-php-ext-install pdo pdo_mysql zip
+RUN apt-get update && apt-get install -y libpq-dev \
+    && docker-php-ext-install pdo pdo_pgsql zip
 
 # Opcache para producción
 RUN echo "opcache.enable=1\n\
