@@ -19,6 +19,8 @@ services:
     build: ./backend
     container_name: ludoteca-backend
     working_dir: /app
+    expose:
+      - "9000"
     volumes:
       - ./backend:/app
       - backend-vendor:/app/vendor
