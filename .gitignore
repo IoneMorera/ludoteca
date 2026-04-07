@@ -16,3 +16,13 @@ ludoteca-mysql-data/
 
 # Production secrets
 #.env.production
+
+# Archivos locales para Docker
+docker-compose.yml
+docker/*.env
+docker/config/
+.env
+Dockerfile
+database.php 
+entrypoint.sh
+nginx.conf
