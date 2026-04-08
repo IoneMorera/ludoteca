@@ -11,7 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchUser() {
     try {
-      const { data } = await api.get('/user')
+      const { data } = await api.get('/api/user')
       user.value = data.user
     } catch {
       user.value = null
@@ -39,7 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
     try {
       await getCsrfCookie()
-      const { data } = await api.post('/register', datos)
+      const { data } = await api.post('/api/register', datos)
       user.value = data.user
       return data
     } catch (e) {
@@ -52,7 +52,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      await api.post('/logout')
+      await api.post('/api/logout')
     } finally {
       user.value = null
     }
