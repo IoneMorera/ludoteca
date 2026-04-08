@@ -59,7 +59,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function getCsrfCookie() {
-    const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const backendBase = import.meta.env.VITE_URL || 'http://localhost:8000'
     await api.get('/sanctum/csrf-cookie', {
       baseURL: backendBase,
     })
