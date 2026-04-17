@@ -1,0 +1,18 @@
+# ============================================
+# REDIRECCIONES PARA PROXY API → RAILWAY
+# ============================================
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://ludoteca.up.railway.app/api/:splat"
+  status = 200
+  force = true
+
+# ============================================
+# SPA FALLBACK (Vue Router)
+# ============================================
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
