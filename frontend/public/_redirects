@@ -1,2 +1,9 @@
+# 🔥 NO CACHEAR sanctum/csrf-cookie
+/sanctum/csrf-cookie  https://ludoteca.up.railway.app/sanctum/csrf-cookie  200!
+  Cache-Control: no-store
+
+# 🔥 Proxy API
 /api/*  https://ludoteca.up.railway.app/api/:splat  200!
-/*      /index.html                                 200
+
+# 🔥 SPA fallback
+/*      /index.html  200
