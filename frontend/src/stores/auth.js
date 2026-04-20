@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '../api'
 
+const TOKEN_KEY = 'auth_token'
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const loading = ref(false)
@@ -9,12 +11,25 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!user.value)
 
+  function setToken(token) {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token)
+    } else {
+      localStorage.removeItem(TOKEN_KEY)
+    }
+  }
+
   async function fetchUser() {
+    if (!localStorage.getItem(TOKEN_KEY)) {
+      user.value = null
+      return
+    }
     try {
       const { data } = await api.get('/api/user')
       user.value = data.user
     } catch {
       user.value = null
+      setToken(null)
     }
   }
 
@@ -22,8 +37,8 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     error.value = null
     try {
-      await getCsrfCookie()
       const { data } = await api.post('/api/login', credentials)
+      setToken(data.token)
       user.value = data.user
       return data
     } catch (e) {
@@ -38,8 +53,8 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     error.value = null
     try {
-      await getCsrfCookie()
       const { data } = await api.post('/api/register', datos)
+      setToken(data.token)
       user.value = data.user
       return data
     } catch (e) {
@@ -55,12 +70,8 @@ export const useAuthStore = defineStore('auth', () => {
       await api.post('/api/logout')
     } finally {
       user.value = null
+      setToken(null)
     }
-  }
-
-  async function getCsrfCookie() {
-    //const backendBase = import.meta.env.VITE_URL || 'http://localhost:8000'
-    await api.get('/sanctum/csrf-cookie')
   }
 
   return {
