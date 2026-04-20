@@ -78,10 +78,10 @@ class AuthController extends Controller
         }
 
         try {
-            Auth::login($user);
-            Log::debug('register: user logged in', ['user_id' => $user->id]);
+            $token = $user->createToken('web')->plainTextToken;
+            Log::debug('register: token created', ['user_id' => $user->id]);
         } catch (\Throwable $e) {
-            Log::error('register: failed to login user after registration', [
+            Log::error('register: failed to create token after registration', [
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -91,6 +91,7 @@ class AuthController extends Controller
 
         return response()->json([
             'user' => $user->only('id', 'name', 'email', 'bgg_username'),
+            'token' => $token,
         ], 201);
     }
 
@@ -101,27 +102,25 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        if (!Auth::attempt($credentials, $request->boolean('remember'))) {
+        if (!Auth::attempt($credentials)) {
             return response()->json([
                 'message' => 'Credenciales incorrectas.',
             ], 422);
         }
 
-        $request->session()->regenerate();
-
         /** @var \App\Models\User $user */
         $user = Auth::user();
+        $token = $user->createToken('web')->plainTextToken;
 
         return response()->json([
             'user' => $user->only('id', 'name', 'email', 'bgg_username'),
+            'token' => $token,
         ]);
     }
 
     public function logout(Request $request): JsonResponse
     {
-        Auth::guard('web')->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        $request->user()->currentAccessToken()->delete();
 
         return response()->json(null, 204);
     }
