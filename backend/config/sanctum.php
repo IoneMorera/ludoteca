@@ -21,7 +21,8 @@ return [
         Sanctum::currentApplicationUrlWithPort(),
         // Sanctum::currentRequestHost(),
     ))),
-
+    
+    'domain' => null,
     /*
     |--------------------------------------------------------------------------
     | Sanctum Guards
