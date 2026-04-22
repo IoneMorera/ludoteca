@@ -106,67 +106,82 @@ class BggController extends Controller
             'bgg_username' => 'nullable|string',
         ]);
 
-        $categoria = Categoria::firstOrCreate(
-            ['nombre' => 'Importado BGG'],
-            ['descripcion' => 'Juegos importados desde BoardGameGeek']
-        );
+        try {
+            $categoria = Categoria::firstOrCreate(
+                ['nombre' => 'Importado BGG'],
+                ['descripcion' => 'Juegos importados desde BoardGameGeek']
+            );
 
-        $propietario = $this->resolveOwner($request->input('bgg_username'));
+            $propietario = $this->resolveOwner($request->input('bgg_username'));
 
-        $games = $request->input('games');
-        $bggIds = array_map(fn ($g) => (int) $g['bgg_id'], $games);
+            $games = $request->input('games');
+            $bggIds = array_values(array_unique(array_map(fn ($g) => (int) $g['bgg_id'], $games)));
 
-        $existingBggIds = Juego::whereIn('bgg_id', $bggIds)->pluck('bgg_id')->all();
-        $existingBggIdsSet = array_flip($existingBggIds);
+            $existingBggIds = Juego::whereIn('bgg_id', $bggIds)->pluck('bgg_id')->all();
+            $existingBggIdsSet = array_flip($existingBggIds);
 
-        $now = now();
-        $rowsToInsert = [];
-        $imagesPending = [];
+            $now = now();
+            $rowsByBggId = [];
+            $imagesPending = [];
 
-        foreach ($games as $game) {
-            $bggId = (int) $game['bgg_id'];
-            if (isset($existingBggIdsSet[$bggId])) {
-                continue;
-            }
+            foreach ($games as $game) {
+                $bggId = (int) $game['bgg_id'];
+                if (isset($existingBggIdsSet[$bggId]) || isset($rowsByBggId[$bggId])) {
+                    continue;
+                }
 
-            $rowsToInsert[] = [
-                'nombre' => $game['name'],
-                'num_jugadores_min' => $game['min_players'] ?? null,
-                'num_jugadores_max' => $game['max_players'] ?? null,
-                'categoria_id' => $categoria->id,
-                'estado' => 'disponible',
-                'bgg_id' => $bggId,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-
-            $imageUrl = $this->normalizeImageUrl($game['image'] ?? $game['thumbnail'] ?? null);
-            if ($imageUrl) {
-                $imagesPending[] = [
+                $rowsByBggId[$bggId] = [
+                    'nombre' => $game['name'],
+                    'num_jugadores_min' => $game['min_players'] ?? null,
+                    'num_jugadores_max' => $game['max_players'] ?? null,
+                    'categoria_id' => $categoria->id,
+                    'estado' => 'disponible',
                     'bgg_id' => $bggId,
-                    'image_url' => $imageUrl,
+                    'created_at' => $now,
+                    'updated_at' => $now,
                 ];
+
+                $imageUrl = $this->normalizeImageUrl($game['image'] ?? $game['thumbnail'] ?? null);
+                if ($imageUrl) {
+                    $imagesPending[] = [
+                        'bgg_id' => $bggId,
+                        'image_url' => $imageUrl,
+                    ];
+                }
             }
-        }
 
-        $imported = count($rowsToInsert);
-        $skipped = count($existingBggIds);
+            $rowsToInsert = array_values($rowsByBggId);
+            $imported = count($rowsToInsert);
+            $skipped = count($existingBggIds);
 
-        if ($imported > 0) {
-            foreach (array_chunk($rowsToInsert, 200) as $chunk) {
-                Juego::insert($chunk);
+            if ($imported > 0) {
+                foreach (array_chunk($rowsToInsert, 100) as $chunk) {
+                    Juego::insert($chunk);
+                }
             }
-        }
 
-        if ($propietario) {
-            $this->attachPropietarioBulk($propietario->id, $bggIds);
-        }
+            if ($propietario) {
+                $this->attachPropietarioBulk($propietario->id, $bggIds);
+            }
 
-        return response()->json([
-            'imported' => $imported,
-            'skipped' => $skipped,
-            'images_pending' => $imagesPending,
-        ]);
+            return response()->json([
+                'imported' => $imported,
+                'skipped' => $skipped,
+                'images_pending' => $imagesPending,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('BGG import failed', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 5),
+            ]);
+
+            return response()->json([
+                'message' => 'Error al importar: ' . $e->getMessage(),
+                'exception' => class_basename($e),
+            ], 500);
+        }
     }
 
     public function importExpansions(Request $request): JsonResponse
@@ -178,94 +193,113 @@ class BggController extends Controller
             'bgg_username' => 'nullable|string',
         ]);
 
-        $apiKey = config('services.bgg.api_key');
-        $categoria = Categoria::firstOrCreate(
-            ['nombre' => 'Importado BGG'],
-            ['descripcion' => 'Juegos importados desde BoardGameGeek']
-        );
+        try {
+            $apiKey = config('services.bgg.api_key');
+            $categoria = Categoria::firstOrCreate(
+                ['nombre' => 'Importado BGG'],
+                ['descripcion' => 'Juegos importados desde BoardGameGeek']
+            );
 
-        $propietario = $this->resolveOwner($request->input('bgg_username'));
+            $propietario = $this->resolveOwner($request->input('bgg_username'));
 
-        $expansions = $request->input('expansions');
-        $expansionBggIds = array_map(fn ($e) => (int) $e['bgg_id'], $expansions);
+            $expansions = $request->input('expansions');
+            $expansionBggIds = array_values(array_unique(array_map(fn ($e) => (int) $e['bgg_id'], $expansions)));
 
-        $existingBggIds = Juego::whereIn('bgg_id', $expansionBggIds)->pluck('bgg_id')->all();
-        $existingSet = array_flip($existingBggIds);
+            $existingBggIds = Juego::whereIn('bgg_id', $expansionBggIds)->pluck('bgg_id')->all();
+            $existingSet = array_flip($existingBggIds);
 
-        $toResolve = array_filter($expansionBggIds, fn ($id) => !isset($existingSet[$id]));
-        $baseIdMap = $this->findBaseGamesBggIds($toResolve, $apiKey);
+            $toResolve = array_values(array_filter($expansionBggIds, fn ($id) => !isset($existingSet[$id])));
+            $baseIdMap = $this->findBaseGamesBggIds($toResolve, $apiKey);
 
-        $baseBggIds = array_values(array_unique(array_filter($baseIdMap)));
-        $baseGames = Juego::whereIn('bgg_id', $baseBggIds)->pluck('id', 'bgg_id')->all();
+            $baseBggIds = array_values(array_unique(array_filter($baseIdMap)));
+            $baseGames = Juego::whereIn('bgg_id', $baseBggIds)->pluck('id', 'bgg_id')->all();
 
-        $now = now();
-        $rowsToInsert = [];
-        $imagesPending = [];
-        $omitted = [];
-        $attachBggIds = [];
+            $now = now();
+            $rowsByBggId = [];
+            $imagesPending = [];
+            $omitted = [];
+            $attachBggIds = [];
 
-        foreach ($expansions as $expansion) {
-            $bggId = (int) $expansion['bgg_id'];
+            foreach ($expansions as $expansion) {
+                $bggId = (int) $expansion['bgg_id'];
 
-            if (isset($existingSet[$bggId])) {
-                $attachBggIds[] = $bggId;
-                continue;
-            }
+                if (isset($existingSet[$bggId])) {
+                    $attachBggIds[] = $bggId;
+                    continue;
+                }
 
-            $baseBggId = $baseIdMap[$bggId] ?? null;
-            if (!$baseBggId) {
-                $omitted[] = $expansion['name'];
-                continue;
-            }
+                if (isset($rowsByBggId[$bggId])) {
+                    continue;
+                }
 
-            $baseLocalId = $baseGames[$baseBggId] ?? null;
-            if (!$baseLocalId) {
-                $omitted[] = $expansion['name'] . ' (juego base BGG #' . $baseBggId . ' no encontrado)';
-                continue;
-            }
+                $baseBggId = $baseIdMap[$bggId] ?? null;
+                if (!$baseBggId) {
+                    $omitted[] = $expansion['name'];
+                    continue;
+                }
 
-            $rowsToInsert[] = [
-                'nombre' => $expansion['name'],
-                'bgg_id' => $bggId,
-                'num_jugadores_min' => $expansion['min_players'] ?? null,
-                'num_jugadores_max' => $expansion['max_players'] ?? null,
-                'categoria_id' => $categoria->id,
-                'estado' => 'disponible',
-                'juego_base_id' => $baseLocalId,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-            $attachBggIds[] = $bggId;
+                $baseLocalId = $baseGames[$baseBggId] ?? null;
+                if (!$baseLocalId) {
+                    $omitted[] = $expansion['name'] . ' (juego base BGG #' . $baseBggId . ' no encontrado)';
+                    continue;
+                }
 
-            $imageUrl = $this->normalizeImageUrl($expansion['image'] ?? $expansion['thumbnail'] ?? null);
-            if ($imageUrl) {
-                $imagesPending[] = [
+                $rowsByBggId[$bggId] = [
+                    'nombre' => $expansion['name'],
                     'bgg_id' => $bggId,
-                    'image_url' => $imageUrl,
+                    'num_jugadores_min' => $expansion['min_players'] ?? null,
+                    'num_jugadores_max' => $expansion['max_players'] ?? null,
+                    'categoria_id' => $categoria->id,
+                    'estado' => 'disponible',
+                    'juego_base_id' => $baseLocalId,
+                    'created_at' => $now,
+                    'updated_at' => $now,
                 ];
+                $attachBggIds[] = $bggId;
+
+                $imageUrl = $this->normalizeImageUrl($expansion['image'] ?? $expansion['thumbnail'] ?? null);
+                if ($imageUrl) {
+                    $imagesPending[] = [
+                        'bgg_id' => $bggId,
+                        'image_url' => $imageUrl,
+                    ];
+                }
             }
-        }
 
-        $imported = count($rowsToInsert);
-        $skipped = count($existingBggIds);
+            $rowsToInsert = array_values($rowsByBggId);
+            $imported = count($rowsToInsert);
+            $skipped = count($existingBggIds);
 
-        if ($imported > 0) {
-            foreach (array_chunk($rowsToInsert, 200) as $chunk) {
-                Juego::insert($chunk);
+            if ($imported > 0) {
+                foreach (array_chunk($rowsToInsert, 100) as $chunk) {
+                    Juego::insert($chunk);
+                }
             }
-        }
 
-        if ($propietario && !empty($attachBggIds)) {
-            $this->attachPropietarioBulk($propietario->id, $attachBggIds);
-        }
+            if ($propietario && !empty($attachBggIds)) {
+                $this->attachPropietarioBulk($propietario->id, $attachBggIds);
+            }
 
-        return response()->json([
-            'imported' => $imported,
-            'skipped' => $skipped,
-            'omitted' => $omitted,
-            'omitted_count' => count($omitted),
-            'images_pending' => $imagesPending,
-        ]);
+            return response()->json([
+                'imported' => $imported,
+                'skipped' => $skipped,
+                'omitted' => $omitted,
+                'omitted_count' => count($omitted),
+                'images_pending' => $imagesPending,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('BGG import expansions failed', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 5),
+            ]);
+
+            return response()->json([
+                'message' => 'Error al importar expansiones: ' . $e->getMessage(),
+                'exception' => class_basename($e),
+            ], 500);
+        }
     }
 
     public function importImages(Request $request): JsonResponse
