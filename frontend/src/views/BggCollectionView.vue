@@ -11,6 +11,8 @@ import ErrorState from '../components/ErrorState.vue'
 const route = useRoute()
 const router = useRouter()
 
+const IMAGE_BATCH_SIZE = 10
+
 const games = ref([])
 const loading = ref(true)
 const error = ref(null)
@@ -19,6 +21,7 @@ const importing = ref(false)
 const importResult = ref(null)
 const importingExpansions = ref(false)
 const expansionResult = ref(null)
+const imageProgress = ref(null)
 const username = computed(() => route.params.username)
 const subtitle = computed(
   () => `Juegos del usuario ${username.value} en BoardGameGeek`,
@@ -44,15 +47,61 @@ async function fetchCollection() {
   }
 }
 
+async function downloadPendingImages(pending) {
+  if (!pending || pending.length === 0) {
+    return { succeeded: 0, failed: 0, total: 0 }
+  }
+
+  let succeeded = 0
+  let failed = 0
+  imageProgress.value = { done: 0, total: pending.length, succeeded: 0, failed: 0 }
+
+  for (let i = 0; i < pending.length; i += IMAGE_BATCH_SIZE) {
+    const batch = pending.slice(i, i + IMAGE_BATCH_SIZE)
+    try {
+      const { data } = await api.post('/bgg/import-images', { images: batch })
+      succeeded += data.succeeded || 0
+      failed += data.failed || 0
+    } catch (e) {
+      console.error('Image batch error:', e?.response?.data || e)
+      failed += batch.length
+    }
+    imageProgress.value = {
+      done: Math.min(i + batch.length, pending.length),
+      total: pending.length,
+      succeeded,
+      failed,
+    }
+  }
+
+  return { succeeded, failed, total: pending.length }
+}
+
 async function importGames() {
   if (importing.value || games.value.length === 0) return
   importing.value = true
   importResult.value = null
+  imageProgress.value = null
   try {
     const { data } = await api.post('/bgg/import', { games: games.value, bgg_username: username.value })
-    importResult.value = data
-  } catch {
-    importResult.value = { error: 'Error al importar los juegos' }
+    const pending = data.images_pending || []
+    importResult.value = {
+      imported: data.imported,
+      skipped: data.skipped,
+      imagesTotal: pending.length,
+    }
+    if (pending.length > 0) {
+      const imgRes = await downloadPendingImages(pending)
+      importResult.value = {
+        ...importResult.value,
+        imagesOk: imgRes.succeeded,
+        imagesFail: imgRes.failed,
+      }
+    }
+  } catch (e) {
+    importResult.value = {
+      error: e.response?.data?.message || e.message || 'Error al importar los juegos',
+    }
   } finally {
     importing.value = false
   }
@@ -62,6 +111,7 @@ async function importExpansions() {
   if (importingExpansions.value) return
   importingExpansions.value = true
   expansionResult.value = null
+  imageProgress.value = null
   try {
     const { data: expData } = await api.get(`/bgg/expansions/${username.value}`)
     if (!expData.expansions || expData.expansions.length === 0) {
@@ -69,9 +119,26 @@ async function importExpansions() {
       return
     }
     const { data } = await api.post('/bgg/import-expansions', { expansions: expData.expansions, bgg_username: username.value })
-    expansionResult.value = data
-  } catch {
-    expansionResult.value = { error: 'Error al importar expansiones' }
+    const pending = data.images_pending || []
+    expansionResult.value = {
+      imported: data.imported,
+      skipped: data.skipped,
+      omitted: data.omitted,
+      omitted_count: data.omitted_count,
+      imagesTotal: pending.length,
+    }
+    if (pending.length > 0) {
+      const imgRes = await downloadPendingImages(pending)
+      expansionResult.value = {
+        ...expansionResult.value,
+        imagesOk: imgRes.succeeded,
+        imagesFail: imgRes.failed,
+      }
+    }
+  } catch (e) {
+    expansionResult.value = {
+      error: e.response?.data?.message || e.message || 'Error al importar expansiones',
+    }
   } finally {
     importingExpansions.value = false
   }
@@ -120,10 +187,16 @@ onMounted(fetchCollection)
       class="import-feedback"
       :class="importResult.error ? 'import-error' : 'import-success'"
     >
-      <template v-if="importResult.error">{{ importResult.error }}</template>
-      <template v-else>
-        ✔ {{ importResult.imported }} juego(s) importado(s), {{ importResult.skipped }} ya existían en la BBDD
-      </template>
+      <div>
+        <template v-if="importResult.error">{{ importResult.error }}</template>
+        <template v-else>
+          ✔ {{ importResult.imported }} juego(s) importado(s), {{ importResult.skipped }} ya existían en la BBDD
+          <template v-if="importResult.imagesTotal > 0 && importResult.imagesOk !== undefined">
+            <br/>🖼 Imágenes: {{ importResult.imagesOk }}/{{ importResult.imagesTotal }} descargadas
+            <template v-if="importResult.imagesFail > 0"> · {{ importResult.imagesFail }} fallaron</template>
+          </template>
+        </template>
+      </div>
       <button class="dismiss-btn" @click="importResult = null">✕</button>
     </div>
 
@@ -139,6 +212,10 @@ onMounted(fetchCollection)
         </template>
         <template v-else>
           ✔ {{ expansionResult.imported }} expansión(es) importada(s), {{ expansionResult.skipped }} ya existían
+          <template v-if="expansionResult.imagesTotal > 0 && expansionResult.imagesOk !== undefined">
+            <br/>🖼 Imágenes: {{ expansionResult.imagesOk }}/{{ expansionResult.imagesTotal }} descargadas
+            <template v-if="expansionResult.imagesFail > 0"> · {{ expansionResult.imagesFail }} fallaron</template>
+          </template>
           <template v-if="expansionResult.omitted_count > 0">
             <br/>⚠ {{ expansionResult.omitted_count }} omitida(s) por no tener juego base en la ludoteca:
             <ul class="omitted-list">
@@ -148,6 +225,13 @@ onMounted(fetchCollection)
         </template>
       </div>
       <button class="dismiss-btn" @click="expansionResult = null">✕</button>
+    </div>
+
+    <div v-if="imageProgress && (importing || importingExpansions)" class="import-feedback import-progress">
+      <div>
+        Descargando imágenes: {{ imageProgress.done }}/{{ imageProgress.total }}
+        <template v-if="imageProgress.failed > 0"> · {{ imageProgress.failed }} fallidas</template>
+      </div>
     </div>
 
     <FilterBar v-if="!loading && !error">
@@ -258,6 +342,11 @@ onMounted(fetchCollection)
 .import-error {
   background: #ffebee;
   color: #c62828;
+}
+
+.import-progress {
+  background: #e3f2fd;
+  color: #1565c0;
 }
 
 .dismiss-btn {
