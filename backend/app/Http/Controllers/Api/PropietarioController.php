@@ -70,14 +70,16 @@ class PropietarioController extends Controller
     public function coleccion(Propietario $propietario): JsonResponse
     {
         $juegos = $propietario->juegos()
-            ->with(['categoria', 'ubicacion.mueble.habitacion', 'propietarios', 'expansiones', 'juegoBase'])
-            ->whereNull('juego_base_id')
+            ->with([
+                'categoria',
+                'ubicacion.mueble.habitacion',
+                'propietarios',
+                'expansiones.propietarios',
+                'juegoBase',
+            ])
+            ->whereNull('juegos.juego_base_id')
             ->orderBy('nombre')
-            ->get()
-            ->map(function ($juego) {
-                $juego->load('expansiones.propietarios');
-                return $juego;
-            });
+            ->get();
 
         return response()->json([
             'propietario' => $propietario,
