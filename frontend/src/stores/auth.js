@@ -25,7 +25,7 @@ export const useAuthStore = defineStore('auth', () => {
       return
     }
     try {
-      const { data } = await api.get('/api/user')
+      const { data } = await api.get('/user')
       user.value = data.user
     } catch {
       user.value = null
@@ -37,7 +37,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     error.value = null
     try {
-      const { data } = await api.post('/api/login', credentials)
+      const { data } = await api.post('/login', credentials)
       setToken(data.token)
       user.value = data.user
       return data
@@ -53,7 +53,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     error.value = null
     try {
-      const { data } = await api.post('/api/register', datos)
+      const { data } = await api.post('/register', datos)
       setToken(data.token)
       user.value = data.user
       return data
@@ -67,7 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      await api.post('/api/logout')
+      await api.post('/logout')
     } finally {
       user.value = null
       setToken(null)
