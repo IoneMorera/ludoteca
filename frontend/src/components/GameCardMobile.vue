@@ -1,10 +1,10 @@
 <script setup>
 import StatusBadge from './StatusBadge.vue'
 import { formatDate } from '../utils/format'
+import { resolveImageUrl } from '../utils/images'
 
 const props = defineProps({
   juego: { type: Object, required: true },
-  backendUrl: { type: String, default: '' },
   showJugadores: { type: Boolean, default: false },
   showFechaCompra: { type: Boolean, default: false },
   showUbicacion: { type: Boolean, default: true },
@@ -26,7 +26,7 @@ function esCompartido(juego) {
     <div class="gcm__header">
       <img
         v-if="juego.imagen"
-        :src="backendUrl + juego.imagen"
+        :src="resolveImageUrl(juego.imagen)"
         :alt="juego.nombre"
         class="gcm__thumb"
       />

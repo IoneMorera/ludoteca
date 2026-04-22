@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { formatDate } from '../utils/format'
+import { resolveImageUrl } from '../utils/images'
 import { useJuegosStore } from '../stores/juegos'
 import { useCategoriasStore } from '../stores/categorias'
 import { usePropietariosStore } from '../stores/propietarios'
@@ -14,7 +15,6 @@ const router = useRouter()
 const juegosStore = useJuegosStore()
 const categoriasStore = useCategoriasStore()
 const propietariosStore = usePropietariosStore()
-const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
 const mostrarFormulario = ref(false)
 const form = ref({})
@@ -78,7 +78,7 @@ async function guardar() {
       <div class="detalle-header">
         <img
           v-if="juego.imagen"
-          :src="backendUrl + juego.imagen"
+          :src="resolveImageUrl(juego.imagen)"
           :alt="juego.nombre"
           class="detalle-cover"
         />
