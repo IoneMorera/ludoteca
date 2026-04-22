@@ -37,6 +37,7 @@ Route::middleware('auth:sanctum')->group(function () {
             ]);
         });
 
+        Route::get('bgg/search', [BggController::class, 'search']);
         Route::get('bgg/collection/{username}', [BggController::class, 'collection']);
         Route::get('bgg/expansions/{username}', [BggController::class, 'expansions']);
         Route::get('bgg/plays/{username}', [BggController::class, 'plays']);

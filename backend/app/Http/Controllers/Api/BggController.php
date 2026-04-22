@@ -501,6 +501,83 @@ class BggController extends Controller
         return $map;
     }
 
+    public function search(Request $request): JsonResponse
+    {
+        $query = trim((string) $request->input('query', ''));
+
+        if ($query === '') {
+            return response()->json(['query' => '', 'games' => []]);
+        }
+
+        // Si parece un código de barras (solo dígitos, 8-14 caracteres), BGG no
+        // lo soporta de forma nativa: devolvemos vacío para que el cliente
+        // pueda ofrecer búsqueda manual.
+        if (preg_match('/^\d{8,14}$/', $query)) {
+            return response()->json([
+                'query' => $query,
+                'games' => [],
+                'reason' => 'barcode_unsupported',
+            ]);
+        }
+
+        // Limitamos la longitud: OCR puede devolver texto muy ruidoso.
+        if (mb_strlen($query) > 120) {
+            $query = mb_substr($query, 0, 120);
+        }
+
+        $apiKey = config('services.bgg.api_key');
+        $headers = [
+            'Accept' => 'application/xml',
+            'User-Agent' => self::IMAGE_USER_AGENT,
+        ];
+        if ($apiKey) {
+            $headers['Authorization'] = 'Bearer ' . $apiKey;
+        }
+
+        try {
+            $response = Http::timeout(30)->withHeaders($headers)
+                ->get(self::BGG_API_URL . '/search', [
+                    'query' => $query,
+                    'type' => 'boardgame,boardgameexpansion',
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('BGG search request failed', [
+                'query' => $query,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'No se pudo contactar con BGG.',
+                'games' => [],
+            ], 502);
+        }
+
+        if ($response->failed()) {
+            return response()->json([
+                'message' => 'Error al buscar en BGG.',
+                'games' => [],
+            ], $response->status());
+        }
+
+        $games = $this->parseSearchXml($response->body());
+
+        if (!empty($games)) {
+            $topIds = array_slice(array_map(fn ($g) => $g['bgg_id'], $games), 0, 10);
+            $details = $this->fetchThingDetails($topIds, $apiKey);
+            foreach ($games as &$game) {
+                if (isset($details[$game['bgg_id']])) {
+                    $game = array_merge($game, $details[$game['bgg_id']]);
+                }
+            }
+            unset($game);
+        }
+
+        return response()->json([
+            'query' => $query,
+            'total' => count($games),
+            'games' => $games,
+        ]);
+    }
+
     public function plays(string $username): JsonResponse
     {
         $apiKey = config('services.bgg.api_key');
@@ -617,6 +694,114 @@ class BggController extends Controller
             'total' => $total,
             'plays' => $plays,
         ];
+    }
+
+    private function parseSearchXml(string $xml): array
+    {
+        $data = @simplexml_load_string($xml);
+
+        if ($data === false || !isset($data->item)) {
+            return [];
+        }
+
+        $games = [];
+        $seen = [];
+
+        foreach ($data->item as $item) {
+            $bggId = (int) ($item['id'] ?? 0);
+            if (!$bggId || isset($seen[$bggId])) {
+                continue;
+            }
+            $seen[$bggId] = true;
+
+            $name = (string) ($item->name['value'] ?? '');
+            if ($name === '') {
+                continue;
+            }
+
+            $games[] = [
+                'bgg_id' => $bggId,
+                'name' => $name,
+                'year' => (int) ($item->yearpublished['value'] ?? 0),
+                'type' => (string) ($item['type'] ?? 'boardgame'),
+            ];
+        }
+
+        return $games;
+    }
+
+    private function fetchThingDetails(array $bggIds, ?string $apiKey): array
+    {
+        if (empty($bggIds)) {
+            return [];
+        }
+
+        $headers = [
+            'Accept' => 'application/xml',
+            'User-Agent' => self::IMAGE_USER_AGENT,
+        ];
+        if ($apiKey) {
+            $headers['Authorization'] = 'Bearer ' . $apiKey;
+        }
+
+        try {
+            $response = Http::timeout(30)->withHeaders($headers)
+                ->get(self::BGG_API_URL . '/thing', [
+                    'id' => implode(',', $bggIds),
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('BGG thing lookup failed', [
+                'ids' => $bggIds,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+
+        if ($response->failed()) {
+            return [];
+        }
+
+        $data = @simplexml_load_string($response->body());
+        if ($data === false || !isset($data->item)) {
+            return [];
+        }
+
+        $details = [];
+        foreach ($data->item as $item) {
+            $bggId = (int) ($item['id'] ?? 0);
+            if (!$bggId) {
+                continue;
+            }
+
+            $primaryName = '';
+            if (isset($item->name)) {
+                foreach ($item->name as $nameNode) {
+                    if ((string) $nameNode['type'] === 'primary') {
+                        $primaryName = (string) $nameNode['value'];
+                        break;
+                    }
+                }
+            }
+
+            $details[$bggId] = [
+                'name' => $primaryName !== '' ? $primaryName : null,
+                'year' => (int) ($item->yearpublished['value'] ?? 0),
+                'image' => (string) ($item->image ?? ''),
+                'thumbnail' => (string) ($item->thumbnail ?? ''),
+                'min_players' => (int) ($item->minplayers['value'] ?? 0),
+                'max_players' => (int) ($item->maxplayers['value'] ?? 0),
+                'playing_time' => (int) ($item->playingtime['value'] ?? 0),
+                'description' => trim((string) ($item->description ?? '')),
+            ];
+
+            // Evitamos sobrescribir con null si no tenemos nombre primario.
+            $details[$bggId] = array_filter(
+                $details[$bggId],
+                fn ($v) => $v !== null && $v !== '' && $v !== 0
+            );
+        }
+
+        return $details;
     }
 
     private function parseCollectionXml(string $xml): array
