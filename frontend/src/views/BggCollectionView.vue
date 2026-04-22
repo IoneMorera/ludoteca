@@ -12,6 +12,7 @@ const route = useRoute()
 const router = useRouter()
 
 const IMAGE_BATCH_SIZE = 10
+const IMPORT_BATCH_SIZE = 200
 
 const games = ref([])
 const loading = ref(true)
@@ -22,6 +23,7 @@ const importResult = ref(null)
 const importingExpansions = ref(false)
 const expansionResult = ref(null)
 const imageProgress = ref(null)
+const importProgress = ref(null)
 const username = computed(() => route.params.username)
 const subtitle = computed(
   () => `Juegos del usuario ${username.value} en BoardGameGeek`,
@@ -82,16 +84,38 @@ async function importGames() {
   importing.value = true
   importResult.value = null
   imageProgress.value = null
+  importProgress.value = { done: 0, total: games.value.length }
+
   try {
-    const { data } = await api.post('/bgg/import', { games: games.value, bgg_username: username.value })
-    const pending = data.images_pending || []
-    importResult.value = {
-      imported: data.imported,
-      skipped: data.skipped,
-      imagesTotal: pending.length,
+    let totalImported = 0
+    let totalSkipped = 0
+    const allPending = []
+
+    for (let i = 0; i < games.value.length; i += IMPORT_BATCH_SIZE) {
+      const batch = games.value.slice(i, i + IMPORT_BATCH_SIZE)
+      const { data } = await api.post('/bgg/import', {
+        games: batch,
+        bgg_username: username.value,
+      })
+      totalImported += data.imported || 0
+      totalSkipped += data.skipped || 0
+      if (Array.isArray(data.images_pending)) {
+        allPending.push(...data.images_pending)
+      }
+      importProgress.value = {
+        done: Math.min(i + batch.length, games.value.length),
+        total: games.value.length,
+      }
     }
-    if (pending.length > 0) {
-      const imgRes = await downloadPendingImages(pending)
+
+    importResult.value = {
+      imported: totalImported,
+      skipped: totalSkipped,
+      imagesTotal: allPending.length,
+    }
+
+    if (allPending.length > 0) {
+      const imgRes = await downloadPendingImages(allPending)
       importResult.value = {
         ...importResult.value,
         imagesOk: imgRes.succeeded,
@@ -104,6 +128,7 @@ async function importGames() {
     }
   } finally {
     importing.value = false
+    importProgress.value = null
   }
 }
 
@@ -112,23 +137,53 @@ async function importExpansions() {
   importingExpansions.value = true
   expansionResult.value = null
   imageProgress.value = null
+  importProgress.value = null
+
   try {
     const { data: expData } = await api.get(`/bgg/expansions/${username.value}`)
-    if (!expData.expansions || expData.expansions.length === 0) {
+    const list = expData.expansions || []
+    if (list.length === 0) {
       expansionResult.value = { imported: 0, skipped: 0, omitted: [], omitted_count: 0, noExpansions: true }
       return
     }
-    const { data } = await api.post('/bgg/import-expansions', { expansions: expData.expansions, bgg_username: username.value })
-    const pending = data.images_pending || []
-    expansionResult.value = {
-      imported: data.imported,
-      skipped: data.skipped,
-      omitted: data.omitted,
-      omitted_count: data.omitted_count,
-      imagesTotal: pending.length,
+
+    importProgress.value = { done: 0, total: list.length }
+
+    let totalImported = 0
+    let totalSkipped = 0
+    const allOmitted = []
+    const allPending = []
+
+    for (let i = 0; i < list.length; i += IMPORT_BATCH_SIZE) {
+      const batch = list.slice(i, i + IMPORT_BATCH_SIZE)
+      const { data } = await api.post('/bgg/import-expansions', {
+        expansions: batch,
+        bgg_username: username.value,
+      })
+      totalImported += data.imported || 0
+      totalSkipped += data.skipped || 0
+      if (Array.isArray(data.omitted)) {
+        allOmitted.push(...data.omitted)
+      }
+      if (Array.isArray(data.images_pending)) {
+        allPending.push(...data.images_pending)
+      }
+      importProgress.value = {
+        done: Math.min(i + batch.length, list.length),
+        total: list.length,
+      }
     }
-    if (pending.length > 0) {
-      const imgRes = await downloadPendingImages(pending)
+
+    expansionResult.value = {
+      imported: totalImported,
+      skipped: totalSkipped,
+      omitted: allOmitted,
+      omitted_count: allOmitted.length,
+      imagesTotal: allPending.length,
+    }
+
+    if (allPending.length > 0) {
+      const imgRes = await downloadPendingImages(allPending)
       expansionResult.value = {
         ...expansionResult.value,
         imagesOk: imgRes.succeeded,
@@ -141,6 +196,7 @@ async function importExpansions() {
     }
   } finally {
     importingExpansions.value = false
+    importProgress.value = null
   }
 }
 
@@ -225,6 +281,12 @@ onMounted(fetchCollection)
         </template>
       </div>
       <button class="dismiss-btn" @click="expansionResult = null">✕</button>
+    </div>
+
+    <div v-if="importProgress && (importing || importingExpansions)" class="import-feedback import-progress">
+      <div>
+        Creando juegos: {{ importProgress.done }}/{{ importProgress.total }}
+      </div>
     </div>
 
     <div v-if="imageProgress && (importing || importingExpansions)" class="import-feedback import-progress">
