@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Categoria;
 use App\Models\Juego;
 use App\Models\Propietario;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class BggController extends Controller
@@ -16,6 +18,8 @@ class BggController extends Controller
     private const BGG_API_URL = 'https://boardgamegeek.com/xmlapi2';
     private const MAX_RETRIES = 5;
     private const RETRY_DELAY_SECONDS = 2;
+    private const IMAGE_USER_AGENT = 'Ludoteca/1.0 (BoardGameGeek Integration)';
+    private const IMAGE_TIMEOUT = 20;
 
     public function collection(string $username): JsonResponse
     {
@@ -110,6 +114,7 @@ class BggController extends Controller
 
         $imported = 0;
         $skipped = 0;
+        $imagesPending = [];
 
         foreach ($request->input('games') as $game) {
             $result = Juego::firstOrCreate(
@@ -125,9 +130,12 @@ class BggController extends Controller
 
             if ($result->wasRecentlyCreated) {
                 $imported++;
-                $localPath = $this->downloadCover($game);
-                if ($localPath) {
-                    $result->update(['imagen' => $localPath]);
+                $imageUrl = $this->normalizeImageUrl($game['image'] ?? $game['thumbnail'] ?? null);
+                if ($imageUrl) {
+                    $imagesPending[] = [
+                        'bgg_id' => (int) $game['bgg_id'],
+                        'image_url' => $imageUrl,
+                    ];
                 }
             } else {
                 $skipped++;
@@ -141,6 +149,7 @@ class BggController extends Controller
         return response()->json([
             'imported' => $imported,
             'skipped' => $skipped,
+            'images_pending' => $imagesPending,
         ]);
     }
 
@@ -164,6 +173,7 @@ class BggController extends Controller
         $imported = 0;
         $skipped = 0;
         $omitted = [];
+        $imagesPending = [];
 
         foreach ($request->input('expansions') as $expansion) {
             $existingExpansion = Juego::where('bgg_id', $expansion['bgg_id'])->first();
@@ -198,9 +208,12 @@ class BggController extends Controller
                 'juego_base_id' => $baseGame->id,
             ]);
 
-            $localPath = $this->downloadCover($expansion);
-            if ($localPath) {
-                $juego->update(['imagen' => $localPath]);
+            $imageUrl = $this->normalizeImageUrl($expansion['image'] ?? $expansion['thumbnail'] ?? null);
+            if ($imageUrl) {
+                $imagesPending[] = [
+                    'bgg_id' => (int) $expansion['bgg_id'],
+                    'image_url' => $imageUrl,
+                ];
             }
 
             if ($propietario) {
@@ -215,6 +228,88 @@ class BggController extends Controller
             'skipped' => $skipped,
             'omitted' => $omitted,
             'omitted_count' => count($omitted),
+            'images_pending' => $imagesPending,
+        ]);
+    }
+
+    public function importImages(Request $request): JsonResponse
+    {
+        $request->validate([
+            'images' => 'required|array|min:1|max:30',
+            'images.*.bgg_id' => 'required|integer',
+            'images.*.image_url' => 'required|string',
+        ]);
+
+        $items = $request->input('images');
+        $succeeded = 0;
+        $failed = 0;
+        $failures = [];
+
+        $responses = Http::pool(function (Pool $pool) use ($items) {
+            return array_map(
+                fn ($item) => $pool
+                    ->as('bgg_' . $item['bgg_id'])
+                    ->timeout(self::IMAGE_TIMEOUT)
+                    ->withHeaders([
+                        'User-Agent' => self::IMAGE_USER_AGENT,
+                        'Accept' => 'image/*',
+                    ])
+                    ->get($item['image_url']),
+                $items
+            );
+        });
+
+        foreach ($items as $item) {
+            $key = 'bgg_' . $item['bgg_id'];
+            $response = $responses[$key] ?? null;
+
+            if ($response instanceof \Throwable) {
+                Log::warning('BGG image download threw', [
+                    'bgg_id' => $item['bgg_id'],
+                    'url' => $item['image_url'],
+                    'error' => $response->getMessage(),
+                ]);
+                $failed++;
+                $failures[] = $item['bgg_id'];
+                continue;
+            }
+
+            if (!$response || !$response->successful()) {
+                Log::warning('BGG image download failed', [
+                    'bgg_id' => $item['bgg_id'],
+                    'url' => $item['image_url'],
+                    'status' => $response?->status(),
+                ]);
+                $failed++;
+                $failures[] = $item['bgg_id'];
+                continue;
+            }
+
+            $extension = pathinfo(parse_url($item['image_url'], PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'jpg';
+            $filename = "juegos/bgg_{$item['bgg_id']}.{$extension}";
+
+            try {
+                Storage::disk('public')->put($filename, $response->body());
+                $juego = Juego::where('bgg_id', $item['bgg_id'])->first();
+                if ($juego) {
+                    $juego->update(['imagen' => "/storage/{$filename}"]);
+                }
+                $succeeded++;
+            } catch (\Throwable $e) {
+                Log::error('BGG image store failed', [
+                    'bgg_id' => $item['bgg_id'],
+                    'error' => $e->getMessage(),
+                ]);
+                $failed++;
+                $failures[] = $item['bgg_id'];
+            }
+        }
+
+        return response()->json([
+            'processed' => count($items),
+            'succeeded' => $succeeded,
+            'failed' => $failed,
+            'failures' => $failures,
         ]);
     }
 
@@ -231,7 +326,7 @@ class BggController extends Controller
     {
         $headers = [
             'Accept' => 'application/xml',
-            'User-Agent' => 'Ludoteca/1.0 (BoardGameGeek Integration)',
+            'User-Agent' => self::IMAGE_USER_AGENT,
         ];
 
         if ($apiKey) {
@@ -276,7 +371,7 @@ class BggController extends Controller
         $response = Http::timeout(30)->withHeaders([
             'Accept' => 'application/xml',
             'Authorization' => 'Bearer ' . $apiKey,
-            'User-Agent' => 'Ludoteca/1.0 (BoardGameGeek Integration)',
+            'User-Agent' => self::IMAGE_USER_AGENT,
         ])->get(self::BGG_API_URL . '/plays', [
             'username' => $username,
             'page' => $page,
@@ -299,7 +394,7 @@ class BggController extends Controller
             $response = Http::timeout(30)->withHeaders([
                 'Accept' => 'application/xml',
                 'Authorization' => 'Bearer ' . $apiKey,
-                'User-Agent' => 'Ludoteca/1.0 (BoardGameGeek Integration)',
+                'User-Agent' => self::IMAGE_USER_AGENT,
             ])->get($url, $params);
 
             if ($response->status() !== 202) {
@@ -312,28 +407,26 @@ class BggController extends Controller
         return null;
     }
 
-    private function downloadCover(array $game): ?string
+    private function normalizeImageUrl(?string $url): ?string
     {
-        $imageUrl = $game['image'] ?? $game['thumbnail'] ?? null;
-        if (!$imageUrl) {
+        if (!$url) {
             return null;
         }
 
-        try {
-            $response = Http::timeout(10)->get($imageUrl);
-            if ($response->failed()) {
-                return null;
-            }
-
-            $extension = pathinfo(parse_url($imageUrl, PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'jpg';
-            $filename = "juegos/bgg_{$game['bgg_id']}.{$extension}";
-
-            Storage::disk('public')->put($filename, $response->body());
-
-            return "/storage/{$filename}";
-        } catch (\Throwable) {
+        $url = trim($url);
+        if ($url === '') {
             return null;
         }
+
+        if (str_starts_with($url, '//')) {
+            return 'https:' . $url;
+        }
+
+        if (!preg_match('#^https?://#i', $url)) {
+            return null;
+        }
+
+        return $url;
     }
 
     private function parsePlaysXml(string $xml, string $username): array

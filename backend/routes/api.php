@@ -42,6 +42,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('bgg/plays/{username}', [BggController::class, 'plays']);
         Route::post('bgg/import', [BggController::class, 'import']);
         Route::post('bgg/import-expansions', [BggController::class, 'importExpansions']);
+        Route::post('bgg/import-images', [BggController::class, 'importImages']);
 
         Route::apiResource('categorias', CategoriaController::class);
         Route::apiResource('juegos', JuegoController::class);

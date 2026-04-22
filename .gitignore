@@ -8,6 +8,9 @@
 .DS_Store
 Thumbs.db
 
+# Enlace simbólico de prueba que apunta a `mobile` (recorrido circular; ralentiza Git / la UI)
+mobile/testlink
+
 # Cursor
 .cursor/
 
