@@ -9,6 +9,7 @@ use App\Models\Propietario;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -112,38 +113,53 @@ class BggController extends Controller
 
         $propietario = $this->resolveOwner($request->input('bgg_username'));
 
-        $imported = 0;
-        $skipped = 0;
+        $games = $request->input('games');
+        $bggIds = array_map(fn ($g) => (int) $g['bgg_id'], $games);
+
+        $existingBggIds = Juego::whereIn('bgg_id', $bggIds)->pluck('bgg_id')->all();
+        $existingBggIdsSet = array_flip($existingBggIds);
+
+        $now = now();
+        $rowsToInsert = [];
         $imagesPending = [];
 
-        foreach ($request->input('games') as $game) {
-            $result = Juego::firstOrCreate(
-                ['bgg_id' => $game['bgg_id']],
-                [
-                    'nombre' => $game['name'],
-                    'num_jugadores_min' => $game['min_players'] ?? null,
-                    'num_jugadores_max' => $game['max_players'] ?? null,
-                    'categoria_id' => $categoria->id,
-                    'estado' => 'disponible',
-                ]
-            );
-
-            if ($result->wasRecentlyCreated) {
-                $imported++;
-                $imageUrl = $this->normalizeImageUrl($game['image'] ?? $game['thumbnail'] ?? null);
-                if ($imageUrl) {
-                    $imagesPending[] = [
-                        'bgg_id' => (int) $game['bgg_id'],
-                        'image_url' => $imageUrl,
-                    ];
-                }
-            } else {
-                $skipped++;
+        foreach ($games as $game) {
+            $bggId = (int) $game['bgg_id'];
+            if (isset($existingBggIdsSet[$bggId])) {
+                continue;
             }
 
-            if ($propietario) {
-                $result->propietarios()->syncWithoutDetaching([$propietario->id]);
+            $rowsToInsert[] = [
+                'nombre' => $game['name'],
+                'num_jugadores_min' => $game['min_players'] ?? null,
+                'num_jugadores_max' => $game['max_players'] ?? null,
+                'categoria_id' => $categoria->id,
+                'estado' => 'disponible',
+                'bgg_id' => $bggId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            $imageUrl = $this->normalizeImageUrl($game['image'] ?? $game['thumbnail'] ?? null);
+            if ($imageUrl) {
+                $imagesPending[] = [
+                    'bgg_id' => $bggId,
+                    'image_url' => $imageUrl,
+                ];
             }
+        }
+
+        $imported = count($rowsToInsert);
+        $skipped = count($existingBggIds);
+
+        if ($imported > 0) {
+            foreach (array_chunk($rowsToInsert, 200) as $chunk) {
+                Juego::insert($chunk);
+            }
+        }
+
+        if ($propietario) {
+            $this->attachPropietarioBulk($propietario->id, $bggIds);
         }
 
         return response()->json([
@@ -170,57 +186,77 @@ class BggController extends Controller
 
         $propietario = $this->resolveOwner($request->input('bgg_username'));
 
-        $imported = 0;
-        $skipped = 0;
-        $omitted = [];
-        $imagesPending = [];
+        $expansions = $request->input('expansions');
+        $expansionBggIds = array_map(fn ($e) => (int) $e['bgg_id'], $expansions);
 
-        foreach ($request->input('expansions') as $expansion) {
-            $existingExpansion = Juego::where('bgg_id', $expansion['bgg_id'])->first();
-            if ($existingExpansion) {
-                if ($propietario) {
-                    $existingExpansion->propietarios()->syncWithoutDetaching([$propietario->id]);
-                }
-                $skipped++;
+        $existingBggIds = Juego::whereIn('bgg_id', $expansionBggIds)->pluck('bgg_id')->all();
+        $existingSet = array_flip($existingBggIds);
+
+        $toResolve = array_filter($expansionBggIds, fn ($id) => !isset($existingSet[$id]));
+        $baseIdMap = $this->findBaseGamesBggIds($toResolve, $apiKey);
+
+        $baseBggIds = array_values(array_unique(array_filter($baseIdMap)));
+        $baseGames = Juego::whereIn('bgg_id', $baseBggIds)->pluck('id', 'bgg_id')->all();
+
+        $now = now();
+        $rowsToInsert = [];
+        $imagesPending = [];
+        $omitted = [];
+        $attachBggIds = [];
+
+        foreach ($expansions as $expansion) {
+            $bggId = (int) $expansion['bgg_id'];
+
+            if (isset($existingSet[$bggId])) {
+                $attachBggIds[] = $bggId;
                 continue;
             }
 
-            $baseGameBggId = $this->findBaseGameBggId($expansion['bgg_id'], $apiKey);
-
-            if (!$baseGameBggId) {
+            $baseBggId = $baseIdMap[$bggId] ?? null;
+            if (!$baseBggId) {
                 $omitted[] = $expansion['name'];
                 continue;
             }
 
-            $baseGame = Juego::where('bgg_id', $baseGameBggId)->first();
-            if (!$baseGame) {
-                $omitted[] = $expansion['name'] . ' (juego base BGG #' . $baseGameBggId . ' no encontrado)';
+            $baseLocalId = $baseGames[$baseBggId] ?? null;
+            if (!$baseLocalId) {
+                $omitted[] = $expansion['name'] . ' (juego base BGG #' . $baseBggId . ' no encontrado)';
                 continue;
             }
 
-            $juego = Juego::create([
+            $rowsToInsert[] = [
                 'nombre' => $expansion['name'],
-                'bgg_id' => $expansion['bgg_id'],
+                'bgg_id' => $bggId,
                 'num_jugadores_min' => $expansion['min_players'] ?? null,
                 'num_jugadores_max' => $expansion['max_players'] ?? null,
                 'categoria_id' => $categoria->id,
                 'estado' => 'disponible',
-                'juego_base_id' => $baseGame->id,
-            ]);
+                'juego_base_id' => $baseLocalId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+            $attachBggIds[] = $bggId;
 
             $imageUrl = $this->normalizeImageUrl($expansion['image'] ?? $expansion['thumbnail'] ?? null);
             if ($imageUrl) {
                 $imagesPending[] = [
-                    'bgg_id' => (int) $expansion['bgg_id'],
+                    'bgg_id' => $bggId,
                     'image_url' => $imageUrl,
                 ];
             }
+        }
 
-            if ($propietario) {
-                $juego->propietarios()->syncWithoutDetaching([$propietario->id]);
+        $imported = count($rowsToInsert);
+        $skipped = count($existingBggIds);
+
+        if ($imported > 0) {
+            foreach (array_chunk($rowsToInsert, 200) as $chunk) {
+                Juego::insert($chunk);
             }
+        }
 
-            $imported++;
+        if ($propietario && !empty($attachBggIds)) {
+            $this->attachPropietarioBulk($propietario->id, $attachBggIds);
         }
 
         return response()->json([
@@ -313,6 +349,30 @@ class BggController extends Controller
         ]);
     }
 
+    private function attachPropietarioBulk(int $propietarioId, array $bggIds): void
+    {
+        if (empty($bggIds)) {
+            return;
+        }
+
+        $juegoIds = Juego::whereIn('bgg_id', $bggIds)->pluck('id')->all();
+        if (empty($juegoIds)) {
+            return;
+        }
+
+        $now = now();
+        $rows = array_map(fn ($juegoId) => [
+            'juego_id' => $juegoId,
+            'propietario_id' => $propietarioId,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $juegoIds);
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            DB::table('juego_propietario')->insertOrIgnore($chunk);
+        }
+    }
+
     private function resolveOwner(?string $bggUsername): ?Propietario
     {
         if (!$bggUsername) {
@@ -322,8 +382,12 @@ class BggController extends Controller
         return Propietario::whereRaw('LOWER(bgg_username) = ?', [strtolower($bggUsername)])->first();
     }
 
-    private function findBaseGameBggId(int $expansionBggId, ?string $apiKey): ?int
+    private function findBaseGamesBggIds(array $expansionBggIds, ?string $apiKey): array
     {
+        if (empty($expansionBggIds)) {
+            return [];
+        }
+
         $headers = [
             'Accept' => 'application/xml',
             'User-Agent' => self::IMAGE_USER_AGENT,
@@ -333,28 +397,44 @@ class BggController extends Controller
             $headers['Authorization'] = 'Bearer ' . $apiKey;
         }
 
-        $response = Http::timeout(15)->withHeaders($headers)
-            ->get(self::BGG_API_URL . '/thing', [
-                'id' => $expansionBggId,
-                'type' => 'boardgameexpansion',
-            ]);
+        $map = [];
 
-        if ($response->failed()) {
-            return null;
-        }
+        foreach (array_chunk($expansionBggIds, 50) as $chunk) {
+            $response = Http::timeout(30)->withHeaders($headers)
+                ->get(self::BGG_API_URL . '/thing', [
+                    'id' => implode(',', $chunk),
+                    'type' => 'boardgameexpansion',
+                ]);
 
-        $data = @simplexml_load_string($response->body());
-        if ($data === false || !isset($data->item)) {
-            return null;
-        }
+            if ($response->failed()) {
+                Log::warning('BGG bulk thing request failed', [
+                    'ids_count' => count($chunk),
+                    'status' => $response->status(),
+                ]);
+                continue;
+            }
 
-        foreach ($data->item->link as $link) {
-            if ((string) $link['type'] === 'boardgameexpansion' && (string) $link['inbound'] === 'true') {
-                return (int) $link['id'];
+            $data = @simplexml_load_string($response->body());
+            if ($data === false || !isset($data->item)) {
+                continue;
+            }
+
+            foreach ($data->item as $item) {
+                $expansionId = (int) ($item['id'] ?? 0);
+                if (!$expansionId) {
+                    continue;
+                }
+
+                foreach ($item->link as $link) {
+                    if ((string) $link['type'] === 'boardgameexpansion' && (string) $link['inbound'] === 'true') {
+                        $map[$expansionId] = (int) $link['id'];
+                        break;
+                    }
+                }
             }
         }
 
-        return null;
+        return $map;
     }
 
     public function plays(string $username): JsonResponse
