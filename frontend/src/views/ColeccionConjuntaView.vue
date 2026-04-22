@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { usePropietariosStore } from '../stores/propietarios'
+import { resolveImageUrl } from '../utils/images'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingState from '../components/LoadingState.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -8,7 +9,6 @@ import StatusBadge from '../components/StatusBadge.vue'
 import GameCardMobile from '../components/GameCardMobile.vue'
 
 const store = usePropietariosStore()
-const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
 const seleccionados = ref([])
 const haConsultado = ref(false)
@@ -110,7 +110,7 @@ function tituloColeccion() {
                 <td class="td-imagen">
                   <img
                     v-if="juego.imagen"
-                    :src="backendUrl + juego.imagen"
+                    :src="resolveImageUrl(juego.imagen)"
                     :alt="juego.nombre"
                     class="juego-thumb"
                   />
@@ -170,7 +170,6 @@ function tituloColeccion() {
           v-for="juego in juegos"
           :key="'card-' + juego.id"
           :juego="juego"
-          :backend-url="backendUrl"
           :show-ubicacion="true"
           :show-expansiones="true"
         />

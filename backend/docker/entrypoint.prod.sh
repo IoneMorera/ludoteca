@@ -5,6 +5,15 @@ set -e
 chown -R www-data:www-data /app/storage /app/bootstrap/cache
 chmod -R 775 /app/storage /app/bootstrap/cache
 
+# Asegurar symlink public/storage -> storage/app/public
+# (necesario para servir imágenes bajo /storage/...)
+rm -f /app/public/storage
+php artisan storage:link --force || true
+
+# Crear directorio para imágenes de juegos si no existe
+mkdir -p /app/storage/app/public/juegos
+chown -R www-data:www-data /app/storage/app/public
+
 # Migraciones
 php artisan migrate --force || true
 

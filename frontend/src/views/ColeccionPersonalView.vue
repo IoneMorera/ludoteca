@@ -2,6 +2,7 @@
 import { onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePropietariosStore } from '../stores/propietarios'
+import { resolveImageUrl } from '../utils/images'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingState from '../components/LoadingState.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -11,7 +12,6 @@ import GameCardMobile from '../components/GameCardMobile.vue'
 const route = useRoute()
 const router = useRouter()
 const store = usePropietariosStore()
-const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
 onMounted(() => {
   store.fetchColeccion(route.params.id)
@@ -67,7 +67,7 @@ function esCompartido(juego) {
                 <td class="td-imagen">
                   <img
                     v-if="juego.imagen"
-                    :src="backendUrl + juego.imagen"
+                    :src="resolveImageUrl(juego.imagen)"
                     :alt="juego.nombre"
                     class="juego-thumb"
                   />
@@ -127,7 +127,6 @@ function esCompartido(juego) {
           v-for="juego in juegos"
           :key="'card-' + juego.id"
           :juego="juego"
-          :backend-url="backendUrl"
           :show-ubicacion="true"
           :show-expansiones="true"
         />

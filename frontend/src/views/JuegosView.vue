@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { formatDate } from '../utils/format'
+import { resolveImageUrl } from '../utils/images'
 import { useJuegosStore } from '../stores/juegos'
 import { useCategoriasStore } from '../stores/categorias'
 import { useHabitacionesStore } from '../stores/habitaciones'
@@ -25,7 +26,6 @@ const mueblesStore = useMueblesStore()
 const ubicacionesStore = useUbicacionesStore()
 const propietariosStore = usePropietariosStore()
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 const buscar = ref('')
 const categoriaFiltro = ref('')
 const habitacionFiltro = ref(route.query.habitacion_id || '')
@@ -279,7 +279,7 @@ function estadoClase(estado) {
               <td class="td-imagen">
                 <img
                   v-if="juego.imagen"
-                  :src="backendUrl + juego.imagen"
+                  :src="resolveImageUrl(juego.imagen)"
                   :alt="juego.nombre"
                   class="juego-thumb"
                 />
@@ -320,7 +320,6 @@ function estadoClase(estado) {
           v-for="juego in juegosStore.juegos"
           :key="'card-' + juego.id"
           :juego="juego"
-          :backend-url="backendUrl"
           :show-jugadores="true"
           :show-fecha-compra="true"
         >

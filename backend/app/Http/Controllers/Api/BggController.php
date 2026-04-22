@@ -356,13 +356,13 @@ class BggController extends Controller
             }
 
             $extension = pathinfo(parse_url($item['image_url'], PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'jpg';
-            $filename = "juegos/bgg_{$item['bgg_id']}.{$extension}";
 
             try {
-                Storage::disk('public')->put($filename, $response->body());
+                $publicPath = $this->storeImage($item['bgg_id'], $extension, $response->body());
+
                 $juego = Juego::where('bgg_id', $item['bgg_id'])->first();
                 if ($juego) {
-                    $juego->update(['imagen' => "/storage/{$filename}"]);
+                    $juego->update(['imagen' => $publicPath]);
                 }
                 $succeeded++;
             } catch (\Throwable $e) {
@@ -381,6 +381,36 @@ class BggController extends Controller
             'failed' => $failed,
             'failures' => $failures,
         ]);
+    }
+
+    /**
+     * Guarda una imagen de juego y devuelve la ruta pública (o URL absoluta si es R2/S3).
+     *
+     * - Si hay R2 configurado (R2_BUCKET presente), sube a R2 con prefijo por tenant
+     *   y devuelve URL pública completa.
+     * - Si no, cae al disco público local y devuelve la ruta relativa /storage/...
+     */
+    private function storeImage(int $bggId, string $extension, string $body): string
+    {
+        $r2Configured = filled(config('filesystems.disks.r2.bucket'))
+            && filled(config('filesystems.disks.r2.endpoint'));
+
+        if ($r2Configured) {
+            $tenantId = function_exists('tenant') ? (tenant()?->id ?? 'central') : 'central';
+            $key = "tenants/{$tenantId}/juegos/bgg_{$bggId}.{$extension}";
+
+            Storage::disk('r2')->put($key, $body, 'public');
+
+            $publicUrl = rtrim((string) config('filesystems.disks.r2.url'), '/');
+            if ($publicUrl !== '') {
+                return $publicUrl . '/' . $key;
+            }
+            return Storage::disk('r2')->url($key);
+        }
+
+        $filename = "juegos/bgg_{$bggId}.{$extension}";
+        Storage::disk('public')->put($filename, $body);
+        return "/storage/{$filename}";
     }
 
     private function attachPropietarioBulk(int $propietarioId, array $bggIds): void
