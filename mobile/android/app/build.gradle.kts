@@ -30,6 +30,23 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "channel"
+
+    productFlavors {
+        create("prod") {
+            dimension = "channel"
+            resValue("string", "app_name", "Ludoteca")
+        }
+        create("dev") {
+            dimension = "channel"
+            // Sufijo en el applicationId para que pueda coexistir con la
+            // versión "prod" instalada previamente en el dispositivo.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name", "Ludoteca Dev")
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
