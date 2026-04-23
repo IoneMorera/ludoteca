@@ -16,16 +16,15 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
     container_name: ludoteca-backend
     working_dir: /app
     volumes:
       - ./backend:/app
       - backend-vendor:/app/vendor
       - backend-bootstrap-cache:/app/bootstrap/cache
-    depends_on:
-      mysql:
-        condition: service_healthy
 
   nginx:
     image: nginx:alpine
@@ -34,7 +33,7 @@ services:
       - "8000:80"
     volumes:
       - ./backend:/app
-      - ./backend/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./backend/docker/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
       - backend-vendor:/app/vendor
     depends_on:
       - backend
