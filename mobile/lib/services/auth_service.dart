@@ -42,6 +42,33 @@ class AuthService {
     }
   }
 
+  Future<Map<String, dynamic>?> updateUser({
+    String? name,
+    String? bggUsername,
+    bool? noEnfundo,
+  }) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (bggUsername != null) body['bgg_username'] = bggUsername;
+    if (noEnfundo != null) body['no_enfundo'] = noEnfundo;
+    if (body.isEmpty) return null;
+    final response = await _api.put('/user', data: body);
+    final user = response.data['user'] as Map<String, dynamic>?;
+    if (user != null) {
+      final prefs = await SharedPreferences.getInstance();
+      if (user['name'] != null) {
+        await prefs.setString('user_name', user['name']);
+      }
+      if (user['bgg_username'] != null) {
+        await prefs.setString('bgg_username', user['bgg_username']);
+      }
+      if (user['no_enfundo'] != null) {
+        await prefs.setBool('no_enfundo', user['no_enfundo'] == true);
+      }
+    }
+    return user;
+  }
+
   Future<bool> isLoggedIn() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('auth_token') != null;

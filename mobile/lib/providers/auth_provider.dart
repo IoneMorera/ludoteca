@@ -13,6 +13,9 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _user != null;
   String? get error => _error;
   String get userName => _user?['name'] ?? '';
+  String get userEmail => _user?['email'] ?? '';
+  String? get bggUsername => _user?['bgg_username'];
+  bool get noEnfundo => _user?['no_enfundo'] == true;
 
   Future<bool> checkAuth() async {
     if (!await _authService.isLoggedIn()) return false;
@@ -47,5 +50,29 @@ class AuthProvider extends ChangeNotifier {
     await _authService.logout();
     _user = null;
     notifyListeners();
+  }
+
+  Future<bool> updateProfile({
+    String? name,
+    String? bggUsername,
+    bool? noEnfundo,
+  }) async {
+    try {
+      final updated = await _authService.updateUser(
+        name: name,
+        bggUsername: bggUsername,
+        noEnfundo: noEnfundo,
+      );
+      if (updated != null) {
+        _user = updated;
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
   }
 }

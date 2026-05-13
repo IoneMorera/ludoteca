@@ -1,7 +1,10 @@
 import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../services/recognition_service.dart';
 
 class RecognizeScreen extends StatefulWidget {
@@ -12,116 +15,139 @@ class RecognizeScreen extends StatefulWidget {
 }
 
 class _RecognizeScreenState extends State<RecognizeScreen> {
-  final RecognitionService _recognitionService = RecognitionService();
+  final RecognitionService _service = RecognitionService();
+  final TextEditingController _manualController = TextEditingController();
   File? _imageFile;
   bool _processing = false;
-  List<Map<String, dynamic>> _results = [];
+  RecognitionResult? _result;
   String? _error;
-  String? _extractedText;
-  List<String> _triedQueries = [];
 
   @override
   void dispose() {
-    _recognitionService.dispose();
+    _service.dispose();
+    _manualController.dispose();
     super.dispose();
   }
 
   Future<void> _pickAndRecognize(ImageSource source) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: source, maxWidth: 1200);
+    final picked = await picker.pickImage(source: source, imageQuality: 100);
     if (picked == null) return;
+    final cropped = await _cropImage(picked.path);
+    if (cropped == null) return;
 
     setState(() {
-      _imageFile = File(picked.path);
+      _imageFile = cropped;
       _processing = true;
-      _results = [];
+      _result = null;
       _error = null;
-      _extractedText = null;
-      _triedQueries = [];
+      _manualController.clear();
     });
 
     try {
-      final result = await _recognitionService.recognizeGame(_imageFile!);
-      setState(() {
-        _results = result.games;
-        _extractedText = result.extractedText;
-        _triedQueries = result.triedQueries;
-        if (result.extractedText.isEmpty) {
-          _error =
-              'No se detectó texto en la imagen. Intenta con una foto más cercana al título.';
-        } else if (result.games.isEmpty) {
-          _error = 'No se encontraron juegos en BGG con el texto detectado.';
-        }
-      });
+      final result = await _service.recognizeGame(cropped);
+      _applyResult(result);
     } on DioException catch (e) {
-      setState(() {
-        _error = _friendlyDioError(e);
-      });
+      setState(() => _error = _friendlyDioError(e));
     } catch (e) {
       setState(() => _error = 'Error al procesar la imagen: $e');
     } finally {
-      setState(() => _processing = false);
+      if (mounted) setState(() => _processing = false);
     }
+  }
+
+  Future<File?> _cropImage(String path) async {
+    final cropper = ImageCropper();
+    final cropped = await cropper.cropImage(
+      sourcePath: path,
+      compressFormat: ImageCompressFormat.png,
+      compressQuality: 100,
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: 'Recorta la portada',
+          toolbarColor: Theme.of(context).colorScheme.primary,
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: Theme.of(context).colorScheme.primary,
+          initAspectRatio: CropAspectRatioPreset.original,
+          lockAspectRatio: false,
+          hideBottomControls: false,
+        ),
+        IOSUiSettings(
+          title: 'Recorta la portada',
+          aspectRatioLockEnabled: false,
+        ),
+      ],
+    );
+    if (cropped == null) return null;
+    return File(cropped.path);
+  }
+
+  Future<void> _searchManually() async {
+    final text = _manualController.text.trim();
+    if (text.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _processing = true;
+      _error = null;
+    });
+    try {
+      final result = await _service.searchByText(text);
+      _applyResult(result, manual: true);
+    } catch (e) {
+      setState(() => _error = 'Error al buscar: $e');
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  void _applyResult(RecognitionResult result, {bool manual = false}) {
+    setState(() {
+      _result = result;
+      if (!manual && _manualController.text.isEmpty) {
+        _manualController.text = result.extractedText;
+      }
+      if (result.localMatches.isEmpty && result.bggGames.isEmpty) {
+        _error = manual
+            ? 'No se ha encontrado nada con "${_manualController.text.trim()}".'
+            : 'No se ha podido identificar el juego. Prueba a editar el texto detectado.';
+      } else {
+        _error = null;
+      }
+    });
   }
 
   String _friendlyDioError(DioException e) {
     final status = e.response?.statusCode;
-    if (status == 401) {
-      return 'Tu sesión ha caducado. Vuelve a iniciar sesión.';
-    }
-    if (status == 404) {
-      return 'El servidor no tiene el endpoint /bgg/search. Actualiza el backend.';
-    }
-    if (status == 502 || status == 503) {
-      return 'BGG no está disponible ahora mismo. Inténtalo de nuevo más tarde.';
-    }
+    if (status == 401) return 'Tu sesi\u00f3n ha caducado. Vuelve a iniciar sesi\u00f3n.';
+    if (status == 503) return 'El servicio de visi\u00f3n no est\u00e1 configurado.';
+    if (status == 404) return 'Endpoint no disponible. Actualiza el backend.';
     if (e.type == DioExceptionType.connectionTimeout ||
         e.type == DioExceptionType.receiveTimeout) {
-      return 'Tiempo de espera agotado al contactar con el servidor.';
+      return 'Tiempo de espera agotado.';
     }
     if (e.type == DioExceptionType.connectionError) {
-      return 'No se pudo conectar con el servidor. Comprueba la URL configurada y tu conexión.';
+      return 'No se pudo conectar con el servidor.';
     }
-    return 'Error al buscar en BGG${status != null ? ' (HTTP $status)' : ''}.';
+    return 'Error al buscar (HTTP $status).';
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final result = _result;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Reconocer juego')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text('Toma una foto de la caja o componentes del juego',
-              style: theme.textTheme.bodyLarge
-                  ?.copyWith(color: Colors.grey[600]),
-              textAlign: TextAlign.center),
+          Text(
+            'Toma una foto enfocando bien la portada para mejores resultados.',
+            style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 20),
-          if (_imageFile != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Image.file(_imageFile!, height: 250, fit: BoxFit.cover),
-            )
-          else
-            Container(
-              height: 250,
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.photo_camera, size: 56, color: Colors.grey),
-                    SizedBox(height: 8),
-                    Text('Sin imagen', style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-              ),
-            ),
+          _buildImagePreview(),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -131,7 +157,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
                       ? null
                       : () => _pickAndRecognize(ImageSource.camera),
                   icon: const Icon(Icons.camera_alt),
-                  label: const Text('Cámara'),
+                  label: const Text('C\u00e1mara'),
                 ),
               ),
               const SizedBox(width: 12),
@@ -141,100 +167,212 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
                       ? null
                       : () => _pickAndRecognize(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library),
-                  label: const Text('Galería'),
+                  label: const Text('Galer\u00eda'),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 24),
           if (_processing)
-            const Column(
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 12),
-                Text('Analizando imagen...',
-                    style: TextStyle(color: Colors.grey)),
-              ],
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 8),
+                    Text('Analizando...'),
+                  ],
+                ),
+              ),
             ),
-          if (_error != null)
+          if (_error != null && !_processing) ...[
             Card(
               color: Colors.orange[50],
+              margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text(_error!,
-                    style: TextStyle(color: Colors.orange[800])),
+                child:
+                    Text(_error!, style: TextStyle(color: Colors.orange[800])),
               ),
             ),
-          if (_extractedText != null && _extractedText!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text('Texto detectado',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(color: Colors.grey[700])),
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(_extractedText!,
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey[800])),
-                  ),
-                  if (_triedQueries.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                          'Consultas probadas: ${_triedQueries.join(" · ")}',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                              fontStyle: FontStyle.italic)),
-                    ),
-                  ],
-                ],
+          ],
+          if (result != null && !_processing) ...[
+            _buildManualSearchCard(theme, result),
+            const SizedBox(height: 16),
+            if (result.localMatches.isNotEmpty)
+              _buildLocalMatches(theme, result),
+            if (result.bggGames.isNotEmpty)
+              _buildBggGames(theme, result),
+            if (result.source != RecognitionSource.none) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Fuente: ${_sourceLabel(result.source)}',
+                style:
+                    TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
               ),
-            ),
-          if (_results.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text('Posibles coincidencias:',
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            ...(_results.take(10).map((game) => Card(
-                  child: ListTile(
-                    leading: (game['thumbnail'] != null &&
-                            (game['thumbnail'] as String).isNotEmpty)
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: Image.network(
-                              game['thumbnail'],
-                              width: 48,
-                              height: 48,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) =>
-                                  const Icon(Icons.casino),
-                            ),
-                          )
-                        : const Icon(Icons.casino),
-                    title: Text(game['name'] ?? 'Sin nombre'),
-                    subtitle: Text([
-                      if (game['year'] != null && game['year'] != 0)
-                        '${game['year']}',
-                      'BGG #${game['bgg_id'] ?? '-'}',
-                    ].join(' · ')),
-                    trailing: FilledButton(
-                      onPressed: () {
-                        Navigator.of(context)
-                            .pushNamed('/quick-add', arguments: game);
-                      },
-                      child: const Text('Añadir'),
-                    ),
-                  ),
-                ))),
+            ],
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildImagePreview() {
+    if (_imageFile != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.file(_imageFile!, height: 220, fit: BoxFit.cover),
+      );
+    }
+    return Container(
+      height: 220,
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.photo_camera, size: 56, color: Colors.grey),
+            SizedBox(height: 8),
+            Text('Sin imagen', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildManualSearchCard(ThemeData theme, RecognitionResult result) {
+    return Card(
+      elevation: 0,
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.edit_note, size: 20, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('Texto detectado (editable)',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _manualController,
+              maxLines: 3,
+              minLines: 1,
+              decoration: InputDecoration(
+                hintText: 'Escribe o corrige el t\u00edtulo',
+                filled: true,
+                fillColor: theme.colorScheme.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _searchManually(),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _processing ? null : _searchManually,
+              icon: const Icon(Icons.search),
+              label: const Text('Buscar con este texto'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalMatches(ThemeData theme, RecognitionResult result) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('En tu ludoteca',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        ...result.localMatches.map((m) => Card(
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  child: Icon(
+                    m.matchedVia.contains('phash')
+                        ? Icons.image_search
+                        : Icons.text_fields,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                title: Text(m.nombre),
+                subtitle: Text('Coincidencia ${(m.score * 100).toStringAsFixed(0)}% \u00b7 ${m.matchedVia}'),
+                trailing: FilledButton(
+                  onPressed: () => Navigator.of(context)
+                      .pushNamed('/juego', arguments: m.juegoLocalId),
+                  child: const Text('Abrir'),
+                ),
+              ),
+            )),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _buildBggGames(ThemeData theme, RecognitionResult result) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Resultados externos',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        ...result.bggGames.take(10).map((game) => Card(
+              child: ListTile(
+                leading: (game['thumbnail'] != null &&
+                        (game['thumbnail'] as String).isNotEmpty)
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.network(
+                          game['thumbnail'],
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              const Icon(Icons.casino),
+                        ),
+                      )
+                    : const Icon(Icons.casino),
+                title: Text(game['name']?.toString() ?? 'Sin nombre'),
+                subtitle: Text([
+                  if (game['year'] != null && game['year'] != 0)
+                    '${game['year']}',
+                  if (game['bgg_id'] != null) 'BGG #${game['bgg_id']}',
+                ].join(' \u00b7 ')),
+                trailing: FilledButton(
+                  onPressed: () => Navigator.of(context)
+                      .pushNamed('/juego/nuevo', arguments: game),
+                  child: const Text('A\u00f1adir'),
+                ),
+              ),
+            )),
+      ],
+    );
+  }
+
+  String _sourceLabel(RecognitionSource s) {
+    return switch (s) {
+      RecognitionSource.ocrFuzzy => 'OCR + b\u00fasqueda local',
+      RecognitionSource.phash => 'comparaci\u00f3n visual de portada',
+      RecognitionSource.bggSearch => 'BGG',
+      RecognitionSource.vision => 'IA de visi\u00f3n + BGG',
+      RecognitionSource.manual => 'b\u00fasqueda manual',
+      RecognitionSource.none => 'sin resultado',
+    };
   }
 }

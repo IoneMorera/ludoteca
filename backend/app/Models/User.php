@@ -18,6 +18,7 @@ class User extends Authenticatable
         'password',
         'tenant_id',
         'bgg_username',
+        'no_enfundo',
     ];
 
     protected $hidden = [
@@ -28,6 +29,7 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'no_enfundo' => 'boolean',
     ];
 
     public function tenant()

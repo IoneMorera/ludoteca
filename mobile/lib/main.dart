@@ -2,24 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import 'config/api_config.dart';
+import 'data/sync_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/juegos_provider.dart';
-import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/juegos_list_screen.dart';
-import 'screens/juego_detail_screen.dart';
-import 'screens/scanner_screen.dart';
-import 'screens/quick_add_screen.dart';
-import 'screens/game_night_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/recognize_screen.dart';
-import 'screens/colecciones_screen.dart';
-import 'screens/ubicaciones_screen.dart';
-import 'screens/categorias_screen.dart';
-import 'screens/propietarios_screen.dart';
+import 'providers/sync_provider.dart';
 import 'screens/bgg_screen.dart';
-import 'services/sync_service.dart';
-import 'config/api_config.dart';
+import 'screens/categorias_screen.dart';
+import 'screens/colecciones_screen.dart';
+import 'screens/fundas_faltantes_screen.dart';
+import 'screens/game_night_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/juego_detail_screen.dart';
+import 'screens/juego_form_screen.dart';
+import 'screens/juegos_list_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/profile_screen.dart';
+import 'screens/propietarios_screen.dart';
+import 'screens/recognize_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/ubicaciones_screen.dart';
 import 'services/api_service.dart';
 
 void main() async {
@@ -38,6 +40,7 @@ class LudotecaApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => JuegosProvider()),
+        ChangeNotifierProvider(create: (_) => SyncProvider()),
       ],
       child: MaterialApp(
         title: 'Ludoteca',
@@ -66,22 +69,31 @@ class LudotecaApp extends StatelessWidget {
         onGenerateRoute: (settings) {
           switch (settings.name) {
             case '/login':
-              return MaterialPageRoute(
-                  builder: (_) => const LoginScreen());
+              return MaterialPageRoute(builder: (_) => const LoginScreen());
             case '/home':
-              return MaterialPageRoute(
-                  builder: (_) => const MainShell());
+              return MaterialPageRoute(builder: (_) => const MainShell());
             case '/juego':
-              final id = settings.arguments as int;
+              final args = settings.arguments;
+              if (args is int) {
+                return MaterialPageRoute(
+                    builder: (_) => JuegoDetailScreen(juegoLocalId: args));
+              }
+              if (args is Map<String, dynamic>) {
+                return MaterialPageRoute(
+                    builder: (_) => JuegoDetailScreen(
+                          juegoLocalId: args['local_id'] as int?,
+                          juegoServerId: args['server_id'] as int?,
+                        ));
+              }
+              return MaterialPageRoute(builder: (_) => const MainShell());
+            case '/juego/nuevo':
+              final prefill = settings.arguments as Map<String, dynamic>?;
               return MaterialPageRoute(
-                  builder: (_) => JuegoDetailScreen(juegoId: id));
-            case '/scanner':
+                  builder: (_) => JuegoFormScreen(bggPrefill: prefill));
+            case '/juego/editar':
+              final localId = settings.arguments as int;
               return MaterialPageRoute(
-                  builder: (_) => const ScannerScreen());
-            case '/quick-add':
-              final game = settings.arguments as Map<String, dynamic>?;
-              return MaterialPageRoute(
-                  builder: (_) => QuickAddScreen(bggGame: game));
+                  builder: (_) => JuegoFormScreen(juegoLocalId: localId));
             case '/game-night':
               return MaterialPageRoute(
                   builder: (_) => const GameNightScreen());
@@ -91,6 +103,9 @@ class LudotecaApp extends StatelessWidget {
             case '/colecciones':
               return MaterialPageRoute(
                   builder: (_) => const ColeccionesScreen());
+            case '/fundas-faltantes':
+              return MaterialPageRoute(
+                  builder: (_) => const FundasFaltantesScreen());
             case '/ubicaciones':
               return MaterialPageRoute(
                   builder: (_) => const UbicacionesScreen());
@@ -101,11 +116,11 @@ class LudotecaApp extends StatelessWidget {
               return MaterialPageRoute(
                   builder: (_) => const PropietariosScreen());
             case '/bgg':
-              return MaterialPageRoute(
-                  builder: (_) => const BggScreen());
+              return MaterialPageRoute(builder: (_) => const BggScreen());
+            case '/profile':
+              return MaterialPageRoute(builder: (_) => const ProfileScreen());
             default:
-              return MaterialPageRoute(
-                  builder: (_) => const MainShell());
+              return MaterialPageRoute(builder: (_) => const MainShell());
           }
         },
       ),
@@ -134,7 +149,8 @@ class _AuthGateState extends State<AuthGate> {
     final loggedIn = await auth.checkAuth();
 
     if (loggedIn) {
-      SyncService().syncJuegos();
+      // Sincronizaci\u00f3n inicial: full pull si nunca se ha sincronizado.
+      SyncService().syncAll();
     }
 
     setState(() => _checking = false);
@@ -166,7 +182,7 @@ class _MainShellState extends State<MainShell> {
   final _screens = const [
     HomeScreen(),
     JuegosListScreen(),
-    SizedBox(), // placeholder for scanner (opens as full screen)
+    SizedBox(), // placeholder para "Reconocer" (se abre como pantalla completa)
     ColeccionesScreen(),
     SettingsScreen(),
   ];
@@ -182,7 +198,7 @@ class _MainShellState extends State<MainShell> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           if (index == 2) {
-            Navigator.of(context).pushNamed('/scanner');
+            Navigator.of(context).pushNamed('/recognize');
             return;
           }
           setState(() => _currentIndex = index);
@@ -199,8 +215,9 @@ class _MainShellState extends State<MainShell> {
             label: 'Juegos',
           ),
           NavigationDestination(
-            icon: Icon(Icons.qr_code_scanner),
-            label: 'Escanear',
+            icon: Icon(Icons.camera_alt_outlined),
+            selectedIcon: Icon(Icons.camera_alt),
+            label: 'Reconocer',
           ),
           NavigationDestination(
             icon: Icon(Icons.collections_bookmark_outlined),

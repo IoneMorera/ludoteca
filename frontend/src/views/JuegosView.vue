@@ -9,6 +9,7 @@ import { useHabitacionesStore } from '../stores/habitaciones'
 import { useMueblesStore } from '../stores/muebles'
 import { useUbicacionesStore } from '../stores/ubicaciones'
 import { usePropietariosStore } from '../stores/propietarios'
+import { useTiposFundaStore } from '../stores/tiposFunda'
 import PageHeader from '../components/PageHeader.vue'
 import FilterBar from '../components/FilterBar.vue'
 import LoadingState from '../components/LoadingState.vue'
@@ -17,6 +18,7 @@ import FormModal from '../components/FormModal.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import LocationPicker from '../components/LocationPicker.vue'
 import GameCardMobile from '../components/GameCardMobile.vue'
+import GameSleevesEditor from '../components/GameSleevesEditor.vue'
 
 const route = useRoute()
 const juegosStore = useJuegosStore()
@@ -25,6 +27,7 @@ const habitacionesStore = useHabitacionesStore()
 const mueblesStore = useMueblesStore()
 const ubicacionesStore = useUbicacionesStore()
 const propietariosStore = usePropietariosStore()
+const tiposFundaStore = useTiposFundaStore()
 
 const buscar = ref('')
 const categoriaFiltro = ref('')
@@ -52,6 +55,7 @@ const form = ref({
   ubicacion_id: '',
   propietario_ids: [],
   juego_base_id: '',
+  fundas: [],
 })
 
 const mueblesFiltrados = computed(() => {
@@ -113,6 +117,7 @@ onMounted(async () => {
   juegosStore.fetchJuegos(buildParams())
   categoriasStore.fetchCategorias()
   propietariosStore.fetchPropietarios()
+  tiposFundaStore.fetchTiposFunda()
   await Promise.all([
     habitacionesStore.fetchHabitaciones(),
     mueblesStore.fetchMuebles(),
@@ -155,6 +160,7 @@ function abrirFormulario(juego = null) {
       ubicacion_id: juego.ubicacion?.id || '',
       propietario_ids: juego.propietarios?.map((p) => p.id) || [],
       juego_base_id: juego.juego_base_id || '',
+      fundas: normalizeFundas(juego.fundas),
     }
   } else {
     editando.value = null
@@ -173,6 +179,7 @@ function abrirFormulario(juego = null) {
       ubicacion_id: '',
       propietario_ids: [],
       juego_base_id: '',
+      fundas: [],
     }
   }
   mostrarFormulario.value = true
@@ -189,10 +196,15 @@ function onMuebleChange() {
 
 async function guardar() {
   try {
+    const payload = {
+      ...form.value,
+      fundas: normalizeFundas(form.value.fundas),
+    }
+
     if (editando.value) {
-      await juegosStore.actualizarJuego(editando.value, form.value)
+      await juegosStore.actualizarJuego(editando.value, payload)
     } else {
-      await juegosStore.crearJuego(form.value)
+      await juegosStore.crearJuego(payload)
     }
     mostrarFormulario.value = false
     juegosStore.fetchJuegos()
@@ -218,6 +230,16 @@ function estadoClase(estado) {
     baja: 'badge-danger',
   }
   return clases[estado] || ''
+}
+
+function normalizeFundas(fundas = []) {
+  return fundas
+    .filter((funda) => funda.tipo_funda_id && funda.cantidad_cartas)
+    .map((funda) => ({
+      tipo_funda_id: Number(funda.tipo_funda_id),
+      cantidad_cartas: Number(funda.cantidad_cartas),
+      enfundadas: Boolean(funda.enfundadas),
+    }))
 }
 </script>
 
@@ -432,6 +454,12 @@ function estadoClase(estado) {
             </select>
           </div>
           <LocationPicker v-model="form.ubicacion_id" />
+          <div class="form-group">
+            <GameSleevesEditor
+              v-model="form.fundas"
+              :tipos-funda="tiposFundaStore.tiposFunda"
+            />
+          </div>
           <div class="form-group">
             <label>Fecha de compra</label>
             <input v-model="form.fecha_compra" type="date" class="input" />

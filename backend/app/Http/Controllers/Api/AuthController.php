@@ -128,7 +128,25 @@ class AuthController extends Controller
     public function user(Request $request): JsonResponse
     {
         return response()->json([
-            'user' => $request->user()->only('id', 'name', 'email', 'bgg_username'),
+            'user' => $request->user()->only('id', 'name', 'email', 'bgg_username', 'no_enfundo'),
+        ]);
+    }
+
+    public function updateUser(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'bgg_username' => 'sometimes|nullable|string|max:255',
+            'no_enfundo' => 'sometimes|boolean',
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+        $user->fill($validated);
+        $user->save();
+
+        return response()->json([
+            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo'),
         ]);
     }
 
