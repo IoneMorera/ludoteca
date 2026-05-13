@@ -11,7 +11,7 @@ class JuegoController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Juego::with(['categoria', 'ubicacion.mueble.habitacion', 'propietarios']);
+        $query = Juego::with(['categoria', 'ubicacion.mueble.habitacion', 'propietarios', 'fundas.tipoFunda']);
 
         if ($request->has('categoria_id')) {
             $query->where('categoria_id', $request->categoria_id);
@@ -70,10 +70,16 @@ class JuegoController extends Controller
             'juego_base_id' => 'nullable|exists:juegos,id',
             'propietario_ids' => 'nullable|array',
             'propietario_ids.*' => 'exists:propietarios,id',
+            'fundas' => 'nullable|array',
+            'fundas.*.tipo_funda_id' => 'required|distinct|exists:tipos_funda,id',
+            'fundas.*.cantidad_cartas' => 'required|integer|min:1|max:65535',
+            'fundas.*.enfundadas' => 'boolean',
         ]);
 
         $propietarioIds = $validated['propietario_ids'] ?? [];
+        $fundas = $validated['fundas'] ?? [];
         unset($validated['propietario_ids']);
+        unset($validated['fundas']);
 
         $juego = Juego::create($validated);
 
@@ -81,7 +87,9 @@ class JuegoController extends Controller
             $juego->propietarios()->sync($propietarioIds);
         }
 
-        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'propietarios']);
+        $this->syncFundas($juego, $fundas);
+
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'propietarios', 'fundas.tipoFunda']);
 
         return response()->json($juego, 201);
     }
@@ -93,9 +101,11 @@ class JuegoController extends Controller
             'ubicacion.mueble.habitacion',
             'prestamos',
             'propietarios',
+            'fundas.tipoFunda',
             'juegoBase',
             'expansiones.propietarios',
             'expansiones.ubicacion.mueble.habitacion',
+            'expansiones.fundas.tipoFunda',
         ]);
 
         return response()->json($juego);
@@ -118,10 +128,16 @@ class JuegoController extends Controller
             'juego_base_id' => 'nullable|exists:juegos,id',
             'propietario_ids' => 'nullable|array',
             'propietario_ids.*' => 'exists:propietarios,id',
+            'fundas' => 'nullable|array',
+            'fundas.*.tipo_funda_id' => 'required|distinct|exists:tipos_funda,id',
+            'fundas.*.cantidad_cartas' => 'required|integer|min:1|max:65535',
+            'fundas.*.enfundadas' => 'boolean',
         ]);
 
         $propietarioIds = $validated['propietario_ids'] ?? null;
+        $fundas = $validated['fundas'] ?? null;
         unset($validated['propietario_ids']);
+        unset($validated['fundas']);
 
         $juego->update($validated);
 
@@ -129,7 +145,11 @@ class JuegoController extends Controller
             $juego->propietarios()->sync($propietarioIds);
         }
 
-        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'propietarios']);
+        if ($fundas !== null) {
+            $this->syncFundas($juego, $fundas);
+        }
+
+        $juego->load(['categoria', 'ubicacion.mueble.habitacion', 'propietarios', 'fundas.tipoFunda']);
 
         return response()->json($juego);
     }
@@ -139,5 +159,18 @@ class JuegoController extends Controller
         $juego->delete();
 
         return response()->json(null, 204);
+    }
+
+    private function syncFundas(Juego $juego, array $fundas): void
+    {
+        $juego->fundas()->delete();
+
+        foreach ($fundas as $funda) {
+            $juego->fundas()->create([
+                'tipo_funda_id' => $funda['tipo_funda_id'],
+                'cantidad_cartas' => $funda['cantidad_cartas'],
+                'enfundadas' => $funda['enfundadas'] ?? false,
+            ]);
+        }
     }
 }

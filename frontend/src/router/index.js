@@ -39,6 +39,12 @@ const routes = [
     meta: { title: 'Categorías' },
   },
   {
+    path: '/fundas',
+    name: 'fundas',
+    component: () => import('../views/TiposFundaView.vue'),
+    meta: { title: 'Fundas' },
+  },
+  {
     path: '/prestamos',
     name: 'prestamos',
     component: () => import('../views/PrestamosView.vue'),

@@ -15,6 +15,7 @@ const menuItems = [
   { type: 'item', name: 'Colecciones', path: '/propietarios', icon: '👥' },
   { type: 'item', name: 'Juegos', path: '/juegos', icon: '🎲' },
   { type: 'item', name: 'Categorías', path: '/categorias', icon: '📂' },
+  { type: 'item', name: 'Fundas', path: '/fundas', icon: '🃏' },
   { type: 'item', name: 'Colecciones Conjuntas', path: '/colecciones/conjunta', icon: '🤝' },
   {
     type: 'group',

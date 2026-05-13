@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingState from '../components/LoadingState.vue'
@@ -8,8 +8,17 @@ const stats = ref({
   totalJuegos: 0,
   juegosDisponibles: 0,
   totalExpansiones: 0,
+  fundasFaltantes: [],
 })
 const loading = ref(true)
+const mostrarFundasFaltantes = ref(false)
+const fundasDesplegadas = ref({})
+
+const totalFundasFaltantes = computed(() => {
+  return stats.value.fundasFaltantes.reduce((total, funda) => {
+    return total + Number(funda.cantidad_total || 0)
+  }, 0)
+})
 
 onMounted(async () => {
   try {
@@ -18,6 +27,7 @@ onMounted(async () => {
       totalJuegos: data.totalJuegos || 0,
       juegosDisponibles: data.juegosDisponibles || 0,
       totalExpansiones: data.totalExpansiones || 0,
+      fundasFaltantes: data.fundasFaltantes || [],
     }
   } catch {
     // Stats will remain at 0
@@ -25,6 +35,13 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+function toggleJuegos(tipoFundaId) {
+  fundasDesplegadas.value = {
+    ...fundasDesplegadas.value,
+    [tipoFundaId]: !fundasDesplegadas.value[tipoFundaId],
+  }
+}
 </script>
 
 <template>
@@ -62,6 +79,57 @@ onMounted(async () => {
         </div>
       </div>
 
+    </div>
+
+    <div v-if="!loading && stats.fundasFaltantes.length" class="fundas-alert">
+      <button
+        type="button"
+        class="fundas-alert__summary"
+        @click="mostrarFundasFaltantes = !mostrarFundasFaltantes"
+      >
+        <span class="fundas-alert__icon">🃏</span>
+        <span>
+          <strong>Faltan Fundas</strong>
+          <small>{{ totalFundasFaltantes }} fundas pendientes en {{ stats.fundasFaltantes.length }} tamaños</small>
+        </span>
+        <span class="fundas-alert__chevron">{{ mostrarFundasFaltantes ? '▴' : '▾' }}</span>
+      </button>
+
+      <div v-if="mostrarFundasFaltantes" class="fundas-alert__list">
+        <div
+          v-for="funda in stats.fundasFaltantes"
+          :key="funda.tipo_funda_id"
+          class="fundas-alert__item"
+        >
+          <button
+            type="button"
+            class="fundas-alert__item-header"
+            @click="toggleJuegos(funda.tipo_funda_id)"
+          >
+            <span>
+              <strong>{{ funda.nombre || 'Tipo no disponible' }}</strong>
+              <small>{{ funda.ancho_mm }} x {{ funda.alto_mm }} mm</small>
+            </span>
+            <span class="fundas-alert__quantity">{{ funda.cantidad_total }} fundas</span>
+            <span>{{ fundasDesplegadas[funda.tipo_funda_id] ? '▴' : '▾' }}</span>
+          </button>
+
+          <div
+            v-if="fundasDesplegadas[funda.tipo_funda_id]"
+            class="fundas-alert__games"
+          >
+            <router-link
+              v-for="juego in funda.juegos"
+              :key="juego.id"
+              :to="`/juegos/${juego.id}`"
+              class="fundas-alert__game"
+            >
+              <span>{{ juego.nombre || 'Juego no disponible' }}</span>
+              <strong>{{ juego.cantidad_cartas }} cartas</strong>
+            </router-link>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="quick-actions">
@@ -116,6 +184,89 @@ onMounted(async () => {
 }
 .stat-expansiones {
   border-left-color: #ff9800;
+}
+
+.fundas-alert {
+  background: var(--bg-surface);
+  border: 1px solid #f59e0b;
+  border-left: 4px solid #f59e0b;
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  margin-bottom: 2rem;
+  overflow: hidden;
+}
+
+.fundas-alert__summary,
+.fundas-alert__item-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: transparent;
+  border: 0;
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+}
+
+.fundas-alert__summary {
+  padding: 1rem 1.25rem;
+}
+
+.fundas-alert__summary small,
+.fundas-alert__item-header small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
+}
+
+.fundas-alert__icon {
+  font-size: 1.8rem;
+}
+
+.fundas-alert__chevron {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.fundas-alert__list {
+  border-top: 1px solid var(--border-soft);
+}
+
+.fundas-alert__item + .fundas-alert__item {
+  border-top: 1px solid var(--border-soft);
+}
+
+.fundas-alert__item-header {
+  padding: 0.85rem 1.25rem;
+}
+
+.fundas-alert__quantity {
+  margin-left: auto;
+  white-space: nowrap;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.fundas-alert__games {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0 1.25rem 0.9rem 2.25rem;
+}
+
+.fundas-alert__game {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--primary);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.fundas-alert__game:hover {
+  text-decoration: underline;
 }
 
 .stat-icon {
@@ -173,5 +324,18 @@ onMounted(async () => {
 
 .action-icon {
   font-size: 2rem;
+}
+
+@media (max-width: 600px) {
+  .fundas-alert__summary,
+  .fundas-alert__item-header,
+  .fundas-alert__game {
+    align-items: flex-start;
+  }
+
+  .fundas-alert__game {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
 }
 </style>

@@ -1,16 +1,19 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:dio/dio.dart';
-import '../providers/juegos_provider.dart';
+
 import '../models/juego.dart';
-import '../services/api_service.dart';
+import '../providers/juegos_provider.dart';
 import '../widgets/game_image.dart';
 
+/// Detalle de un juego.
+///
+/// Se identifica preferentemente por `juegoLocalId`. Si se navega con un
+/// `juegoServerId` se resuelve el local a partir de \u00e9l.
 class JuegoDetailScreen extends StatefulWidget {
-  final int juegoId;
-  const JuegoDetailScreen({super.key, required this.juegoId});
+  final int? juegoLocalId;
+  final int? juegoServerId;
+  const JuegoDetailScreen({super.key, this.juegoLocalId, this.juegoServerId});
 
   @override
   State<JuegoDetailScreen> createState() => _JuegoDetailScreenState();
@@ -20,59 +23,14 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<JuegosProvider>().fetchJuego(widget.juegoId);
-  }
-
-  Future<void> _changeImage() async {
-    final picker = ImagePicker();
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Cámara'),
-              onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Galería'),
-              onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (source == null) return;
-
-    final picked = await picker.pickImage(
-      source: source,
-      maxWidth: 800,
-      imageQuality: 80,
-    );
-    if (picked == null) return;
-
-    try {
-      final formData = FormData.fromMap({
-        'imagen': await MultipartFile.fromFile(File(picked.path).path),
-        '_method': 'PUT',
-      });
-      await ApiService().upload('/juegos/${widget.juegoId}', formData);
-      if (mounted) {
-        context.read<JuegosProvider>().fetchJuego(widget.juegoId);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Imagen actualizada')),
-        );
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<JuegosProvider>();
+      if (widget.juegoLocalId != null) {
+        provider.fetchJuego(widget.juegoLocalId!);
+      } else if (widget.juegoServerId != null) {
+        provider.fetchJuego(widget.juegoServerId!, isServerId: true);
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
+    });
   }
 
   String _formatDate(String? dateStr) {
@@ -80,6 +38,16 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     final parts = dateStr.split('-');
     if (parts.length != 3) return dateStr;
     return '${parts[2]}-${parts[1]}-${parts[0]}';
+  }
+
+  Future<void> _openEditor(BuildContext context, Juego juego) async {
+    if (juego.localId == null) return;
+    final result = await Navigator.of(context)
+        .pushNamed('/juego/editar', arguments: juego.localId);
+    if (!mounted) return;
+    if (result == true) {
+      await this.context.read<JuegosProvider>().refreshDetail();
+    }
   }
 
   @override
@@ -91,13 +59,21 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(juego?.nombre ?? 'Cargando...'),
+        actions: [
+          if (juego != null)
+            IconButton(
+              tooltip: 'Editar',
+              onPressed: () => _openEditor(context, juego),
+              icon: const Icon(Icons.edit_outlined),
+            ),
+        ],
       ),
       body: provider.loading
           ? const Center(child: CircularProgressIndicator())
           : juego == null
               ? const Center(child: Text('Juego no encontrado'))
               : RefreshIndicator(
-                  onRefresh: () => provider.fetchJuego(widget.juegoId),
+                  onRefresh: () => provider.refreshDetail(),
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
@@ -114,29 +90,94 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                                   .toList(),
                             )),
                       ],
-                      if (juego.expansiones.isNotEmpty) ...[
+                      if (juego.fundas.isNotEmpty) ...[
                         const SizedBox(height: 20),
-                        _buildSection('Expansiones (${juego.expansiones.length})',
-                            theme,
+                        _buildSection('Cartas y fundas', theme,
                             child: Column(
-                              children: juego.expansiones
-                                  .map((exp) => ListTile(
-                                        dense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                        leading: const Icon(Icons.extension,
-                                            size: 20),
-                                        title: Text(exp.nombre,
-                                            style:
-                                                const TextStyle(fontSize: 14)),
-                                        trailing:
-                                            const Icon(Icons.chevron_right,
-                                                size: 18),
-                                        onTap: () => Navigator.of(context)
-                                            .pushNamed('/juego',
-                                                arguments: exp.id),
+                              children: juego.fundas
+                                  .map((funda) => Card(
+                                        elevation: 0,
+                                        margin:
+                                            const EdgeInsets.only(bottom: 8),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: ListTile(
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 4,
+                                          ),
+                                          leading: CircleAvatar(
+                                            backgroundColor: (funda.enfundadas
+                                                    ? Colors.green
+                                                    : Colors.orange)
+                                                .withValues(alpha: 0.1),
+                                            child: Icon(
+                                              Icons.style,
+                                              color: funda.enfundadas
+                                                  ? Colors.green
+                                                  : Colors.orange,
+                                            ),
+                                          ),
+                                          title: Text(
+                                            funda.tipoTexto,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            '${funda.cantidadCartas} cartas',
+                                          ),
+                                          trailing: Chip(
+                                            label: Text(
+                                              funda.enfundadas
+                                                  ? 'Enfundadas'
+                                                  : 'Faltan',
+                                            ),
+                                            backgroundColor: (funda.enfundadas
+                                                    ? Colors.green
+                                                    : Colors.orange)
+                                                .withValues(alpha: 0.1),
+                                            labelStyle: TextStyle(
+                                              color: funda.enfundadas
+                                                  ? Colors.green[700]
+                                                  : Colors.orange[700],
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
                                       ))
                                   .toList(),
                             )),
+                      ],
+                      if (juego.expansiones.isNotEmpty) ...[
+                        const SizedBox(height: 20),
+                        _buildSection(
+                          'Expansiones (${juego.expansiones.length})',
+                          theme,
+                          child: Column(
+                            children: juego.expansiones
+                                .map((exp) => ListTile(
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: const Icon(Icons.extension,
+                                          size: 20),
+                                      title: Text(exp.nombre,
+                                          style:
+                                              const TextStyle(fontSize: 14)),
+                                      trailing: const Icon(Icons.chevron_right,
+                                          size: 18),
+                                      onTap: () => Navigator.of(context)
+                                          .pushNamed('/juego',
+                                              arguments: exp.localId),
+                                    ))
+                                .toList(),
+                          ),
+                        ),
                       ],
                     ],
                   ),
@@ -148,30 +189,11 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: _changeImage,
-          child: Stack(
-            children: [
-              GameImage(
-                juego: juego,
-                width: 120,
-                height: 120,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              Positioned(
-                bottom: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                ),
-              ),
-            ],
-          ),
+        GameImage(
+          juego: juego,
+          width: 120,
+          height: 120,
+          borderRadius: BorderRadius.circular(12),
         ),
         const SizedBox(width: 16),
         Expanded(
@@ -185,6 +207,12 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                         style: theme.textTheme.titleLarge
                             ?.copyWith(fontWeight: FontWeight.bold)),
                   ),
+                  if (juego.dirty)
+                    const Tooltip(
+                      message: 'Cambios pendientes de sincronizar',
+                      child: Icon(Icons.sync_problem,
+                          color: Colors.orange, size: 18),
+                    ),
                 ],
               ),
               if (juego.esExpansion) ...[
@@ -196,7 +224,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     color: Colors.blue[50],
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text('Expansión',
+                  child: Text('Expansi\u00f3n',
                       style: TextStyle(
                           fontSize: 12,
                           color: Colors.blue[700],
@@ -213,8 +241,8 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
               if (juego.esExpansion && juego.juegoBase != null) ...[
                 const SizedBox(height: 8),
                 InkWell(
-                  onTap: () => Navigator.of(context)
-                      .pushNamed('/juego', arguments: juego.juegoBase!.id),
+                  onTap: () => Navigator.of(context).pushNamed('/juego',
+                      arguments: juego.juegoBase!.localId),
                   child: Text('Juego base: ${juego.juegoBase!.nombre}',
                       style: TextStyle(
                           color: theme.colorScheme.primary,
@@ -231,16 +259,14 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
 
   Widget _buildInfoGrid(Juego juego, ThemeData theme) {
     final items = <_InfoItem>[
-      _InfoItem('Categoría', juego.categoria?.nombre ?? '-', Icons.category),
+      _InfoItem('Categor\u00eda', juego.categoria?.nombre ?? '-', Icons.category),
       _InfoItem('Jugadores', juego.jugadoresTexto, Icons.people),
       _InfoItem('Edad', juego.edadTexto, Icons.child_care),
       _InfoItem('Estado', juego.estado ?? '-', Icons.info_outline),
-      _InfoItem(
-          'Fecha compra', _formatDate(juego.fechaCompra), Icons.calendar_today),
-      _InfoItem(
-          'Ubicación',
-          juego.ubicacion?.rutaCompleta ?? 'Sin asignar',
-          Icons.location_on),
+      _InfoItem('Fecha compra', _formatDate(juego.fechaCompra),
+          Icons.calendar_today),
+      _InfoItem('Ubicaci\u00f3n',
+          juego.ubicacion?.rutaCompleta ?? 'Sin asignar', Icons.location_on),
     ];
 
     return GridView.count(

@@ -6,15 +6,18 @@ import { resolveImageUrl } from '../utils/images'
 import { useJuegosStore } from '../stores/juegos'
 import { useCategoriasStore } from '../stores/categorias'
 import { usePropietariosStore } from '../stores/propietarios'
+import { useTiposFundaStore } from '../stores/tiposFunda'
 import StatusBadge from '../components/StatusBadge.vue'
 import FormModal from '../components/FormModal.vue'
 import LocationPicker from '../components/LocationPicker.vue'
+import GameSleevesEditor from '../components/GameSleevesEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
 const juegosStore = useJuegosStore()
 const categoriasStore = useCategoriasStore()
 const propietariosStore = usePropietariosStore()
+const tiposFundaStore = useTiposFundaStore()
 
 const mostrarFormulario = ref(false)
 const form = ref({})
@@ -23,6 +26,7 @@ onMounted(async () => {
   await juegosStore.fetchJuego(route.params.id)
   categoriasStore.fetchCategorias()
   propietariosStore.fetchPropietarios()
+  tiposFundaStore.fetchTiposFunda()
 })
 
 const juego = computed(() => juegosStore.juego)
@@ -34,6 +38,7 @@ const propietariosTexto = computed(() => {
 
 const esExpansion = computed(() => !!juego.value?.juego_base_id)
 const tieneExpansiones = computed(() => juego.value?.expansiones?.length > 0)
+const tieneFundas = computed(() => juego.value?.fundas?.length > 0)
 
 function abrirEdicion() {
   const j = juego.value
@@ -50,18 +55,34 @@ function abrirEdicion() {
     ubicacion_id: j.ubicacion?.id || '',
     propietario_ids: j.propietarios?.map((p) => p.id) || [],
     juego_base_id: j.juego_base_id || '',
+    fundas: normalizeFundas(j.fundas),
   }
   mostrarFormulario.value = true
 }
 
 async function guardar() {
   try {
-    await juegosStore.actualizarJuego(juego.value.id, form.value)
+    const payload = {
+      ...form.value,
+      fundas: normalizeFundas(form.value.fundas),
+    }
+
+    await juegosStore.actualizarJuego(juego.value.id, payload)
     mostrarFormulario.value = false
     await juegosStore.fetchJuego(route.params.id)
   } catch (e) {
     alert(e.response?.data?.message || 'Error al guardar')
   }
+}
+
+function normalizeFundas(fundas = []) {
+  return fundas
+    .filter((funda) => funda.tipo_funda_id && funda.cantidad_cartas)
+    .map((funda) => ({
+      tipo_funda_id: Number(funda.tipo_funda_id),
+      cantidad_cartas: Number(funda.cantidad_cartas),
+      enfundadas: Boolean(funda.enfundadas),
+    }))
 }
 </script>
 
@@ -139,6 +160,59 @@ async function guardar() {
           <span class="info-label">Propietarios</span>
           <span class="info-value">{{ propietariosTexto }}</span>
         </div>
+      </div>
+
+      <div class="fundas-section">
+        <h2>Cartas y fundas</h2>
+        <div v-if="tieneFundas" class="table-container">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Tipo de funda</th>
+                <th>Tamaño</th>
+                <th>Cartas</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="funda in juego.fundas" :key="funda.id">
+                <td>{{ funda.tipo_funda?.nombre || '-' }}</td>
+                <td>
+                  <template v-if="funda.tipo_funda">
+                    {{ funda.tipo_funda.ancho_mm }} x {{ funda.tipo_funda.alto_mm }} mm
+                  </template>
+                  <template v-else>-</template>
+                </td>
+                <td>{{ funda.cantidad_cartas }}</td>
+                <td>{{ funda.enfundadas ? 'Enfundadas' : 'Sin enfundar' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="tieneFundas" class="cards-mobile">
+          <div v-for="funda in juego.fundas" :key="'funda-card-' + funda.id" class="funda-card">
+            <div class="funda-card__header">
+              <strong>{{ funda.tipo_funda?.nombre || '-' }}</strong>
+              <span
+                class="badge"
+                :class="funda.enfundadas ? 'badge-success' : 'badge-warning'"
+              >
+                {{ funda.enfundadas ? 'Enfundadas' : 'Sin enfundar' }}
+              </span>
+            </div>
+            <div class="funda-card__body">
+              <span>
+                Tamaño:
+                <template v-if="funda.tipo_funda">
+                  {{ funda.tipo_funda.ancho_mm }} x {{ funda.tipo_funda.alto_mm }} mm
+                </template>
+                <template v-else>-</template>
+              </span>
+              <span>{{ funda.cantidad_cartas }} cartas</span>
+            </div>
+          </div>
+        </div>
+        <p v-else class="fundas-empty">No se han indicado cartas ni fundas para este juego.</p>
       </div>
 
       <div v-if="tieneExpansiones" class="expansiones-section">
@@ -267,6 +341,12 @@ async function guardar() {
           </div>
         </div>
         <LocationPicker v-model="form.ubicacion_id" />
+        <div class="form-group">
+          <GameSleevesEditor
+            v-model="form.fundas"
+            :tipos-funda="tiposFundaStore.tiposFunda"
+          />
+        </div>
         <div class="form-group">
           <label>Fecha de compra</label>
           <input v-model="form.fecha_compra" type="date" class="input" />
@@ -408,6 +488,45 @@ async function guardar() {
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-main);
+}
+
+.fundas-section {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.fundas-section h2 {
+  font-size: 1.2rem;
+  color: var(--primary);
+  margin-bottom: 0.75rem;
+}
+
+.fundas-empty {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.funda-card {
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 0.85rem;
+}
+
+.funda-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.funda-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
 }
 
 .expansiones-section {

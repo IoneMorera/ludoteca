@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:provider/provider.dart';
+
+import '../data/sync_service.dart';
+import '../models/juego.dart';
+import '../providers/sync_provider.dart';
 import '../services/api_service.dart';
 import '../services/image_cache_manager.dart';
-import '../models/juego.dart';
 
 class BggScreen extends StatefulWidget {
   const BggScreen({super.key});
@@ -51,11 +55,14 @@ class _BggScreenState extends State<BggScreen> {
     });
     try {
       final response = await _api.get('/bgg/collection/$username');
-      setState(() {
-        _bggGames =
-            (response.data as List).cast<Map<String, dynamic>>();
-      });
-    } catch (_) {}
+      final data = response.data;
+      final games = data is Map<String, dynamic>
+          ? (data['games'] as List?)?.cast<Map<String, dynamic>>() ?? []
+          : (data as List).cast<Map<String, dynamic>>();
+      setState(() => _bggGames = games);
+    } catch (e) {
+      setState(() => _importMessage = 'Error al cargar colecci\u00f3n: $e');
+    }
     setState(() => _loadingCollection = false);
   }
 
@@ -73,8 +80,14 @@ class _BggScreenState extends State<BggScreen> {
       final data = response.data;
       setState(() {
         _importMessage =
-            'Importados: ${data['imported'] ?? 0}, ya existían: ${data['skipped'] ?? 0}';
+            'Importados: ${data['imported'] ?? 0}, ya exist\u00edan: ${data['skipped'] ?? 0}';
       });
+      // dispara una sincronizaci\u00f3n para descargar los juegos importados.
+      if (mounted) {
+        context.read<SyncProvider>().syncNow(fullPull: false);
+      } else {
+        SyncService().syncAll();
+      }
     } catch (e) {
       setState(() => _importMessage = 'Error al importar');
     }
@@ -88,21 +101,38 @@ class _BggScreenState extends State<BggScreen> {
       _importMessage = null;
     });
     try {
+      final fetched = await _api
+          .get('/bgg/expansions/${_selectedOwner!.bggUsername}');
+      final fetchedData = fetched.data;
+      final expansions = fetchedData is Map<String, dynamic>
+          ? (fetchedData['expansions'] as List?)?.cast<Map<String, dynamic>>() ??
+              []
+          : (fetchedData as List).cast<Map<String, dynamic>>();
+
+      if (expansions.isEmpty) {
+        setState(() => _importMessage = 'No hay expansiones en BGG para este usuario.');
+        return;
+      }
+
       final response = await _api.post('/bgg/import-expansions', data: {
-        'username': _selectedOwner!.bggUsername,
+        'expansions': expansions,
         'bgg_username': _selectedOwner!.bggUsername,
       });
       final data = response.data;
-      setState(() {
-        _importMessage =
-            'Expansiones importadas: ${data['imported'] ?? 0}, omitidas: ${data['skipped'] ?? 0}';
-        if (data['missing'] != null && (data['missing'] as List).isNotEmpty) {
-          _importMessage =
-              '$_importMessage\nSin juego base: ${(data['missing'] as List).join(', ')}';
-        }
-      });
+      var msg =
+          'Expansiones importadas: ${data['imported'] ?? 0}, omitidas: ${data['skipped'] ?? 0}';
+      if (data['omitted'] != null &&
+          (data['omitted'] as List).isNotEmpty) {
+        msg = '$msg\nSin juego base: ${(data['omitted'] as List).join(', ')}';
+      }
+      setState(() => _importMessage = msg);
+      if (mounted) {
+        context.read<SyncProvider>().syncNow(fullPull: false);
+      } else {
+        SyncService().syncAll();
+      }
     } catch (e) {
-      setState(() => _importMessage = 'Error al importar expansiones');
+      setState(() => _importMessage = 'Error al importar expansiones: $e');
     }
     setState(() => _importing = false);
   }

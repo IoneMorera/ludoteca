@@ -1,11 +1,35 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../data/categoria_repository.dart';
+import '../data/juego_repository.dart';
+import '../data/outbox_dao.dart';
+import '../data/propietario_repository.dart';
+import '../data/sync_service.dart';
+import '../data/tipo_funda_repository.dart';
+import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
-import '../services/api_service.dart';
+import '../services/database_service.dart';
 
+/// Provider que centraliza el acceso a los juegos para la UI.
+///
+/// Todas las lecturas/escrituras se hacen contra la BBDD local (offline-first).
+/// El push al servidor lo realiza `SyncService` desde el outbox.
 class JuegosProvider extends ChangeNotifier {
-  final ApiService _api = ApiService();
+  final DatabaseService _dbService = DatabaseService();
+  late final OutboxDao _outbox = OutboxDao(_dbService);
+  late final JuegoRepository _juegos = JuegoRepository(_dbService, _outbox);
+  late final CategoriaRepository _categorias =
+      CategoriaRepository(_dbService, _outbox);
+  late final PropietarioRepository _propietarios =
+      PropietarioRepository(_dbService, _outbox);
+  late final UbicacionRepository _ubicaciones =
+      UbicacionRepository(_dbService, _outbox);
+  late final TipoFundaRepository _tiposFunda =
+      TipoFundaRepository(_dbService, _outbox);
 
-  List<Juego> _juegos = [];
+  List<Juego> _items = [];
   Juego? _juegoDetalle;
   bool _loading = false;
   int _currentPage = 1;
@@ -13,80 +37,105 @@ class JuegosProvider extends ChangeNotifier {
   int _total = 0;
   String _busqueda = '';
   Map<String, dynamic> _stats = {};
+  List<Map<String, dynamic>> _fundasFaltantes = [];
 
-  List<Juego> get juegos => _juegos;
+  List<Juego> get juegos => _items;
   Juego? get juegoDetalle => _juegoDetalle;
   bool get loading => _loading;
   int get currentPage => _currentPage;
   int get lastPage => _lastPage;
   int get total => _total;
   Map<String, dynamic> get stats => _stats;
+  List<Map<String, dynamic>> get fundasFaltantes => _fundasFaltantes;
+
+  static const int _perPage = 30;
+
+  JuegoRepository get juegoRepository => _juegos;
+  CategoriaRepository get categoriaRepository => _categorias;
+  PropietarioRepository get propietarioRepository => _propietarios;
+  UbicacionRepository get ubicacionRepository => _ubicaciones;
+  TipoFundaRepository get tipoFundaRepository => _tiposFunda;
 
   Future<void> fetchJuegos({int page = 1, String? buscar}) async {
     _loading = true;
     notifyListeners();
-
     if (buscar != null) _busqueda = buscar;
-
     try {
-      final params = <String, dynamic>{'page': page};
-      if (_busqueda.isNotEmpty) params['buscar'] = _busqueda;
-
-      final response = await _api.get('/juegos', params: params);
-      final data = response.data;
-
-      _juegos = (data['data'] as List).map((j) => Juego.fromJson(j)).toList();
-      _currentPage = data['current_page'] ?? 1;
-      _lastPage = data['last_page'] ?? 1;
-      _total = data['total'] ?? 0;
-    } catch (_) {}
-
+      _items = await _juegos.search(
+        buscar: _busqueda.isEmpty ? null : _busqueda,
+        page: page,
+        perPage: _perPage,
+      );
+      _total = await _juegos.count(buscar: _busqueda.isEmpty ? null : _busqueda);
+      _currentPage = page;
+      _lastPage = ((_total / _perPage).ceil()).clamp(1, 9999);
+    } catch (e) {
+      debugPrint('fetchJuegos local error: $e');
+    }
     _loading = false;
     notifyListeners();
   }
 
-  Future<void> fetchJuego(int id) async {
+  Future<void> fetchJuego(int localOrServerId, {bool isServerId = false}) async {
     _loading = true;
     _juegoDetalle = null;
     notifyListeners();
-
     try {
-      final response = await _api.get('/juegos/$id');
-      _juegoDetalle = Juego.fromJson(response.data);
-    } catch (_) {}
-
+      if (isServerId) {
+        _juegoDetalle = await _juegos.getByServerId(localOrServerId);
+      } else {
+        _juegoDetalle = await _juegos.getByLocalId(localOrServerId);
+        _juegoDetalle ??= await _juegos.getByServerId(localOrServerId);
+      }
+    } catch (e) {
+      debugPrint('fetchJuego local error: $e');
+    }
     _loading = false;
+    notifyListeners();
+  }
+
+  Future<void> refreshDetail() async {
+    if (_juegoDetalle == null) return;
+    final localId = _juegoDetalle!.localId;
+    if (localId != null) {
+      _juegoDetalle = await _juegos.getByLocalId(localId);
+    } else if (_juegoDetalle!.serverId != null) {
+      _juegoDetalle = await _juegos.getByServerId(_juegoDetalle!.serverId!);
+    }
     notifyListeners();
   }
 
   Future<void> fetchStats() async {
     try {
-      final response = await _api.get('/stats');
-      _stats = response.data;
-    } catch (_) {}
+      _stats = await _juegos.stats();
+      _fundasFaltantes = await _juegos.fundasFaltantesAgrupadas();
+      _stats['fundasFaltantes'] = _fundasFaltantes;
+    } catch (e) {
+      debugPrint('fetchStats local error: $e');
+    }
     notifyListeners();
   }
 
-  Future<List<Categoria>> fetchCategorias() async {
-    try {
-      final response = await _api.get('/categorias');
-      return (response.data as List)
-          .map((c) => Categoria.fromJson(c))
-          .toList();
-    } catch (_) {
-      return [];
-    }
+  Future<int> saveJuego(
+    Juego juego, {
+    required List<int> propietarioLocalIds,
+    required List<JuegoFundaDraft> fundas,
+  }) async {
+    final localId = await _juegos.save(
+      juego,
+      propietarioLocalIds: propietarioLocalIds,
+      fundas: fundas,
+    );
+    // intenta sincronizar en segundo plano
+    unawaited(SyncService().syncAll());
+    await fetchJuegos(page: _currentPage);
+    return localId;
   }
 
-  Future<List<Propietario>> fetchPropietarios() async {
-    try {
-      final response = await _api.get('/propietarios');
-      return (response.data as List)
-          .map((p) => Propietario.fromJson(p))
-          .toList();
-    } catch (_) {
-      return [];
-    }
+  Future<void> deleteJuego(int localId) async {
+    await _juegos.delete(localId);
+    unawaited(SyncService().syncAll());
+    await fetchJuegos(page: _currentPage);
   }
 
   void clearBusqueda() {

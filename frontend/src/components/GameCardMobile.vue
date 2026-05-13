@@ -9,6 +9,7 @@ const props = defineProps({
   showFechaCompra: { type: Boolean, default: false },
   showUbicacion: { type: Boolean, default: true },
   showExpansiones: { type: Boolean, default: true },
+  showFundas: { type: Boolean, default: true },
 })
 
 function propietariosTexto(propietarios) {
@@ -18,6 +19,13 @@ function propietariosTexto(propietarios) {
 
 function esCompartido(juego) {
   return juego.propietarios && juego.propietarios.length > 1
+}
+
+function fundaTexto(funda) {
+  const tipo = funda.tipo_funda
+  if (!tipo) return 'Tipo no disponible'
+
+  return `${tipo.nombre} (${tipo.ancho_mm} x ${tipo.alto_mm} mm)`
 }
 </script>
 
@@ -82,6 +90,27 @@ function esCompartido(juego) {
           {{ juego.ubicacion.mueble?.nombre }} ›
           {{ juego.ubicacion.nombre }}
         </span>
+      </div>
+
+      <div v-if="showFundas && juego.fundas?.length" class="gcm__fundas">
+        <span class="gcm__label">Cartas y fundas</span>
+        <div class="gcm__fundas-list">
+          <div
+            v-for="funda in juego.fundas"
+            :key="funda.id || funda.tipo_funda_id"
+            class="gcm__funda-item"
+          >
+            <span>
+              {{ funda.cantidad_cartas }} x {{ fundaTexto(funda) }}
+            </span>
+            <span
+              class="badge gcm__funda-badge"
+              :class="funda.enfundadas ? 'badge-success' : 'badge-warning'"
+            >
+              {{ funda.enfundadas ? 'Enfundadas' : 'Faltan' }}
+            </span>
+          </div>
+        </div>
       </div>
 
       <div v-if="showExpansiones && juego.expansiones?.length" class="gcm__expansiones">
@@ -217,6 +246,32 @@ function esCompartido(juego) {
 .gcm__badge {
   margin-right: 0.35rem;
   vertical-align: middle;
+}
+
+.gcm__fundas {
+  padding-top: 0.25rem;
+}
+
+.gcm__fundas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.25rem;
+}
+
+.gcm__funda-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-main);
+}
+
+.gcm__funda-badge {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
 }
 
 .gcm__expansiones {

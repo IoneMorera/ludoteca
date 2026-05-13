@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import '../data/sync_service.dart' show SyncStatus;
 import '../providers/auth_provider.dart';
+import '../providers/sync_provider.dart';
 import '../config/api_config.dart';
 import '../services/api_service.dart';
 
@@ -12,6 +15,25 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  String _appVersion = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPackageInfo();
+  }
+
+  Future<void> _loadPackageInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() => _appVersion = '${info.version}+${info.buildNumber}');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _appVersion = '?');
+    }
+  }
+
   Future<void> _editServerUrl() async {
     final ctrl = TextEditingController(text: ApiConfig.serverUrl);
     bool saving = false;
@@ -121,6 +143,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
           ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('Mi perfil'),
+            subtitle: const Text('Nombre, usuario BGG y preferencias'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).pushNamed('/profile'),
+          ),
+          const Divider(),
+          ListTile(
             leading: const Icon(Icons.category),
             title: const Text('Categorías'),
             subtitle: const Text('Gestiona las categorías de juegos'),
@@ -160,12 +190,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => Navigator.of(context).pushNamed('/bgg'),
           ),
           const Divider(),
-          ListTile(
-            leading: const Icon(Icons.camera_enhance),
-            title: const Text('Reconocer juego por foto'),
-            subtitle: const Text('Identifica un juego con la cámara'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).pushNamed('/recognize'),
+          Consumer<SyncProvider>(
+            builder: (context, sync, _) {
+              final s = sync.snapshot;
+              final String subtitle;
+              if (s.status == SyncStatus.syncing) {
+                subtitle = 'Sincronizando...';
+              } else if (s.lastError != null) {
+                subtitle = 'Ultimo error: ${s.lastError}';
+              } else if (s.lastSyncedAt != null) {
+                final hora =
+                    '${s.lastSyncedAt!.hour.toString().padLeft(2, '0')}:${s.lastSyncedAt!.minute.toString().padLeft(2, '0')}';
+                final pending = s.pendingOps > 0
+                    ? '  -  ${s.pendingOps} pendientes'
+                    : '';
+                subtitle = 'Sincronizado a las $hora$pending';
+              } else {
+                subtitle = 'Sin sincronizar todavia';
+              }
+              return ListTile(
+                leading: Icon(
+                  s.status == SyncStatus.error
+                      ? Icons.sync_problem
+                      : Icons.sync,
+                  color: s.status == SyncStatus.error ? Colors.red : null,
+                ),
+                title: const Text('Sincronizacion'),
+                subtitle: Text(subtitle),
+                trailing: s.status == SyncStatus.syncing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh),
+                onTap: s.status == SyncStatus.syncing
+                    ? null
+                    : () => sync.syncNow(fullPull: true),
+              );
+            },
           ),
           const Divider(),
           ListTile(
@@ -180,7 +243,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('Versión'),
-            subtitle: const Text('1.0.0'),
+            subtitle: Text(_appVersion.isEmpty ? '…' : _appVersion),
           ),
           const SizedBox(height: 32),
           FilledButton.tonalIcon(
@@ -197,4 +260,5 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
 }

@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsTombstone;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Juego extends Model
 {
-    use HasFactory;
+    use HasFactory, RecordsTombstone;
 
     protected $table = 'juegos';
 
@@ -25,6 +26,7 @@ class Juego extends Model
         'imagen',
         'bgg_id',
         'juego_base_id',
+        'no_enfundar',
     ];
 
     protected $casts = [
@@ -35,6 +37,7 @@ class Juego extends Model
         'fecha_compra' => 'date:Y-m-d',
         'bgg_id' => 'integer',
         'juego_base_id' => 'integer',
+        'no_enfundar' => 'boolean',
     ];
 
     public function categoria()
@@ -56,6 +59,11 @@ class Juego extends Model
     {
         return $this->belongsToMany(Propietario::class, 'juego_propietario')
             ->withTimestamps();
+    }
+
+    public function fundas()
+    {
+        return $this->hasMany(JuegoFunda::class);
     }
 
     public function juegoBase()

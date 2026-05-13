@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
+import '../data/sync_service.dart' show SyncStatus;
 import '../providers/juegos_provider.dart';
+import '../providers/sync_provider.dart';
 import '../models/juego.dart';
 import '../widgets/game_image.dart';
 
@@ -14,6 +16,7 @@ class JuegosListScreen extends StatefulWidget {
 
 class _JuegosListScreenState extends State<JuegosListScreen> {
   final _searchController = TextEditingController();
+  SyncStatus? _lastSyncStatus;
 
   @override
   void initState() {
@@ -22,11 +25,23 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       final provider = context.read<JuegosProvider>();
       provider.clearBusqueda();
       provider.fetchJuegos();
+      _lastSyncStatus = context.read<SyncProvider>().status;
+      context.read<SyncProvider>().addListener(_onSyncChanged);
     });
+  }
+
+  void _onSyncChanged() {
+    if (!mounted) return;
+    final syncStatus = context.read<SyncProvider>().status;
+    if (_lastSyncStatus == SyncStatus.syncing && syncStatus == SyncStatus.idle) {
+      context.read<JuegosProvider>().fetchJuegos();
+    }
+    _lastSyncStatus = syncStatus;
   }
 
   @override
   void dispose() {
+    context.read<SyncProvider>().removeListener(_onSyncChanged);
     _searchController.dispose();
     super.dispose();
   }
@@ -37,7 +52,12 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
 
     return Scaffold(
       floatingActionButton: FloatingActionButton(
-        onPressed: () => Navigator.of(context).pushNamed('/quick-add'),
+        onPressed: () async {
+          final created = await Navigator.of(context).pushNamed('/juego/nuevo');
+          if (created == true && context.mounted) {
+            provider.fetchJuegos();
+          }
+        },
         child: const Icon(Icons.add),
       ),
       body: Column(
@@ -112,8 +132,8 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       elevation: 0,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () =>
-            Navigator.of(context).pushNamed('/juego', arguments: juego.id),
+        onTap: () => Navigator.of(context)
+            .pushNamed('/juego', arguments: juego.localId ?? juego.id),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
@@ -173,6 +193,34 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                                 fontSize: 12, color: Colors.grey[600])),
                       ],
                     ),
+                    if (juego.fundas.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: juego.fundas.take(2).map((funda) {
+                          final color = funda.enfundadas
+                              ? Colors.green
+                              : Colors.orange;
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${funda.cantidadCartas} ${funda.enfundadas ? 'enfundadas' : 'faltan'}',
+                              style: TextStyle(
+                                color: color[700],
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   ],
                 ),
               ),

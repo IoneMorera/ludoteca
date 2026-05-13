@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\Categoria;
 use App\Models\Juego;
+use App\Models\TipoFunda;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -23,6 +24,21 @@ class DatabaseSeeder extends Seeder
 
         foreach ($categorias as $cat) {
             Categoria::firstOrCreate(['nombre' => $cat['nombre']], $cat);
+        }
+
+        $tiposFunda = [
+            ['nombre' => 'Mini European', 'ancho_mm' => 45, 'alto_mm' => 68],
+            ['nombre' => 'Standard Card Game', 'ancho_mm' => 63, 'alto_mm' => 88],
+            ['nombre' => 'Standard European', 'ancho_mm' => 59, 'alto_mm' => 92],
+            ['nombre' => 'American Standard', 'ancho_mm' => 57, 'alto_mm' => 89],
+            ['nombre' => 'Tarot', 'ancho_mm' => 70, 'alto_mm' => 120],
+        ];
+
+        foreach ($tiposFunda as $tipoFunda) {
+            TipoFunda::firstOrCreate(
+                ['ancho_mm' => $tipoFunda['ancho_mm'], 'alto_mm' => $tipoFunda['alto_mm']],
+                $tipoFunda
+            );
         }
 
         $juegos = [

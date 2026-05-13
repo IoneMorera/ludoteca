@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsTombstone;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Mueble extends Model
 {
-    use HasFactory;
+    use HasFactory, RecordsTombstone;
 
     protected $table = 'muebles';
 

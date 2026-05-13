@@ -1,7 +1,17 @@
 import '../config/api_config.dart';
 
 class Juego {
+  /// `id` legacy: cuando viene del servidor es `serverId`. Para registros
+  /// solo-locales (a\u00fan no sincronizados) es `-localId` para evitar colisiones.
   final int id;
+
+  /// Identificador local autoincremental en SQLite (null si solo viene de
+  /// una respuesta directa del API sin pasar por la cache local).
+  final int? localId;
+
+  /// Identificador remoto en la BBDD del backend (null hasta que se sincroniza).
+  final int? serverId;
+
   final String nombre;
   final String? descripcion;
   final String? imagen;
@@ -10,18 +20,31 @@ class Juego {
   final int? numJugadoresMin;
   final int? numJugadoresMax;
   final int? categoriaId;
+  final int? categoriaLocalId;
   final String? estado;
   final String? fechaCompra;
   final int? juegoBaseId;
+  final int? juegoBaseLocalId;
+  final int? juegoBaseServerId;
+  final int? ubicacionLocalId;
+  final int? bggId;
+  final bool noEnfundar;
+  final String? phash;
+  final String? imageLocalPath;
+  final String? updatedAt;
+  final bool dirty;
   final Categoria? categoria;
   final Ubicacion? ubicacion;
   final List<Propietario> propietarios;
   final List<Juego> expansiones;
+  final List<JuegoFunda> fundas;
   final Juego? juegoBase;
 
   Juego({
     required this.id,
     required this.nombre,
+    this.localId,
+    this.serverId,
     this.descripcion,
     this.imagen,
     this.edadMinima,
@@ -29,19 +52,101 @@ class Juego {
     this.numJugadoresMin,
     this.numJugadoresMax,
     this.categoriaId,
+    this.categoriaLocalId,
     this.estado,
     this.fechaCompra,
     this.juegoBaseId,
+    this.juegoBaseLocalId,
+    this.juegoBaseServerId,
+    this.ubicacionLocalId,
+    this.bggId,
+    this.noEnfundar = false,
+    this.phash,
+    this.imageLocalPath,
+    this.updatedAt,
+    this.dirty = false,
     this.categoria,
     this.ubicacion,
     this.propietarios = const [],
     this.expansiones = const [],
+    this.fundas = const [],
     this.juegoBase,
   });
 
+  Juego copyWithJuegoBase(Juego? base) {
+    return Juego(
+      id: id,
+      localId: localId,
+      serverId: serverId,
+      nombre: nombre,
+      descripcion: descripcion,
+      imagen: imagen,
+      edadMinima: edadMinima,
+      edadMaxima: edadMaxima,
+      numJugadoresMin: numJugadoresMin,
+      numJugadoresMax: numJugadoresMax,
+      categoriaId: categoriaId,
+      categoriaLocalId: categoriaLocalId,
+      estado: estado,
+      fechaCompra: fechaCompra,
+      juegoBaseId: juegoBaseId,
+      juegoBaseLocalId: juegoBaseLocalId,
+      juegoBaseServerId: juegoBaseServerId,
+      ubicacionLocalId: ubicacionLocalId,
+      bggId: bggId,
+      noEnfundar: noEnfundar,
+      phash: phash,
+      imageLocalPath: imageLocalPath,
+      updatedAt: updatedAt,
+      dirty: dirty,
+      categoria: categoria,
+      ubicacion: ubicacion,
+      propietarios: propietarios,
+      expansiones: expansiones,
+      fundas: fundas,
+      juegoBase: base,
+    );
+  }
+
+  Juego copyWithExpansiones(List<Juego> list) {
+    return Juego(
+      id: id,
+      localId: localId,
+      serverId: serverId,
+      nombre: nombre,
+      descripcion: descripcion,
+      imagen: imagen,
+      edadMinima: edadMinima,
+      edadMaxima: edadMaxima,
+      numJugadoresMin: numJugadoresMin,
+      numJugadoresMax: numJugadoresMax,
+      categoriaId: categoriaId,
+      categoriaLocalId: categoriaLocalId,
+      estado: estado,
+      fechaCompra: fechaCompra,
+      juegoBaseId: juegoBaseId,
+      juegoBaseLocalId: juegoBaseLocalId,
+      juegoBaseServerId: juegoBaseServerId,
+      ubicacionLocalId: ubicacionLocalId,
+      bggId: bggId,
+      noEnfundar: noEnfundar,
+      phash: phash,
+      imageLocalPath: imageLocalPath,
+      updatedAt: updatedAt,
+      dirty: dirty,
+      categoria: categoria,
+      ubicacion: ubicacion,
+      propietarios: propietarios,
+      expansiones: list,
+      fundas: fundas,
+      juegoBase: juegoBase,
+    );
+  }
+
   factory Juego.fromJson(Map<String, dynamic> json) {
     return Juego(
-      id: json['id'],
+      id: json['id'] ?? 0,
+      serverId: json['id'] is int ? json['id'] as int : null,
       nombre: json['nombre'] ?? '',
       descripcion: json['descripcion'],
       imagen: json['imagen'],
@@ -53,6 +158,10 @@ class Juego {
       estado: json['estado'],
       fechaCompra: json['fecha_compra'],
       juegoBaseId: json['juego_base_id'],
+      juegoBaseServerId: json['juego_base_id'],
+      bggId: json['bgg_id'],
+      noEnfundar: json['no_enfundar'] == true || json['no_enfundar'] == 1,
+      updatedAt: json['updated_at'],
       categoria: json['categoria'] != null
           ? Categoria.fromJson(json['categoria'])
           : null,
@@ -65,6 +174,10 @@ class Juego {
           [],
       expansiones: (json['expansiones'] as List?)
               ?.map((e) => Juego.fromJson(e))
+              .toList() ??
+          [],
+      fundas: (json['fundas'] as List?)
+              ?.map((f) => JuegoFunda.fromJson(f))
               .toList() ??
           [],
       juegoBase: json['juego_base'] != null
@@ -83,14 +196,17 @@ class Juego {
         'categoria_id': categoriaId,
         'estado': estado,
         'fecha_compra': fechaCompra,
-        'juego_base_id': juegoBaseId,
+        'juego_base_id': juegoBaseServerId ?? juegoBaseId,
         'ubicacion_id': ubicacion?.id,
+        'no_enfundar': noEnfundar,
         'propietario_ids': propietarios.map((p) => p.id).toList(),
+        'fundas': fundas.map((f) => f.toJson()).toList(),
       };
 
-  bool get esExpansion => juegoBaseId != null;
+  bool get esExpansion =>
+      (juegoBaseLocalId != null) || (juegoBaseServerId != null) || (juegoBaseId != null);
   String get jugadoresTexto =>
-      '${numJugadoresMin ?? '?'}–${numJugadoresMax ?? '?'}';
+      '${numJugadoresMin ?? '?'}\u2013${numJugadoresMax ?? '?'}';
   String get edadTexto => '${edadMinima ?? '?'}+';
 
   String? get imagenUrl {
@@ -101,6 +217,76 @@ class Juego {
     final path = imagen!.startsWith('/') ? imagen! : '/$imagen';
     return '${ApiConfig.storageUrl}$path';
   }
+}
+
+class JuegoFunda {
+  final int id;
+  final int tipoFundaId;
+  final int cantidadCartas;
+  final bool enfundadas;
+  final TipoFunda? tipoFunda;
+
+  JuegoFunda({
+    required this.id,
+    required this.tipoFundaId,
+    required this.cantidadCartas,
+    required this.enfundadas,
+    this.tipoFunda,
+  });
+
+  factory JuegoFunda.fromJson(Map<String, dynamic> json) {
+    return JuegoFunda(
+      id: _asInt(json['id']),
+      tipoFundaId: _asInt(json['tipo_funda_id']),
+      cantidadCartas: _asInt(json['cantidad_cartas']),
+      enfundadas: json['enfundadas'] == true || json['enfundadas'] == 1,
+      tipoFunda: json['tipo_funda'] != null
+          ? TipoFunda.fromJson(json['tipo_funda'])
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'tipo_funda_id': tipoFundaId,
+        'cantidad_cartas': cantidadCartas,
+        'enfundadas': enfundadas,
+      };
+
+  String get tipoTexto {
+    if (tipoFunda == null) return 'Tipo no disponible';
+    return tipoFunda!.textoCompleto;
+  }
+}
+
+class TipoFunda {
+  final int id;
+  final String nombre;
+  final int anchoMm;
+  final int altoMm;
+
+  TipoFunda({
+    required this.id,
+    required this.nombre,
+    required this.anchoMm,
+    required this.altoMm,
+  });
+
+  factory TipoFunda.fromJson(Map<String, dynamic> json) {
+    return TipoFunda(
+      id: _asInt(json['id']),
+      nombre: json['nombre'] ?? '',
+      anchoMm: _asInt(json['ancho_mm']),
+      altoMm: _asInt(json['alto_mm']),
+    );
+  }
+
+  String get textoCompleto => '$nombre ($anchoMm x $altoMm mm)';
+}
+
+int _asInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? 0;
 }
 
 class Categoria {
@@ -155,7 +341,7 @@ class Ubicacion {
 
   String get rutaCompleta {
     if (mueble == null) return nombre;
-    return '${mueble!.habitacion?.nombre ?? ''} › ${mueble!.nombre} › $nombre';
+    return '${mueble!.habitacion?.nombre ?? ''} \u203a ${mueble!.nombre} \u203a $nombre';
   }
 }
 

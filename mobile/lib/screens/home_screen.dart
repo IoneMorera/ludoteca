@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
+import '../data/sync_service.dart' show SyncStatus;
 import '../providers/auth_provider.dart';
 import '../providers/juegos_provider.dart';
+import '../providers/sync_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,24 +14,50 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  SyncStatus? _lastSyncStatus;
+
   @override
   void initState() {
     super.initState();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       context.read<JuegosProvider>().fetchStats();
+      _lastSyncStatus = context.read<SyncProvider>().status;
+      context.read<SyncProvider>().addListener(_onSyncChanged);
     });
+  }
+
+  void _onSyncChanged() {
+    if (!mounted) return;
+    final syncStatus = context.read<SyncProvider>().status;
+    if (_lastSyncStatus == SyncStatus.syncing && syncStatus == SyncStatus.idle) {
+      context.read<JuegosProvider>().fetchStats();
+    }
+    _lastSyncStatus = syncStatus;
+  }
+
+  @override
+  void dispose() {
+    context.read<SyncProvider>().removeListener(_onSyncChanged);
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final juegosProvider = context.watch<JuegosProvider>();
+    final syncProvider = context.watch<SyncProvider>();
     final stats = juegosProvider.stats;
+    final fundasFaltantes = _asList(
+      stats['fundasFaltantes'] ?? stats['fundas_faltantes'],
+    );
     final theme = Theme.of(context);
 
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: () => juegosProvider.fetchStats(),
+        onRefresh: () async {
+          await syncProvider.syncNow();
+          await juegosProvider.fetchStats();
+        },
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -43,8 +71,16 @@ class _HomeScreenState extends State<HomeScreen> {
             Text('Tu ludoteca en un vistazo',
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(color: Colors.grey[600])),
+            if (syncProvider.isSyncing) ...[
+              const SizedBox(height: 8),
+              _buildSyncBanner(theme),
+            ],
             const SizedBox(height: 24),
             _buildStatsGrid(stats, theme),
+            if (!auth.noEnfundo && fundasFaltantes.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildFundasFaltantesCard(fundasFaltantes, theme),
+            ],
             const SizedBox(height: 28),
             Text('Acciones rápidas',
                 style: theme.textTheme.titleMedium
@@ -53,6 +89,64 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildQuickActions(context, theme),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSyncBanner(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Sincronizando con la nube...',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFundasFaltantesCard(
+    List<dynamic> fundasFaltantes,
+    ThemeData theme,
+  ) {
+    final total = fundasFaltantes.fold<int>(0, (sum, item) {
+      final funda = _asMap(item);
+      return sum + _asInt(funda['cantidad_total']);
+    });
+
+    return Card(
+      elevation: 0,
+      color: Colors.orange.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.orange.withValues(alpha: 0.35)),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.orange.withValues(alpha: 0.15),
+          child: const Icon(Icons.style, color: Colors.orange),
+        ),
+        title: const Text(
+          'Faltan Fundas',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          '$total fundas pendientes en ${fundasFaltantes.length} tamaños',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).pushNamed('/fundas-faltantes'),
       ),
     );
   }
@@ -112,11 +206,25 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       children: [
         _ActionTile(
-          icon: Icons.qr_code_scanner,
-          title: 'Escanear juego',
-          subtitle: 'Añade un juego escaneando su código',
+          icon: Icons.camera_alt,
+          title: 'Reconocer por foto',
+          subtitle: 'Identifica un juego con la cámara',
           color: Colors.teal,
-          onTap: () => Navigator.of(context).pushNamed('/scanner'),
+          onTap: () => Navigator.of(context).pushNamed('/recognize'),
+        ),
+        const SizedBox(height: 8),
+        _ActionTile(
+          icon: Icons.add_circle_outline,
+          title: 'Añadir juego',
+          subtitle: 'Crea un juego nuevo manualmente',
+          color: Colors.indigo,
+          onTap: () async {
+            final saved =
+                await Navigator.of(context).pushNamed('/juego/nuevo');
+            if (saved == true && context.mounted) {
+              context.read<JuegosProvider>().fetchStats();
+            }
+          },
         ),
         const SizedBox(height: 8),
         _ActionTile(
@@ -129,6 +237,22 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
+}
+
+int _asInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+List<dynamic> _asList(dynamic value) {
+  if (value is List) return value;
+  return [];
+}
+
+Map<String, dynamic> _asMap(dynamic value) {
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return {};
 }
 
 class _StatItem {
