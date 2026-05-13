@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
+import '../data/sync_service.dart' show SyncStatus;
 import '../providers/auth_provider.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
@@ -13,12 +14,31 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  SyncStatus? _lastSyncStatus;
+
   @override
   void initState() {
     super.initState();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       context.read<JuegosProvider>().fetchStats();
+      _lastSyncStatus = context.read<SyncProvider>().status;
+      context.read<SyncProvider>().addListener(_onSyncChanged);
     });
+  }
+
+  void _onSyncChanged() {
+    if (!mounted) return;
+    final syncStatus = context.read<SyncProvider>().status;
+    if (_lastSyncStatus == SyncStatus.syncing && syncStatus == SyncStatus.idle) {
+      context.read<JuegosProvider>().fetchStats();
+    }
+    _lastSyncStatus = syncStatus;
+  }
+
+  @override
+  void dispose() {
+    context.read<SyncProvider>().removeListener(_onSyncChanged);
+    super.dispose();
   }
 
   @override

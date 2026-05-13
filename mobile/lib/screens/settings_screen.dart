@@ -226,7 +226,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     : const Icon(Icons.refresh),
                 onTap: s.status == SyncStatus.syncing
                     ? null
-                    : () => sync.syncNow(),
+                    : () => sync.syncNow(fullPull: true),
               );
             },
           ),

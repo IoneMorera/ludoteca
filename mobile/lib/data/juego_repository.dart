@@ -108,7 +108,7 @@ class JuegoRepository {
     ''');
   }
 
-  Future<Map<String, int>> stats() async {
+  Future<Map<String, dynamic>> stats() async {
     final db = await _dbService.database;
     final base = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM juegos WHERE juego_base_server_id IS NULL AND juego_base_local_id IS NULL');
@@ -116,7 +116,7 @@ class JuegoRepository {
         "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'disponible' AND juego_base_server_id IS NULL AND juego_base_local_id IS NULL");
     final exp = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM juegos WHERE juego_base_local_id IS NOT NULL OR juego_base_server_id IS NOT NULL');
-    return {
+    return <String, dynamic>{
       'totalJuegos': Sqflite.firstIntValue(base) ?? 0,
       'juegosDisponibles': Sqflite.firstIntValue(disponibles) ?? 0,
       'totalExpansiones': Sqflite.firstIntValue(exp) ?? 0,

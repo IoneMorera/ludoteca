@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
+import '../data/sync_service.dart' show SyncStatus;
 import '../providers/juegos_provider.dart';
+import '../providers/sync_provider.dart';
 import '../models/juego.dart';
 import '../widgets/game_image.dart';
 
@@ -14,6 +16,7 @@ class JuegosListScreen extends StatefulWidget {
 
 class _JuegosListScreenState extends State<JuegosListScreen> {
   final _searchController = TextEditingController();
+  SyncStatus? _lastSyncStatus;
 
   @override
   void initState() {
@@ -22,11 +25,23 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       final provider = context.read<JuegosProvider>();
       provider.clearBusqueda();
       provider.fetchJuegos();
+      _lastSyncStatus = context.read<SyncProvider>().status;
+      context.read<SyncProvider>().addListener(_onSyncChanged);
     });
+  }
+
+  void _onSyncChanged() {
+    if (!mounted) return;
+    final syncStatus = context.read<SyncProvider>().status;
+    if (_lastSyncStatus == SyncStatus.syncing && syncStatus == SyncStatus.idle) {
+      context.read<JuegosProvider>().fetchJuegos();
+    }
+    _lastSyncStatus = syncStatus;
   }
 
   @override
   void dispose() {
+    context.read<SyncProvider>().removeListener(_onSyncChanged);
     _searchController.dispose();
     super.dispose();
   }

@@ -47,8 +47,8 @@ class SyncController extends Controller
         return response()->json([
             'server_now' => $serverNow->toIso8601String(),
             'since' => $since?->toIso8601String(),
-            'tables' => $tables,
-            'deleted' => $deleted,
+            'tables' => (object) $tables,
+            'deleted' => (object) $deleted,
         ]);
     }
 

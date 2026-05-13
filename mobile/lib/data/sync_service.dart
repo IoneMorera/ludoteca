@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../config/api_config.dart';
 import '../services/api_service.dart';
@@ -97,6 +98,12 @@ class SyncService {
         return;
       }
       await _push();
+      if (!fullPull) {
+        final db = await _dbService.database;
+        final count = Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM juegos'));
+        if (count == null || count == 0) fullPull = true;
+      }
       await _pull(fullPull: fullPull);
       // Tras sincronizar metadatos, calcular pHashes que falten.
       unawaited(_indexPendingPhashes());
@@ -232,9 +239,17 @@ class SyncService {
         fullPull ? null : await _dbService.getSyncState('last_pull_at');
     final response = await _api
         .get('/sync/snapshot', params: since != null ? {'since': since} : null);
-    final data = response.data as Map<String, dynamic>;
-    final tables = data['tables'] as Map<String, dynamic>? ?? {};
-    final deleted = data['deleted'] as Map<String, dynamic>? ?? {};
+    final data = response.data is Map<String, dynamic>
+        ? response.data as Map<String, dynamic>
+        : <String, dynamic>{};
+    final tablesRaw = data['tables'];
+    final tables = tablesRaw is Map<String, dynamic>
+        ? tablesRaw
+        : <String, dynamic>{};
+    final deletedRaw = data['deleted'];
+    final deleted = deletedRaw is Map<String, dynamic>
+        ? deletedRaw
+        : <String, dynamic>{};
     final serverNow = data['server_now'] as String?;
 
     // ORDEN: padres antes que hijos para que las FK resuelvan.
