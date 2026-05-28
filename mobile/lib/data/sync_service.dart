@@ -131,17 +131,19 @@ class SyncService {
     final pending = await _outbox.pending(limit: 200);
     if (pending.isEmpty) return;
 
-    final operations = pending.map((op) {
+    final operations = <Map<String, dynamic>>[];
+    for (final op in pending) {
+      final data = await _enrichedPayload(op);
       final action = syncActionToString(op.action);
-      return {
+      operations.add({
         'client_op_id': op.clientOpId,
         'table': op.table,
         'action': action,
         if (op.serverId != null) 'server_id': op.serverId,
         if (op.baseUpdatedAt != null) 'base_updated_at': op.baseUpdatedAt,
-        if (op.payload.isNotEmpty) 'data': op.payload,
-      };
-    }).toList();
+        if (data.isNotEmpty) 'data': data,
+      });
+    }
 
     final response =
         await _api.post('/sync/push', data: {'operations': operations});
@@ -204,6 +206,72 @@ class SyncService {
     }
   }
 
+  /// Rellena FK y campos desde SQLite para operaciones encoladas antes de que
+  /// existiera el server_id del padre (reintento tras un push parcial).
+  Future<Map<String, dynamic>> _enrichedPayload(OutboxOperation op) async {
+    final merged = Map<String, dynamic>.from(op.payload);
+    final localId = op.localId;
+    if (localId == null) return merged;
+    final db = await _dbService.database;
+
+    switch (op.table) {
+      case 'muebles':
+        final rows = await db.query('muebles',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final h = rows.first['habitacion_server_id'] as int?;
+          if (h != null) merged['habitacion_id'] = h;
+          merged['nombre'] = rows.first['nombre'] as String;
+        }
+        break;
+      case 'ubicaciones':
+        final rows = await db.query('ubicaciones',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final m = rows.first['mueble_server_id'] as int?;
+          if (m != null) merged['mueble_id'] = m;
+          merged['nombre'] = rows.first['nombre'] as String;
+        }
+        break;
+      case 'juego_fundas':
+        final rows = await db.query('juego_fundas',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final j = rows.first['juego_server_id'] as int?;
+          final t = rows.first['tipo_funda_server_id'] as int?;
+          if (j != null) merged['juego_id'] = j;
+          if (t != null) merged['tipo_funda_id'] = t;
+          merged['cantidad_cartas'] = rows.first['cantidad_cartas'];
+          merged['enfundadas'] =
+              ((rows.first['enfundadas'] as int?) ?? 0) == 1;
+        }
+        break;
+      case 'juego_propietario':
+        final rows = await db.query('juego_propietario',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final j = rows.first['juego_server_id'] as int?;
+          final p = rows.first['propietario_server_id'] as int?;
+          final u = rows.first['ubicacion_server_id'] as int?;
+          if (j != null) merged['juego_id'] = j;
+          if (p != null) merged['propietario_id'] = p;
+          if (u != null) merged['ubicacion_id'] = u;
+        }
+        break;
+      case 'juego_categoria':
+        final rows = await db.query('juego_categoria',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final j = rows.first['juego_server_id'] as int?;
+          final c = rows.first['categoria_server_id'] as int?;
+          if (j != null) merged['juego_id'] = j;
+          if (c != null) merged['categoria_id'] = c;
+        }
+        break;
+    }
+    return merged;
+  }
+
   Future<void> _backfillForeignKeyServerIds({
     required String table,
     required int localId,
@@ -211,11 +279,11 @@ class SyncService {
   }) async {
     final db = await _dbService.database;
     final fkMappings = <String, List<String>>{
-      'juegos': ['juego_fundas.juego', 'juego_propietario.juego', 'juegos.juego_base'],
+      'juegos': ['juego_fundas.juego', 'juego_propietario.juego', 'juego_categoria.juego', 'juegos.juego_base'],
       'tipos_funda': ['juego_fundas.tipo_funda'],
       'propietarios': ['juego_propietario.propietario'],
-      'categorias': ['juegos.categoria'],
-      'ubicaciones': ['juegos.ubicacion'],
+      'categorias': ['juegos.categoria', 'juego_categoria.categoria'],
+      'ubicaciones': ['juegos.ubicacion', 'juego_propietario.ubicacion'],
       'habitaciones': ['muebles.habitacion'],
       'muebles': ['ubicaciones.mueble'],
     };
@@ -302,8 +370,13 @@ class SyncService {
     for (final r in jp) {
       await _juegos.upsertJuegoPropietarioFromServer(r);
     }
+    final jc =
+        (tables['juego_categoria'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    for (final r in jc) {
+      await _juegos.upsertJuegoCategoriaFromServer(r);
+    }
 
-    // tombstones (borrados): aplicar despu\u00e9s del upsert.
+    // tombstones (borrados): aplicar después del upsert.
     for (final entry in deleted.entries) {
       final table = entry.key;
       final ids = (entry.value as List?)?.cast<int>() ?? [];
@@ -326,6 +399,7 @@ class SyncService {
         case 'juegos':
         case 'juego_fundas':
         case 'juego_propietario':
+        case 'juego_categoria':
           await _juegos.deleteByServerIds(table, ids);
           break;
       }

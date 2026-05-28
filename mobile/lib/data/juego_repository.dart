@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../models/juego.dart';
@@ -20,16 +22,25 @@ class JuegoRepository {
 
   // ---------- lectura ----------
 
-  Future<int> count({String? buscar}) async {
+  Future<int> count({String? buscar, String? estado, bool? esExpansion}) async {
     final db = await _dbService.database;
+    final where = <String>[];
+    final args = <dynamic>[];
     if (buscar != null && buscar.isNotEmpty) {
-      final r = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM juegos WHERE nombre LIKE ?',
-        ['%$buscar%'],
-      );
-      return Sqflite.firstIntValue(r) ?? 0;
+      where.add('nombre LIKE ?');
+      args.add('%$buscar%');
     }
-    final r = await db.rawQuery('SELECT COUNT(*) AS c FROM juegos');
+    if (estado != null && estado.isNotEmpty) {
+      where.add('estado = ?');
+      args.add(estado);
+    }
+    if (esExpansion == true) {
+      where.add('es_expansion = 1');
+    } else if (esExpansion == false) {
+      where.add('es_expansion = 0');
+    }
+    final whereSql = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
+    final r = await db.rawQuery('SELECT COUNT(*) AS c FROM juegos $whereSql', args);
     return Sqflite.firstIntValue(r) ?? 0;
   }
 
@@ -38,6 +49,8 @@ class JuegoRepository {
     int page = 1,
     int perPage = 50,
     bool soloBase = false,
+    String? estado,
+    bool? esExpansion,
   }) async {
     final db = await _dbService.database;
     final where = <String>[];
@@ -47,7 +60,16 @@ class JuegoRepository {
       args.add('%$buscar%');
     }
     if (soloBase) {
-      where.add('juego_base_server_id IS NULL AND juego_base_local_id IS NULL');
+      where.add('es_expansion = 0');
+    }
+    if (estado != null && estado.isNotEmpty) {
+      where.add('estado = ?');
+      args.add(estado);
+    }
+    if (esExpansion == true) {
+      where.add('es_expansion = 1');
+    } else if (esExpansion == false) {
+      where.add('es_expansion = 0');
     }
     final whereSql = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
     final offset = (page - 1) * perPage;
@@ -110,15 +132,21 @@ class JuegoRepository {
 
   Future<Map<String, dynamic>> stats() async {
     final db = await _dbService.database;
-    final base = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM juegos WHERE juego_base_server_id IS NULL AND juego_base_local_id IS NULL');
+    final total = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM juegos WHERE es_expansion = 0');
     final disponibles = await db.rawQuery(
-        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'disponible' AND juego_base_server_id IS NULL AND juego_base_local_id IS NULL");
+        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'disponible' AND es_expansion = 0");
+    final enVenta = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'en_venta' AND es_expansion = 0");
+    final vendidos = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'vendido' AND es_expansion = 0");
     final exp = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM juegos WHERE juego_base_local_id IS NOT NULL OR juego_base_server_id IS NOT NULL');
+        'SELECT COUNT(*) AS c FROM juegos WHERE es_expansion = 1');
     return <String, dynamic>{
-      'totalJuegos': Sqflite.firstIntValue(base) ?? 0,
+      'totalJuegos': Sqflite.firstIntValue(total) ?? 0,
       'juegosDisponibles': Sqflite.firstIntValue(disponibles) ?? 0,
+      'juegosEnVenta': Sqflite.firstIntValue(enVenta) ?? 0,
+      'juegosVendidos': Sqflite.firstIntValue(vendidos) ?? 0,
       'totalExpansiones': Sqflite.firstIntValue(exp) ?? 0,
     };
   }
@@ -131,6 +159,8 @@ class JuegoRepository {
   Future<int> save(Juego juego, {
     required List<int> propietarioLocalIds,
     required List<JuegoFundaDraft> fundas,
+    List<int> categoriaLocalIds = const [],
+    Map<int, int?> propietarioUbicaciones = const {},
   }) async {
     final db = await _dbService.database;
 
@@ -180,8 +210,9 @@ class JuegoRepository {
       }
     }
 
-    await _syncPropietarios(localId, juego.serverId, propietarioLocalIds);
+    await _syncPropietarios(localId, juego.serverId, propietarioLocalIds, propietarioUbicaciones);
     await _syncFundas(localId, juego.serverId, fundas);
+    await _syncCategorias(localId, juego.serverId, categoriaLocalIds);
 
     return localId;
   }
@@ -216,6 +247,14 @@ class JuegoRepository {
     final ubicacionLocalId = await _localIdFor(db, 'ubicaciones', data['ubicacion_id']);
     final juegoBaseLocalId = await _localIdFor(db, 'juegos', data['juego_base_id']);
 
+    // Serialize idiomas to JSON string for SQLite
+    String? idiomasJson;
+    if (data['idiomas'] != null) {
+      idiomasJson = data['idiomas'] is String
+          ? data['idiomas']
+          : jsonEncode(data['idiomas']);
+    }
+
     final values = {
       'server_id': serverId,
       'nombre': data['nombre'],
@@ -235,6 +274,14 @@ class JuegoRepository {
       'juego_base_server_id': data['juego_base_id'],
       'juego_base_local_id': juegoBaseLocalId,
       'no_enfundar': (data['no_enfundar'] == true) ? 1 : 0,
+      'es_expansion': (data['es_expansion'] == true) ? 1 : 0,
+      'idiomas': idiomasJson,
+      'idioma_otro': data['idioma_otro'],
+      'independiente_idioma': (data['independiente_idioma'] == true) ? 1 : 0,
+      'tradumaquetado': (data['tradumaquetado'] == true) ? 1 : 0,
+      'tradumaquetado_parcial': (data['tradumaquetado_parcial'] == true) ? 1 : 0,
+      'tradumaquetado_parcial_notas': data['tradumaquetado_parcial_notas'],
+      'varias_copias': (data['varias_copias'] == true) ? 1 : 0,
       'updated_at': data['updated_at'],
       'dirty': 0,
       'pending_action': null,
@@ -268,15 +315,59 @@ class JuegoRepository {
       'dirty': 0,
       'pending_action': null,
     };
-    final existing = await db.query('juego_fundas',
+
+    // Evitar duplicar filas (mismo juego + tipo): antes se insertaba una fila
+    // nueva por server_id sin fusionar la fila local pendiente (server_id null).
+    Map<String, dynamic>? targetRow;
+    int? targetLocalId;
+
+    final byServer = await db.query('juego_fundas',
         where: 'server_id = ?', whereArgs: [serverId], limit: 1);
-    if (existing.isEmpty) {
-      await db.insert('juego_fundas', values,
-          conflictAlgorithm: ConflictAlgorithm.replace);
-    } else {
-      await db.update('juego_fundas', values,
-          where: 'server_id = ?', whereArgs: [serverId]);
+    if (byServer.isNotEmpty) {
+      targetRow = byServer.first;
+      targetLocalId = targetRow['local_id'] as int;
+    } else if (juegoLocalId != null && tipoLocalId != null) {
+      final byJuegoTipo = await db.query(
+        'juego_fundas',
+        where: 'juego_local_id = ? AND tipo_funda_local_id = ?',
+        whereArgs: [juegoLocalId, tipoLocalId],
+        orderBy: 'local_id ASC',
+      );
+      if (byJuegoTipo.isNotEmpty) {
+        targetRow = byJuegoTipo.first;
+        targetLocalId = targetRow['local_id'] as int;
+        for (var i = 1; i < byJuegoTipo.length; i++) {
+          final dupLocalId = byJuegoTipo[i]['local_id'] as int;
+          await db.delete('juego_fundas',
+              where: 'local_id = ?', whereArgs: [dupLocalId]);
+        }
+      }
     }
+
+    if (targetLocalId != null && targetRow != null) {
+      final hadNoServerId = (targetRow['server_id'] as int?) == null;
+      await db.update(
+        'juego_fundas',
+        values,
+        where: 'local_id = ?',
+        whereArgs: [targetLocalId],
+      );
+      if (hadNoServerId) {
+        await _outbox.removeForLocalRow('juego_fundas', targetLocalId);
+      }
+      if (juegoLocalId != null && tipoLocalId != null) {
+        await db.delete(
+          'juego_fundas',
+          where:
+              'juego_local_id = ? AND tipo_funda_local_id = ? AND local_id != ?',
+          whereArgs: [juegoLocalId, tipoLocalId, targetLocalId],
+        );
+      }
+      return;
+    }
+
+    await db.insert('juego_fundas', values,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> upsertJuegoPropietarioFromServer(
@@ -285,12 +376,15 @@ class JuegoRepository {
     final serverId = data['id'] as int;
     final juegoLocalId = await _localIdFor(db, 'juegos', data['juego_id']);
     final propLocalId = await _localIdFor(db, 'propietarios', data['propietario_id']);
+    final ubicLocalId = await _localIdFor(db, 'ubicaciones', data['ubicacion_id']);
     final values = {
       'server_id': serverId,
       'juego_server_id': data['juego_id'],
       'juego_local_id': juegoLocalId,
       'propietario_server_id': data['propietario_id'],
       'propietario_local_id': propLocalId,
+      'ubicacion_server_id': data['ubicacion_id'],
+      'ubicacion_local_id': ubicLocalId,
       'updated_at': data['updated_at'],
       'dirty': 0,
       'pending_action': null,
@@ -302,6 +396,33 @@ class JuegoRepository {
           conflictAlgorithm: ConflictAlgorithm.replace);
     } else {
       await db.update('juego_propietario', values,
+          where: 'server_id = ?', whereArgs: [serverId]);
+    }
+  }
+
+  Future<void> upsertJuegoCategoriaFromServer(
+      Map<String, dynamic> data) async {
+    final db = await _dbService.database;
+    final serverId = data['id'] as int;
+    final juegoLocalId = await _localIdFor(db, 'juegos', data['juego_id']);
+    final catLocalId = await _localIdFor(db, 'categorias', data['categoria_id']);
+    final values = {
+      'server_id': serverId,
+      'juego_server_id': data['juego_id'],
+      'juego_local_id': juegoLocalId,
+      'categoria_server_id': data['categoria_id'],
+      'categoria_local_id': catLocalId,
+      'updated_at': data['updated_at'],
+      'dirty': 0,
+      'pending_action': null,
+    };
+    final existing = await db.query('juego_categoria',
+        where: 'server_id = ?', whereArgs: [serverId], limit: 1);
+    if (existing.isEmpty) {
+      await db.insert('juego_categoria', values,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    } else {
+      await db.update('juego_categoria', values,
           where: 'server_id = ?', whereArgs: [serverId]);
     }
   }
@@ -444,6 +565,26 @@ class JuegoRepository {
         ),
     };
 
+    // Load categorias from pivot table
+    final categoriasByJuego = <int, List<Categoria>>{};
+    final jcRows = await db.rawQuery(
+      '''
+      SELECT jc.juego_local_id, jc.categoria_local_id
+      FROM juego_categoria jc
+      WHERE jc.juego_local_id IN ($placeholders)
+      ''',
+      localIds,
+    );
+    for (final r in jcRows) {
+      final juegoLocalId = r['juego_local_id'] as int;
+      final catLocalId = r['categoria_local_id'] as int?;
+      if (catLocalId != null && categoriaByLocal.containsKey(catLocalId)) {
+        categoriasByJuego
+            .putIfAbsent(juegoLocalId, () => [])
+            .add(categoriaByLocal[catLocalId]!);
+      }
+    }
+
     final juegosByServerId = <int, Juego>{};
     final result = <Juego>[];
     for (final r in rows) {
@@ -477,6 +618,15 @@ class JuegoRepository {
         }
       }
 
+      // Parse idiomas JSON
+      List<String> idiomas = const [];
+      final idiomasRaw = r['idiomas'];
+      if (idiomasRaw is String && idiomasRaw.isNotEmpty) {
+        try {
+          idiomas = (jsonDecode(idiomasRaw) as List).cast<String>();
+        } catch (_) {}
+      }
+
       final juego = Juego(
         id: serverId ?? -localId,
         localId: localId,
@@ -499,11 +649,20 @@ class JuegoRepository {
         juegoBaseServerId: r['juego_base_server_id'] as int?,
         bggId: r['bgg_id'] as int?,
         noEnfundar: ((r['no_enfundar'] as int?) ?? 0) == 1,
+        esExpansionFlag: ((r['es_expansion'] as int?) ?? 0) == 1,
+        idiomas: idiomas,
+        idiomaOtro: r['idioma_otro'] as String?,
+        independienteIdioma: ((r['independiente_idioma'] as int?) ?? 0) == 1,
+        tradumaquetado: ((r['tradumaquetado'] as int?) ?? 0) == 1,
+        tradumaquetadoParcial: ((r['tradumaquetado_parcial'] as int?) ?? 0) == 1,
+        tradumaquetadoParcialNotas: r['tradumaquetado_parcial_notas'] as String?,
+        variasCopias: ((r['varias_copias'] as int?) ?? 0) == 1,
         phash: r['phash'] as String?,
         imageLocalPath: r['image_local_path'] as String?,
         updatedAt: r['updated_at'] as String?,
         dirty: ((r['dirty'] as int?) ?? 0) == 1,
         categoria: cat,
+        categorias: categoriasByJuego[localId] ?? const [],
         ubicacion: ubic,
         propietarios: propietariosByJuego[localId] ?? const [],
         fundas: fundasByJuego[localId] ?? const [],
@@ -624,10 +783,28 @@ class JuegoRepository {
       'juego_base_local_id': juegoBaseLocalId,
       'juego_base_server_id': juegoBaseServerId,
       'no_enfundar': juego.noEnfundar ? 1 : 0,
+      'es_expansion': juego.esExpansionFlag ? 1 : 0,
+      'idiomas': juego.idiomas.isNotEmpty ? jsonEncode(juego.idiomas) : null,
+      'idioma_otro': juego.idiomaOtro,
+      'independiente_idioma': juego.independienteIdioma ? 1 : 0,
+      'tradumaquetado': juego.tradumaquetado ? 1 : 0,
+      'tradumaquetado_parcial': juego.tradumaquetadoParcial ? 1 : 0,
+      'tradumaquetado_parcial_notas': juego.tradumaquetadoParcialNotas,
+      'varias_copias': juego.variasCopias ? 1 : 0,
     };
   }
 
   Map<String, dynamic> _payloadForServer(Map<String, dynamic> values) {
+    // Parse idiomas back from JSON string for the server payload
+    dynamic idiomasForServer;
+    if (values['idiomas'] is String) {
+      try {
+        idiomasForServer = jsonDecode(values['idiomas'] as String);
+      } catch (_) {
+        idiomasForServer = null;
+      }
+    }
+
     return {
       'nombre': values['nombre'],
       'descripcion': values['descripcion'],
@@ -643,11 +820,19 @@ class JuegoRepository {
       'bgg_id': values['bgg_id'],
       'juego_base_id': values['juego_base_server_id'],
       'no_enfundar': values['no_enfundar'] == 1,
+      'es_expansion': values['es_expansion'] == 1,
+      'idiomas': idiomasForServer,
+      'idioma_otro': values['idioma_otro'],
+      'independiente_idioma': values['independiente_idioma'] == 1,
+      'tradumaquetado': values['tradumaquetado'] == 1,
+      'tradumaquetado_parcial': values['tradumaquetado_parcial'] == 1,
+      'tradumaquetado_parcial_notas': values['tradumaquetado_parcial_notas'],
+      'varias_copias': values['varias_copias'] == 1,
     };
   }
 
   Future<void> _syncPropietarios(
-      int juegoLocalId, int? juegoServerId, List<int> propLocalIds) async {
+      int juegoLocalId, int? juegoServerId, List<int> propLocalIds, Map<int, int?> propUbicaciones) async {
     final db = await _dbService.database;
     final existing = await db.query('juego_propietario',
         where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
@@ -671,23 +856,66 @@ class JuegoRepository {
             localId: localId,
             serverId: serverId,
           );
+        } else {
+          await _outbox.removeForLocalRow('juego_propietario', localId);
         }
       }
     }
 
-    // a\u00f1adir los nuevos
+    // añadir los nuevos o actualizar ubicacion
     for (final propLocalId in propLocalIds) {
-      if (existingByPropLocal.containsKey(propLocalId)) continue;
       final propRow = await db.query('propietarios',
           where: 'local_id = ?', whereArgs: [propLocalId], limit: 1);
       if (propRow.isEmpty) continue;
       final propServerId = propRow.first['server_id'] as int?;
+
+      final ubicLocalId = propUbicaciones[propLocalId];
+      int? ubicServerId;
+      if (ubicLocalId != null) {
+        final ubicRow = await db.query('ubicaciones',
+            where: 'local_id = ?', whereArgs: [ubicLocalId], limit: 1);
+        if (ubicRow.isNotEmpty) {
+          ubicServerId = ubicRow.first['server_id'] as int?;
+        }
+      }
+
+      if (existingByPropLocal.containsKey(propLocalId)) {
+        // Update ubicacion if changed
+        final existingRow = existingByPropLocal[propLocalId]!;
+        final existingUbicLocal = existingRow['ubicacion_local_id'] as int?;
+        if (existingUbicLocal != ubicLocalId) {
+          final localId = existingRow['local_id'] as int;
+          await db.update('juego_propietario', {
+            'ubicacion_local_id': ubicLocalId,
+            'ubicacion_server_id': ubicServerId,
+            'dirty': 1,
+            'pending_action': 'update',
+          }, where: 'local_id = ?', whereArgs: [localId]);
+          final sid = existingRow['server_id'] as int?;
+          if (sid != null) {
+            await _outbox.enqueue(
+              table: 'juego_propietario',
+              action: SyncAction.update,
+              localId: localId,
+              serverId: sid,
+              payload: {
+                'juego_id': juegoServerId,
+                'propietario_id': propServerId,
+                'ubicacion_id': ubicServerId,
+              },
+            );
+          }
+        }
+        continue;
+      }
 
       final newLocalId = await db.insert('juego_propietario', {
         'juego_server_id': juegoServerId,
         'juego_local_id': juegoLocalId,
         'propietario_server_id': propServerId,
         'propietario_local_id': propLocalId,
+        'ubicacion_server_id': ubicServerId,
+        'ubicacion_local_id': ubicLocalId,
         'dirty': 1,
         'pending_action': 'create',
       });
@@ -698,9 +926,76 @@ class JuegoRepository {
         payload: {
           'juego_id': juegoServerId,
           'propietario_id': propServerId,
+          'ubicacion_id': ubicServerId,
         },
       );
     }
+  }
+
+  Future<void> _syncCategorias(
+      int juegoLocalId, int? juegoServerId, List<int> catLocalIds) async {
+    final db = await _dbService.database;
+    final existing = await db.query('juego_categoria',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+
+    final existingByCatLocal = {
+      for (final r in existing) (r['categoria_local_id'] as int): r,
+    };
+    final desired = catLocalIds.toSet();
+
+    for (final entry in existingByCatLocal.entries) {
+      if (!desired.contains(entry.key)) {
+        final localId = entry.value['local_id'] as int;
+        final serverId = entry.value['server_id'] as int?;
+        await db.delete('juego_categoria',
+            where: 'local_id = ?', whereArgs: [localId]);
+        if (serverId != null) {
+          await _outbox.enqueue(
+            table: 'juego_categoria',
+            action: SyncAction.delete,
+            localId: localId,
+            serverId: serverId,
+          );
+        } else {
+          await _outbox.removeForLocalRow('juego_categoria', localId);
+        }
+      }
+    }
+
+    for (final catLocalId in catLocalIds) {
+      if (existingByCatLocal.containsKey(catLocalId)) continue;
+      final catRow = await db.query('categorias',
+          where: 'local_id = ?', whereArgs: [catLocalId], limit: 1);
+      if (catRow.isEmpty) continue;
+      final catServerId = catRow.first['server_id'] as int?;
+
+      final newLocalId = await db.insert('juego_categoria', {
+        'juego_server_id': juegoServerId,
+        'juego_local_id': juegoLocalId,
+        'categoria_server_id': catServerId,
+        'categoria_local_id': catLocalId,
+        'dirty': 1,
+        'pending_action': 'create',
+      });
+      await _outbox.enqueue(
+        table: 'juego_categoria',
+        action: SyncAction.create,
+        localId: newLocalId,
+        payload: {
+          'juego_id': juegoServerId,
+          'categoria_id': catServerId,
+        },
+      );
+    }
+  }
+
+  Future<int?> _tipoFundaLocalIdForRow(
+      Database db, Map<String, dynamic> r) async {
+    final direct = r['tipo_funda_local_id'] as int?;
+    if (direct != null) return direct;
+    final sid = r['tipo_funda_server_id'] as int?;
+    if (sid == null) return null;
+    return _localIdFor(db, 'tipos_funda', sid);
   }
 
   Future<void> _syncFundas(
@@ -709,23 +1004,33 @@ class JuegoRepository {
     List<JuegoFundaDraft> drafts,
   ) async {
     final db = await _dbService.database;
-    final existing = await db.query('juego_fundas',
+    var existing = await db.query('juego_fundas',
         where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
 
     final desiredByTipoLocal = {
       for (final d in drafts) d.tipoFundaLocalId: d,
     };
-    final existingByTipoLocal = <int, Map<String, dynamic>>{};
-    for (final r in existing) {
-      final tipoLocal = r['tipo_funda_local_id'] as int?;
-      if (tipoLocal != null) existingByTipoLocal[tipoLocal] = r;
-    }
 
-    // eliminar los que sobran
-    for (final entry in existingByTipoLocal.entries) {
-      if (!desiredByTipoLocal.containsKey(entry.key)) {
-        final localId = entry.value['local_id'] as int;
-        final serverId = entry.value['server_id'] as int?;
+    // Varias filas con el mismo tipo (p.ej. tras sincronizaciones fallidas).
+    final byTipo = <int, List<Map<String, dynamic>>>{};
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      if (tipoLocal == null) continue;
+      byTipo.putIfAbsent(tipoLocal, () => []).add(r);
+    }
+    for (final rows in byTipo.values) {
+      if (rows.length <= 1) continue;
+      rows.sort((a, b) {
+        final sa = a['server_id'] as int?;
+        final sb = b['server_id'] as int?;
+        if (sa != null && sb == null) return -1;
+        if (sa == null && sb != null) return 1;
+        return (a['local_id'] as int).compareTo(b['local_id'] as int);
+      });
+      for (var i = 1; i < rows.length; i++) {
+        final dup = rows[i];
+        final localId = dup['local_id'] as int;
+        final serverId = dup['server_id'] as int?;
         await db.delete('juego_fundas',
             where: 'local_id = ?', whereArgs: [localId]);
         if (serverId != null) {
@@ -735,8 +1040,42 @@ class JuegoRepository {
             localId: localId,
             serverId: serverId,
           );
+        } else {
+          await _outbox.removeForLocalRow('juego_fundas', localId);
         }
       }
+    }
+    existing = await db.query('juego_fundas',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+
+    // eliminar los que sobran (incluye filas con tipo_funda_local_id null)
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      final shouldKeep =
+          tipoLocal != null && desiredByTipoLocal.containsKey(tipoLocal);
+      if (shouldKeep) continue;
+      final localId = r['local_id'] as int;
+      final serverId = r['server_id'] as int?;
+      await db.delete('juego_fundas',
+          where: 'local_id = ?', whereArgs: [localId]);
+      if (serverId != null) {
+        await _outbox.enqueue(
+          table: 'juego_fundas',
+          action: SyncAction.delete,
+          localId: localId,
+          serverId: serverId,
+        );
+      } else {
+        await _outbox.removeForLocalRow('juego_fundas', localId);
+      }
+    }
+
+    existing = await db.query('juego_fundas',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+    final existingByTipoLocal = <int, Map<String, dynamic>>{};
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      if (tipoLocal != null) existingByTipoLocal[tipoLocal] = r;
     }
 
     // upsert

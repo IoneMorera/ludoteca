@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 3;
+  static const int _schemaVersion = 4;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -36,7 +36,7 @@ class DatabaseService {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: (db, version) async {
-        await _createSchemaV3(db);
+        await _createSchemaV4(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -57,11 +57,14 @@ class DatabaseService {
         if (oldVersion < 3) {
           await _migrateToV3(db);
         }
+        if (oldVersion < 4) {
+          await _migrateToV4(db);
+        }
       },
     );
   }
 
-  Future<void> _createSchemaV3(Database db) async {
+  Future<void> _createSchemaV4(Database db) async {
     // tablas de sincronizaci\u00f3n
     await db.execute('''
       CREATE TABLE sync_state (
@@ -185,6 +188,14 @@ class DatabaseService {
         juego_base_server_id INTEGER,
         juego_base_local_id INTEGER,
         no_enfundar INTEGER NOT NULL DEFAULT 0,
+        es_expansion INTEGER NOT NULL DEFAULT 0,
+        idiomas TEXT,
+        idioma_otro TEXT,
+        independiente_idioma INTEGER NOT NULL DEFAULT 0,
+        tradumaquetado INTEGER NOT NULL DEFAULT 0,
+        tradumaquetado_parcial INTEGER NOT NULL DEFAULT 0,
+        tradumaquetado_parcial_notas TEXT,
+        varias_copias INTEGER NOT NULL DEFAULT 0,
         phash TEXT,
         image_local_path TEXT,
         updated_at TEXT,
@@ -221,6 +232,8 @@ class DatabaseService {
         juego_local_id INTEGER,
         propietario_server_id INTEGER,
         propietario_local_id INTEGER,
+        ubicacion_server_id INTEGER,
+        ubicacion_local_id INTEGER,
         updated_at TEXT,
         dirty INTEGER NOT NULL DEFAULT 0,
         pending_action TEXT
@@ -228,6 +241,22 @@ class DatabaseService {
     ''');
     await db.execute(
         'CREATE INDEX idx_jp_juego ON juego_propietario(juego_local_id)');
+
+    await db.execute('''
+      CREATE TABLE juego_categoria (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        juego_server_id INTEGER,
+        juego_local_id INTEGER,
+        categoria_server_id INTEGER,
+        categoria_local_id INTEGER,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX idx_jc_juego ON juego_categoria(juego_local_id)');
 
     // tabla partidas (heredada de v2)
     await db.execute('''
@@ -246,11 +275,57 @@ class DatabaseService {
   }
 
   Future<void> _migrateToV3(Database db) async {
-    // El cache antiguo `juegos_cache` no contiene la informaci\u00f3n suficiente
-    // para sincronizar; se descarta y se fuerza un pull completo en el primer
-    // arranque tras la actualizaci\u00f3n.
     await db.execute('DROP TABLE IF EXISTS juegos_cache');
-    await _createSchemaV3(db);
+    await _createSchemaV4(db);
+  }
+
+  Future<void> _migrateToV4(Database db) async {
+    // New fields on juegos
+    await db.execute('ALTER TABLE juegos ADD COLUMN es_expansion INTEGER NOT NULL DEFAULT 0');
+    await db.execute('ALTER TABLE juegos ADD COLUMN idiomas TEXT');
+    await db.execute('ALTER TABLE juegos ADD COLUMN idioma_otro TEXT');
+    await db.execute('ALTER TABLE juegos ADD COLUMN independiente_idioma INTEGER NOT NULL DEFAULT 0');
+    await db.execute('ALTER TABLE juegos ADD COLUMN tradumaquetado INTEGER NOT NULL DEFAULT 0');
+    await db.execute('ALTER TABLE juegos ADD COLUMN tradumaquetado_parcial INTEGER NOT NULL DEFAULT 0');
+    await db.execute('ALTER TABLE juegos ADD COLUMN tradumaquetado_parcial_notas TEXT');
+    await db.execute('ALTER TABLE juegos ADD COLUMN varias_copias INTEGER NOT NULL DEFAULT 0');
+
+    // Backfill es_expansion
+    await db.execute("UPDATE juegos SET es_expansion = 1 WHERE juego_base_server_id IS NOT NULL OR juego_base_local_id IS NOT NULL");
+
+    // Migrate old estado values
+    await db.execute("UPDATE juegos SET estado = 'disponible' WHERE estado NOT IN ('disponible', 'en_venta', 'vendido')");
+
+    // ubicacion on juego_propietario
+    await db.execute('ALTER TABLE juego_propietario ADD COLUMN ubicacion_server_id INTEGER');
+    await db.execute('ALTER TABLE juego_propietario ADD COLUMN ubicacion_local_id INTEGER');
+
+    // juego_categoria pivot table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS juego_categoria (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        juego_server_id INTEGER,
+        juego_local_id INTEGER,
+        categoria_server_id INTEGER,
+        categoria_local_id INTEGER,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_jc_juego ON juego_categoria(juego_local_id)');
+
+    // Migrate existing categoria_id to juego_categoria
+    await db.execute('''
+      INSERT INTO juego_categoria (juego_local_id, juego_server_id, categoria_local_id, categoria_server_id, dirty)
+      SELECT local_id, server_id, categoria_local_id, categoria_server_id, 0
+      FROM juegos
+      WHERE categoria_local_id IS NOT NULL OR categoria_server_id IS NOT NULL
+    ''');
+
+    // Force full re-pull to get new fields from server
+    await db.delete('sync_state', where: "key = 'last_pull_at'");
   }
 
   // ---------- sync_state helpers ----------

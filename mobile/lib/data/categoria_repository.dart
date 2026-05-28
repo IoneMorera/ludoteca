@@ -76,6 +76,52 @@ class CategoriaRepository {
     return localId;
   }
 
+  Future<void> update(int localId, {required String nombre, String? descripcion}) async {
+    final db = await _dbService.database;
+    final existing = await db.query('categorias',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+
+    await db.update('categorias', {
+      'nombre': nombre,
+      'descripcion': descripcion,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [localId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'categorias',
+        action: SyncAction.update,
+        localId: localId,
+        serverId: serverId,
+        payload: {'nombre': nombre, 'descripcion': descripcion},
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
+  }
+
+  Future<void> delete(int localId) async {
+    final db = await _dbService.database;
+    final existing = await db.query('categorias',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    await db.delete('categorias', where: 'local_id = ?', whereArgs: [localId]);
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'categorias',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: serverId,
+      );
+    } else {
+      await _outbox.removeForLocalRow('categorias', localId);
+    }
+  }
+
   /// Upsert directo desde el snapshot del servidor (no genera outbox).
   Future<void> upsertFromServer(Map<String, dynamic> data) async {
     final db = await _dbService.database;

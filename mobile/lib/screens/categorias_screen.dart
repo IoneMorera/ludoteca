@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import 'package:provider/provider.dart';
+
+import '../data/categoria_repository.dart';
+import '../data/sync_service.dart';
+import '../providers/juegos_provider.dart';
 
 class CategoriasScreen extends StatefulWidget {
   const CategoriasScreen({super.key});
@@ -9,8 +13,7 @@ class CategoriasScreen extends StatefulWidget {
 }
 
 class _CategoriasScreenState extends State<CategoriasScreen> {
-  final ApiService _api = ApiService();
-  List<Map<String, dynamic>> _categorias = [];
+  List<CategoriaRow> _categorias = [];
   bool _loading = true;
 
   @override
@@ -22,9 +25,10 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
   Future<void> _fetchCategorias() async {
     setState(() => _loading = true);
     try {
-      final response = await _api.get('/categorias');
+      final repo = context.read<JuegosProvider>().categoriaRepository;
+      final cats = await repo.getAll();
       setState(() {
-        _categorias = (response.data as List).cast<Map<String, dynamic>>();
+        _categorias = cats;
         _loading = false;
       });
     } catch (e) {
@@ -33,9 +37,9 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
     }
   }
 
-  Future<void> _showFormDialog({Map<String, dynamic>? categoria}) async {
-    final nombreCtrl = TextEditingController(text: categoria?['nombre'] ?? '');
-    final descripcionCtrl = TextEditingController(text: categoria?['descripcion'] ?? '');
+  Future<void> _showFormDialog({CategoriaRow? categoria}) async {
+    final nombreCtrl = TextEditingController(text: categoria?.nombre ?? '');
+    final descripcionCtrl = TextEditingController(text: categoria?.descripcion ?? '');
     final isEditing = categoria != null;
     bool saving = false;
 
@@ -80,15 +84,24 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
                       if (nombreCtrl.text.trim().isEmpty) return;
                       setDialogState(() => saving = true);
                       try {
-                        final data = {
-                          'nombre': nombreCtrl.text.trim(),
-                          'descripcion': descripcionCtrl.text.trim(),
-                        };
+                        final repo = context.read<JuegosProvider>().categoriaRepository;
                         if (isEditing) {
-                          await _api.put('/categorias/${categoria['id']}', data: data);
+                          await repo.update(
+                            categoria.localId,
+                            nombre: nombreCtrl.text.trim(),
+                            descripcion: descripcionCtrl.text.trim().isEmpty
+                                ? null
+                                : descripcionCtrl.text.trim(),
+                          );
                         } else {
-                          await _api.post('/categorias', data: data);
+                          await repo.create(
+                            nombre: nombreCtrl.text.trim(),
+                            descripcion: descripcionCtrl.text.trim().isEmpty
+                                ? null
+                                : descripcionCtrl.text.trim(),
+                          );
                         }
+                        SyncService().syncAll();
                         if (ctx.mounted) Navigator.pop(ctx, true);
                       } catch (e) {
                         setDialogState(() => saving = false);
@@ -111,12 +124,12 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
     if (result == true) _fetchCategorias();
   }
 
-  Future<void> _confirmDelete(Map<String, dynamic> categoria) async {
+  Future<void> _confirmDelete(CategoriaRow categoria) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar categoría'),
-        content: Text('¿Eliminar "${categoria['nombre']}"? Los juegos de esta categoría quedarán sin categoría.'),
+        content: Text('¿Eliminar "${categoria.nombre}"? Los juegos de esta categoría quedarán sin categoría.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -133,7 +146,9 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
 
     if (confirm == true) {
       try {
-        await _api.delete('/categorias/${categoria['id']}');
+        final repo = context.read<JuegosProvider>().categoriaRepository;
+        await repo.delete(categoria.localId);
+        SyncService().syncAll();
         _fetchCategorias();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -189,10 +204,10 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
                             backgroundColor: theme.colorScheme.primaryContainer,
                             child: Icon(Icons.category, color: theme.colorScheme.onPrimaryContainer, size: 20),
                           ),
-                          title: Text(cat['nombre'] ?? '',
+                          title: Text(cat.nombre,
                               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                          subtitle: cat['descripcion'] != null && cat['descripcion'].toString().isNotEmpty
-                              ? Text(cat['descripcion'], maxLines: 2, overflow: TextOverflow.ellipsis,
+                          subtitle: cat.descripcion != null && cat.descripcion!.isNotEmpty
+                              ? Text(cat.descripcion!, maxLines: 2, overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontSize: 12, color: Colors.grey[600]))
                               : null,
                           trailing: PopupMenuButton<String>(

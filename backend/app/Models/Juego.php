@@ -27,6 +27,14 @@ class Juego extends Model
         'bgg_id',
         'juego_base_id',
         'no_enfundar',
+        'es_expansion',
+        'idiomas',
+        'idioma_otro',
+        'independiente_idioma',
+        'tradumaquetado',
+        'tradumaquetado_parcial',
+        'tradumaquetado_parcial_notas',
+        'varias_copias',
     ];
 
     protected $casts = [
@@ -38,11 +46,23 @@ class Juego extends Model
         'bgg_id' => 'integer',
         'juego_base_id' => 'integer',
         'no_enfundar' => 'boolean',
+        'es_expansion' => 'boolean',
+        'idiomas' => 'array',
+        'independiente_idioma' => 'boolean',
+        'tradumaquetado' => 'boolean',
+        'tradumaquetado_parcial' => 'boolean',
+        'varias_copias' => 'boolean',
     ];
 
     public function categoria()
     {
         return $this->belongsTo(Categoria::class);
+    }
+
+    public function categorias()
+    {
+        return $this->belongsToMany(Categoria::class, 'juego_categoria')
+            ->withTimestamps();
     }
 
     public function ubicacion()
@@ -58,6 +78,7 @@ class Juego extends Model
     public function propietarios()
     {
         return $this->belongsToMany(Propietario::class, 'juego_propietario')
+            ->withPivot('ubicacion_id')
             ->withTimestamps();
     }
 

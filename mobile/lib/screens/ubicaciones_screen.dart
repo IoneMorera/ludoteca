@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:provider/provider.dart';
+
+import '../data/ubicacion_repository.dart';
+import '../providers/juegos_provider.dart';
+import '../providers/sync_provider.dart';
 
 class UbicacionesScreen extends StatefulWidget {
   const UbicacionesScreen({super.key});
@@ -9,36 +14,45 @@ class UbicacionesScreen extends StatefulWidget {
 }
 
 class _UbicacionesScreenState extends State<UbicacionesScreen> {
-  final ApiService _api = ApiService();
-  List<Map<String, dynamic>> _habitaciones = [];
-  List<Map<String, dynamic>> _muebles = [];
-  List<Map<String, dynamic>> _ubicaciones = [];
+  List<HabitacionRow> _habitaciones = [];
+  List<MuebleRow> _muebles = [];
+  List<UbicacionRow> _ubicaciones = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _fetchData();
+    SchedulerBinding.instance.addPostFrameCallback((_) => _loadLocal());
   }
 
-  Future<void> _fetchData() async {
+  Future<void> _loadLocal() async {
     setState(() => _loading = true);
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
     try {
-      final results = await Future.wait([
-        _api.get('/habitaciones'),
-        _api.get('/muebles'),
-        _api.get('/ubicaciones'),
-      ]);
-      setState(() {
-        _habitaciones = (results[0].data as List).cast<Map<String, dynamic>>();
-        _muebles = (results[1].data as List).cast<Map<String, dynamic>>();
-        _ubicaciones = (results[2].data as List).cast<Map<String, dynamic>>();
-        _loading = false;
-      });
+      final h = await repo.listHabitaciones();
+      final m = await repo.listMuebles();
+      final u = await repo.getAll();
+      if (mounted) {
+        setState(() {
+          _habitaciones = h;
+          _muebles = m;
+          _ubicaciones = u;
+          _loading = false;
+        });
+      }
     } catch (e) {
       debugPrint('UBICACIONES ERROR: $e');
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _syncIfPossible() async {
+    try {
+      await context.read<SyncProvider>().syncNow();
+    } catch (e) {
+      debugPrint('sync ubicaciones: $e');
+    }
+    if (mounted) await _loadLocal();
   }
 
   void _showAddOptions() {
@@ -53,14 +67,16 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
                 color: Colors.grey[400],
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const SizedBox(height: 12),
-            const Text('Añadir ubicación', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const Text('Añadir ubicación',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 8),
             ListTile(
               leading: const Icon(Icons.home_outlined),
@@ -99,6 +115,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
   Future<void> _showHabitacionDialog() async {
     final ctrl = TextEditingController();
     bool saving = false;
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
 
     final result = await showDialog<bool>(
       context: context,
@@ -127,24 +144,30 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                       if (ctrl.text.trim().isEmpty) return;
                       setDialogState(() => saving = true);
                       try {
-                        await _api.post('/habitaciones', data: {'nombre': ctrl.text.trim()});
+                        await repo.createHabitacion(nombre: ctrl.text.trim());
                         if (ctx.mounted) Navigator.pop(ctx, true);
                       } catch (e) {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
                         }
                       }
                     },
               child: saving
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Crear'),
             ),
           ],
         ),
       ),
     );
-    if (result == true) _fetchData();
+    if (result == true) {
+      await _syncIfPossible();
+    }
   }
 
   Future<void> _showMuebleDialog() async {
@@ -156,8 +179,9 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
     }
 
     final ctrl = TextEditingController();
-    int? habitacionId = _habitaciones.first['id'];
+    int habitacionLocalId = _habitaciones.first.localId;
     bool saving = false;
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
 
     final result = await showDialog<bool>(
       context: context,
@@ -168,7 +192,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
-                value: habitacionId,
+                initialValue: habitacionLocalId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Habitación *',
@@ -176,11 +200,14 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                 ),
                 items: _habitaciones
                     .map((h) => DropdownMenuItem(
-                          value: h['id'] as int,
-                          child: Text(h['nombre'] ?? '', overflow: TextOverflow.ellipsis),
+                          value: h.localId,
+                          child: Text(h.nombre,
+                              overflow: TextOverflow.ellipsis),
                         ))
                     .toList(),
-                onChanged: (v) => setDialogState(() => habitacionId = v),
+                onChanged: (v) => setDialogState(() {
+                  if (v != null) habitacionLocalId = v;
+                }),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -204,30 +231,36 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
               onPressed: saving
                   ? null
                   : () async {
-                      if (ctrl.text.trim().isEmpty || habitacionId == null) return;
+                      if (ctrl.text.trim().isEmpty) return;
                       setDialogState(() => saving = true);
                       try {
-                        await _api.post('/muebles', data: {
-                          'habitacion_id': habitacionId,
-                          'nombre': ctrl.text.trim(),
-                        });
+                        await repo.createMueble(
+                          habitacionLocalId: habitacionLocalId,
+                          nombre: ctrl.text.trim(),
+                        );
                         if (ctx.mounted) Navigator.pop(ctx, true);
                       } catch (e) {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
                         }
                       }
                     },
               child: saving
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Crear'),
             ),
           ],
         ),
       ),
     );
-    if (result == true) _fetchData();
+    if (result == true) {
+      await _syncIfPossible();
+    }
   }
 
   Future<void> _showEstanteDialog() async {
@@ -239,8 +272,9 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
     }
 
     final ctrl = TextEditingController();
-    int? muebleId = _muebles.first['id'];
+    int muebleLocalId = _muebles.first.localId;
     bool saving = false;
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
 
     final result = await showDialog<bool>(
       context: context,
@@ -251,7 +285,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
-                value: muebleId,
+                initialValue: muebleLocalId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Mueble *',
@@ -259,14 +293,16 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                 ),
                 items: _muebles
                     .map((m) => DropdownMenuItem(
-                          value: m['id'] as int,
+                          value: m.localId,
                           child: Text(
-                            '${m['nombre'] ?? ''} (${_habitacionNombre(m['habitacion_id'])})',
+                            '${m.nombre} (${_habitacionNombre(m.habitacionLocalId)})',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ))
                     .toList(),
-                onChanged: (v) => setDialogState(() => muebleId = v),
+                onChanged: (v) {
+                  if (v != null) setDialogState(() => muebleLocalId = v);
+                },
               ),
               const SizedBox(height: 12),
               TextField(
@@ -290,52 +326,58 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
               onPressed: saving
                   ? null
                   : () async {
-                      if (ctrl.text.trim().isEmpty || muebleId == null) return;
+                      if (ctrl.text.trim().isEmpty) return;
                       setDialogState(() => saving = true);
                       try {
-                        await _api.post('/ubicaciones', data: {
-                          'mueble_id': muebleId,
-                          'nombre': ctrl.text.trim(),
-                        });
+                        await repo.createUbicacion(
+                          muebleLocalId: muebleLocalId,
+                          nombre: ctrl.text.trim(),
+                        );
                         if (ctx.mounted) Navigator.pop(ctx, true);
                       } catch (e) {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
                         }
                       }
                     },
               child: saving
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Crear'),
             ),
           ],
         ),
       ),
     );
-    if (result == true) _fetchData();
+    if (result == true) {
+      await _syncIfPossible();
+    }
   }
 
-  String _habitacionNombre(dynamic habitacionId) {
-    final hab = _habitaciones.firstWhere(
-      (h) => h['id'] == habitacionId,
-      orElse: () => {'nombre': '?'},
-    );
-    return hab['nombre'] ?? '?';
+  String _habitacionNombre(int? habitacionLocalId) {
+    if (habitacionLocalId == null) return '?';
+    try {
+      return _habitaciones
+          .firstWhere((h) => h.localId == habitacionLocalId)
+          .nombre;
+    } catch (_) {
+      return '?';
+    }
   }
 
-  List<Map<String, dynamic>> _mueblesDeHabitacion(int habitacionId) {
+  List<MuebleRow> _mueblesDeHabitacion(int habitacionLocalId) {
     return _muebles
-        .where((m) => m['habitacion_id'] == habitacionId)
+        .where((m) => m.habitacionLocalId == habitacionLocalId)
         .toList();
   }
 
-  List<Map<String, dynamic>> _ubicacionesDeMueble(int muebleId) {
+  List<UbicacionRow> _ubicacionesDeMueble(int muebleLocalId) {
     return _ubicaciones
-        .where((u) {
-          final mueble = u['mueble'] as Map<String, dynamic>?;
-          return mueble?['id'] == muebleId;
-        })
+        .where((u) => u.muebleLocalId == muebleLocalId)
         .toList();
   }
 
@@ -356,15 +398,24 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.location_off, size: 56, color: Colors.grey[400]),
+                      Icon(Icons.location_off,
+                          size: 56, color: Colors.grey[400]),
                       const SizedBox(height: 12),
-                      Text('No hay ubicaciones configuradas',
-                          style: TextStyle(color: Colors.grey[600])),
+                      Text(
+                        'No hay ubicaciones configuradas',
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: _syncIfPossible,
+                        icon: const Icon(Icons.sync),
+                        label: const Text('Sincronizar desde el servidor'),
+                      ),
                     ],
                   ),
                 )
               : RefreshIndicator(
-                  onRefresh: _fetchData,
+                  onRefresh: _syncIfPossible,
                   child: ListView.builder(
                     padding: const EdgeInsets.all(12),
                     itemCount: _habitaciones.length,
@@ -375,8 +426,8 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
     );
   }
 
-  Widget _buildHabitacionCard(Map<String, dynamic> habitacion, ThemeData theme) {
-    final muebles = _mueblesDeHabitacion(habitacion['id']);
+  Widget _buildHabitacionCard(HabitacionRow habitacion, ThemeData theme) {
+    final muebles = _mueblesDeHabitacion(habitacion.localId);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -386,9 +437,10 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           initiallyExpanded: true,
-          leading: Icon(Icons.home_outlined, color: theme.colorScheme.primary),
+          leading:
+              Icon(Icons.home_outlined, color: theme.colorScheme.primary),
           title: Text(
-            habitacion['nombre'] ?? '',
+            habitacion.nombre,
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           subtitle: Text(
@@ -399,8 +451,10 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
               ? [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Text('Sin muebles',
-                        style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                    child: Text(
+                      'Sin muebles',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                    ),
                   ),
                 ]
               : muebles.map((m) => _buildMuebleTile(m, theme)).toList(),
@@ -409,35 +463,45 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
     );
   }
 
-  Widget _buildMuebleTile(Map<String, dynamic> mueble, ThemeData theme) {
-    final ubicaciones = _ubicacionesDeMueble(mueble['id']);
-    final ubicacionesCount = mueble['ubicaciones_count'] ?? ubicaciones.length;
+  Widget _buildMuebleTile(MuebleRow mueble, ThemeData theme) {
+    final ubicacionesList = _ubicacionesDeMueble(mueble.localId);
 
     return Padding(
       padding: const EdgeInsets.only(left: 16),
       child: ExpansionTile(
-        leading: Icon(Icons.inventory_2_outlined, size: 20, color: Colors.grey[600]),
-        title: Text(mueble['nombre'] ?? '',
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-        subtitle: ubicacionesCount > 0
-            ? Text('$ubicacionesCount ${ubicacionesCount == 1 ? 'estante' : 'estantes'}',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+        leading: Icon(Icons.inventory_2_outlined,
+            size: 20, color: Colors.grey[600]),
+        title: Text(
+          mueble.nombre,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        ),
+        subtitle: ubicacionesList.isNotEmpty
+            ? Text(
+                '${ubicacionesList.length} ${ubicacionesList.length == 1 ? 'estante' : 'estantes'}',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              )
             : null,
-        children: ubicaciones.isEmpty
+        children: ubicacionesList.isEmpty
             ? [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 16, 12),
-                  child: Text('Sin estantes definidos',
-                      style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                  child: Text(
+                    'Sin estantes definidos',
+                    style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  ),
                 ),
               ]
-            : ubicaciones
+            : ubicacionesList
                 .map((u) => ListTile(
                       dense: true,
-                      contentPadding: const EdgeInsets.only(left: 40, right: 16),
-                      leading: Icon(Icons.shelves, size: 18, color: Colors.grey[500]),
-                      title: Text(u['nombre'] ?? '',
-                          style: const TextStyle(fontSize: 13)),
+                      contentPadding:
+                          const EdgeInsets.only(left: 40, right: 16),
+                      leading: Icon(Icons.shelves,
+                          size: 18, color: Colors.grey[500]),
+                      title: Text(
+                        u.nombre,
+                        style: const TextStyle(fontSize: 13),
+                      ),
                     ))
                 .toList(),
       ),

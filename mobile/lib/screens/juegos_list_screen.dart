@@ -8,7 +8,10 @@ import '../models/juego.dart';
 import '../widgets/game_image.dart';
 
 class JuegosListScreen extends StatefulWidget {
-  const JuegosListScreen({super.key});
+  final String? initialEstado;
+  final bool? initialEsExpansion;
+
+  const JuegosListScreen({super.key, this.initialEstado, this.initialEsExpansion});
 
   @override
   State<JuegosListScreen> createState() => _JuegosListScreenState();
@@ -17,14 +20,19 @@ class JuegosListScreen extends StatefulWidget {
 class _JuegosListScreenState extends State<JuegosListScreen> {
   final _searchController = TextEditingController();
   SyncStatus? _lastSyncStatus;
+  String? _estadoFilter;
+  bool? _esExpansionFilter;
 
   @override
   void initState() {
     super.initState();
+    _estadoFilter = widget.initialEstado;
+    _esExpansionFilter = widget.initialEsExpansion;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<JuegosProvider>();
       provider.clearBusqueda();
-      provider.fetchJuegos();
+      provider.setFilters(estado: _estadoFilter, esExpansion: _esExpansionFilter);
+      provider.fetchJuegos(estado: _estadoFilter, esExpansion: _esExpansionFilter);
       _lastSyncStatus = context.read<SyncProvider>().status;
       context.read<SyncProvider>().addListener(_onSyncChanged);
     });
@@ -37,6 +45,16 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       context.read<JuegosProvider>().fetchJuegos();
     }
     _lastSyncStatus = syncStatus;
+  }
+
+  void _applyFilter(String? estado, bool? esExpansion) {
+    setState(() {
+      _estadoFilter = estado;
+      _esExpansionFilter = esExpansion;
+    });
+    final provider = context.read<JuegosProvider>();
+    provider.setFilters(estado: estado, esExpansion: esExpansion);
+    provider.fetchJuegos(estado: estado, esExpansion: esExpansion);
   }
 
   @override
@@ -63,7 +81,7 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
@@ -85,6 +103,55 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
               onChanged: (value) {
                 provider.fetchJuegos(buscar: value);
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  FilterChip(
+                    label: const Text('Todos'),
+                    selected: _estadoFilter == null && _esExpansionFilter == null,
+                    onSelected: (_) => _applyFilter(null, null),
+                  ),
+                  const SizedBox(width: 6),
+                  FilterChip(
+                    label: const Text('Disponible'),
+                    selected: _estadoFilter == 'disponible',
+                    selectedColor: Colors.green[100],
+                    onSelected: (_) => _applyFilter('disponible', null),
+                  ),
+                  const SizedBox(width: 6),
+                  FilterChip(
+                    label: const Text('En venta'),
+                    selected: _estadoFilter == 'en_venta',
+                    selectedColor: Colors.orange[100],
+                    onSelected: (_) => _applyFilter('en_venta', null),
+                  ),
+                  const SizedBox(width: 6),
+                  FilterChip(
+                    label: const Text('Vendido'),
+                    selected: _estadoFilter == 'vendido',
+                    selectedColor: Colors.red[100],
+                    onSelected: (_) => _applyFilter('vendido', null),
+                  ),
+                  const SizedBox(width: 6),
+                  FilterChip(
+                    label: const Text('Expansiones'),
+                    selected: _esExpansionFilter == true,
+                    selectedColor: Colors.purple[100],
+                    onSelected: (_) => _applyFilter(null, true),
+                  ),
+                  const SizedBox(width: 6),
+                  FilterChip(
+                    label: const Text('Juegos base'),
+                    selected: _esExpansionFilter == false,
+                    onSelected: (_) => _applyFilter(null, false),
+                  ),
+                ],
+              ),
             ),
           ),
           if (provider.loading && provider.juegos.isEmpty)
@@ -157,26 +224,22 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                                   fontWeight: FontWeight.w600,
                                   fontSize: 15)),
                         ),
-                        if (juego.esExpansion)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blue[50],
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text('Exp.',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.blue[700],
-                                    fontWeight: FontWeight.w600)),
-                          ),
+                        ..._buildBadges(juego),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        if (juego.categoria != null) ...[
+                        if (juego.categorias.isNotEmpty) ...[
+                          Icon(Icons.category,
+                              size: 14, color: Colors.grey[500]),
+                          const SizedBox(width: 4),
+                          Text(juego.categorias.map((c) => c.nombre).join(', '),
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[600]),
+                              overflow: TextOverflow.ellipsis),
+                          const SizedBox(width: 12),
+                        ] else if (juego.categoria != null) ...[
                           Icon(Icons.category,
                               size: 14, color: Colors.grey[500]),
                           const SizedBox(width: 4),
@@ -230,6 +293,62 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
         ),
       ),
     );
+  }
+
+  List<Widget> _buildBadges(Juego juego) {
+    final badges = <Widget>[];
+    if (juego.esExpansion) {
+      badges.add(Container(
+        margin: const EdgeInsets.only(left: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.purple[50],
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text('Exp.',
+            style: TextStyle(
+                fontSize: 11,
+                color: Colors.purple[700],
+                fontWeight: FontWeight.w600)),
+      ));
+    }
+    final estado = juego.estado;
+    Color? badgeColor;
+    Color? textColor;
+    String? label;
+    switch (estado) {
+      case 'disponible':
+        badgeColor = Colors.green[50];
+        textColor = Colors.green[700];
+        label = 'Disponible';
+        break;
+      case 'en_venta':
+        badgeColor = Colors.orange[50];
+        textColor = Colors.orange[700];
+        label = 'En venta';
+        break;
+      case 'vendido':
+        badgeColor = Colors.red[50];
+        textColor = Colors.red[700];
+        label = 'Vendido';
+        break;
+    }
+    if (label != null) {
+      badges.add(Container(
+        margin: const EdgeInsets.only(left: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: badgeColor,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 11,
+                color: textColor,
+                fontWeight: FontWeight.w600)),
+      ));
+    }
+    return badges;
   }
 
   Widget _buildPagination(JuegosProvider provider) {
