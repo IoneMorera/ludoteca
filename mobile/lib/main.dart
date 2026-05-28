@@ -86,6 +86,13 @@ class LudotecaApp extends StatelessWidget {
                         ));
               }
               return MaterialPageRoute(builder: (_) => const MainShell());
+            case '/juegos':
+              final args = settings.arguments as Map<String, dynamic>?;
+              return MaterialPageRoute(
+                  builder: (_) => JuegosListScreen(
+                        initialEstado: args?['estado'] as String?,
+                        initialEsExpansion: args?['esExpansion'] as bool?,
+                      ));
             case '/juego/nuevo':
               final prefill = settings.arguments as Map<String, dynamic>?;
               return MaterialPageRoute(

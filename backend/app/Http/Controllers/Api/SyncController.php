@@ -7,6 +7,7 @@ use App\Models\Categoria;
 use App\Models\Habitacion;
 use App\Models\Juego;
 use App\Models\JuegoFunda;
+use App\Models\JuegoCategoriaPivot;
 use App\Models\JuegoPropietarioPivot;
 use App\Models\Mueble;
 use App\Models\Propietario;
@@ -40,6 +41,7 @@ class SyncController extends Controller
             'juegos' => $this->fetchJuegos($since),
             'juego_fundas' => $this->fetchJuegoFundas($since),
             'juego_propietario' => $this->fetchJuegoPropietario($since),
+            'juego_categoria' => $this->fetchJuegoCategoria($since),
         ];
 
         $deleted = $this->fetchTombstones($since);
@@ -195,7 +197,10 @@ class SyncController extends Controller
                 'nombre', 'descripcion', 'edad_minima', 'edad_maxima',
                 'num_jugadores_min', 'num_jugadores_max', 'categoria_id',
                 'ubicacion_id', 'estado', 'fecha_compra', 'imagen', 'bgg_id',
-                'juego_base_id', 'no_enfundar',
+                'juego_base_id', 'no_enfundar', 'es_expansion', 'idiomas',
+                'idioma_otro', 'independiente_idioma', 'tradumaquetado',
+                'tradumaquetado_parcial', 'tradumaquetado_parcial_notas',
+                'varias_copias',
             ],
             'categorias' => ['nombre', 'descripcion'],
             'propietarios' => ['nombre', 'bgg_username', 'es_principal'],
@@ -204,7 +209,8 @@ class SyncController extends Controller
             'ubicaciones' => ['mueble_id', 'nombre'],
             'tipos_funda' => ['nombre', 'ancho_mm', 'alto_mm', 'descripcion'],
             'juego_fundas' => ['juego_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas'],
-            'juego_propietario' => ['juego_id', 'propietario_id'],
+            'juego_propietario' => ['juego_id', 'propietario_id', 'ubicacion_id'],
+            'juego_categoria' => ['juego_id', 'categoria_id'],
             default => [],
         };
 
@@ -223,6 +229,7 @@ class SyncController extends Controller
             'tipos_funda' => TipoFunda::class,
             'juego_fundas' => JuegoFunda::class,
             'juego_propietario' => JuegoPropietarioPivot::class,
+            'juego_categoria' => JuegoCategoriaPivot::class,
             default => throw new \InvalidArgumentException("Unknown table: {$table}"),
         };
     }
@@ -355,6 +362,14 @@ class SyncController extends Controller
                 'bgg_id' => $j->bgg_id,
                 'juego_base_id' => $j->juego_base_id,
                 'no_enfundar' => (bool) $j->no_enfundar,
+                'es_expansion' => (bool) $j->es_expansion,
+                'idiomas' => $j->idiomas,
+                'idioma_otro' => $j->idioma_otro,
+                'independiente_idioma' => (bool) $j->independiente_idioma,
+                'tradumaquetado' => (bool) $j->tradumaquetado,
+                'tradumaquetado_parcial' => (bool) $j->tradumaquetado_parcial,
+                'tradumaquetado_parcial_notas' => $j->tradumaquetado_parcial_notas,
+                'varias_copias' => (bool) $j->varias_copias,
                 'created_at' => $j->created_at?->toIso8601String(),
                 'updated_at' => $j->updated_at?->toIso8601String(),
             ])->all();
@@ -385,6 +400,21 @@ class SyncController extends Controller
                 'id' => $row->id,
                 'juego_id' => $row->juego_id,
                 'propietario_id' => $row->propietario_id,
+                'ubicacion_id' => $row->ubicacion_id ?? null,
+                'created_at' => $row->created_at,
+                'updated_at' => $row->updated_at,
+            ])->all();
+    }
+
+    private function fetchJuegoCategoria(?Carbon $since): array
+    {
+        return DB::table('juego_categoria')
+            ->when($since, fn ($q) => $q->where('updated_at', '>', $since))
+            ->get()
+            ->map(fn ($row) => [
+                'id' => $row->id,
+                'juego_id' => $row->juego_id,
+                'categoria_id' => $row->categoria_id,
                 'created_at' => $row->created_at,
                 'updated_at' => $row->updated_at,
             ])->all();

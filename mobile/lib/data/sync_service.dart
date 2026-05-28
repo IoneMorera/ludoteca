@@ -252,8 +252,20 @@ class SyncService {
         if (rows.isNotEmpty) {
           final j = rows.first['juego_server_id'] as int?;
           final p = rows.first['propietario_server_id'] as int?;
+          final u = rows.first['ubicacion_server_id'] as int?;
           if (j != null) merged['juego_id'] = j;
           if (p != null) merged['propietario_id'] = p;
+          if (u != null) merged['ubicacion_id'] = u;
+        }
+        break;
+      case 'juego_categoria':
+        final rows = await db.query('juego_categoria',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final j = rows.first['juego_server_id'] as int?;
+          final c = rows.first['categoria_server_id'] as int?;
+          if (j != null) merged['juego_id'] = j;
+          if (c != null) merged['categoria_id'] = c;
         }
         break;
     }
@@ -267,11 +279,11 @@ class SyncService {
   }) async {
     final db = await _dbService.database;
     final fkMappings = <String, List<String>>{
-      'juegos': ['juego_fundas.juego', 'juego_propietario.juego', 'juegos.juego_base'],
+      'juegos': ['juego_fundas.juego', 'juego_propietario.juego', 'juego_categoria.juego', 'juegos.juego_base'],
       'tipos_funda': ['juego_fundas.tipo_funda'],
       'propietarios': ['juego_propietario.propietario'],
-      'categorias': ['juegos.categoria'],
-      'ubicaciones': ['juegos.ubicacion'],
+      'categorias': ['juegos.categoria', 'juego_categoria.categoria'],
+      'ubicaciones': ['juegos.ubicacion', 'juego_propietario.ubicacion'],
       'habitaciones': ['muebles.habitacion'],
       'muebles': ['ubicaciones.mueble'],
     };
@@ -358,8 +370,13 @@ class SyncService {
     for (final r in jp) {
       await _juegos.upsertJuegoPropietarioFromServer(r);
     }
+    final jc =
+        (tables['juego_categoria'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    for (final r in jc) {
+      await _juegos.upsertJuegoCategoriaFromServer(r);
+    }
 
-    // tombstones (borrados): aplicar despu\u00e9s del upsert.
+    // tombstones (borrados): aplicar después del upsert.
     for (final entry in deleted.entries) {
       final table = entry.key;
       final ids = (entry.value as List?)?.cast<int>() ?? [];
@@ -382,6 +399,7 @@ class SyncService {
         case 'juegos':
         case 'juego_fundas':
         case 'juego_propietario':
+        case 'juego_categoria':
           await _juegos.deleteByServerIds(table, ids);
           break;
       }

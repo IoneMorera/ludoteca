@@ -56,17 +56,36 @@ class JuegosProvider extends ChangeNotifier {
   UbicacionRepository get ubicacionRepository => _ubicaciones;
   TipoFundaRepository get tipoFundaRepository => _tiposFunda;
 
-  Future<void> fetchJuegos({int page = 1, String? buscar}) async {
+  String? _estadoFilter;
+  bool? _esExpansionFilter;
+
+  String? get estadoFilter => _estadoFilter;
+  bool? get esExpansionFilter => _esExpansionFilter;
+
+  void setFilters({String? estado, bool? esExpansion}) {
+    _estadoFilter = estado;
+    _esExpansionFilter = esExpansion;
+  }
+
+  Future<void> fetchJuegos({int page = 1, String? buscar, String? estado, bool? esExpansion}) async {
     _loading = true;
     notifyListeners();
     if (buscar != null) _busqueda = buscar;
+    if (estado != null) _estadoFilter = estado;
+    if (esExpansion != null) _esExpansionFilter = esExpansion;
     try {
       _items = await _juegos.search(
         buscar: _busqueda.isEmpty ? null : _busqueda,
         page: page,
         perPage: _perPage,
+        estado: _estadoFilter,
+        esExpansion: _esExpansionFilter,
       );
-      _total = await _juegos.count(buscar: _busqueda.isEmpty ? null : _busqueda);
+      _total = await _juegos.count(
+        buscar: _busqueda.isEmpty ? null : _busqueda,
+        estado: _estadoFilter,
+        esExpansion: _esExpansionFilter,
+      );
       _currentPage = page;
       _lastPage = ((_total / _perPage).ceil()).clamp(1, 9999);
     } catch (e) {
@@ -120,13 +139,16 @@ class JuegosProvider extends ChangeNotifier {
     Juego juego, {
     required List<int> propietarioLocalIds,
     required List<JuegoFundaDraft> fundas,
+    List<int> categoriaLocalIds = const [],
+    Map<int, int?> propietarioUbicaciones = const {},
   }) async {
     final localId = await _juegos.save(
       juego,
       propietarioLocalIds: propietarioLocalIds,
       fundas: fundas,
+      categoriaLocalIds: categoriaLocalIds,
+      propietarioUbicaciones: propietarioUbicaciones,
     );
-    // intenta sincronizar en segundo plano
     unawaited(SyncService().syncAll());
     await fetchJuegos(page: _currentPage);
     return localId;

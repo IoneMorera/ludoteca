@@ -29,11 +29,20 @@ class Juego {
   final int? ubicacionLocalId;
   final int? bggId;
   final bool noEnfundar;
+  final bool esExpansionFlag;
+  final List<String> idiomas;
+  final String? idiomaOtro;
+  final bool independienteIdioma;
+  final bool tradumaquetado;
+  final bool tradumaquetadoParcial;
+  final String? tradumaquetadoParcialNotas;
+  final bool variasCopias;
   final String? phash;
   final String? imageLocalPath;
   final String? updatedAt;
   final bool dirty;
   final Categoria? categoria;
+  final List<Categoria> categorias;
   final Ubicacion? ubicacion;
   final List<Propietario> propietarios;
   final List<Juego> expansiones;
@@ -61,11 +70,20 @@ class Juego {
     this.ubicacionLocalId,
     this.bggId,
     this.noEnfundar = false,
+    this.esExpansionFlag = false,
+    this.idiomas = const [],
+    this.idiomaOtro,
+    this.independienteIdioma = false,
+    this.tradumaquetado = false,
+    this.tradumaquetadoParcial = false,
+    this.tradumaquetadoParcialNotas,
+    this.variasCopias = false,
     this.phash,
     this.imageLocalPath,
     this.updatedAt,
     this.dirty = false,
     this.categoria,
+    this.categorias = const [],
     this.ubicacion,
     this.propietarios = const [],
     this.expansiones = const [],
@@ -95,11 +113,20 @@ class Juego {
       ubicacionLocalId: ubicacionLocalId,
       bggId: bggId,
       noEnfundar: noEnfundar,
+      esExpansionFlag: esExpansionFlag,
+      idiomas: idiomas,
+      idiomaOtro: idiomaOtro,
+      independienteIdioma: independienteIdioma,
+      tradumaquetado: tradumaquetado,
+      tradumaquetadoParcial: tradumaquetadoParcial,
+      tradumaquetadoParcialNotas: tradumaquetadoParcialNotas,
+      variasCopias: variasCopias,
       phash: phash,
       imageLocalPath: imageLocalPath,
       updatedAt: updatedAt,
       dirty: dirty,
       categoria: categoria,
+      categorias: categorias,
       ubicacion: ubicacion,
       propietarios: propietarios,
       expansiones: expansiones,
@@ -130,11 +157,20 @@ class Juego {
       ubicacionLocalId: ubicacionLocalId,
       bggId: bggId,
       noEnfundar: noEnfundar,
+      esExpansionFlag: esExpansionFlag,
+      idiomas: idiomas,
+      idiomaOtro: idiomaOtro,
+      independienteIdioma: independienteIdioma,
+      tradumaquetado: tradumaquetado,
+      tradumaquetadoParcial: tradumaquetadoParcial,
+      tradumaquetadoParcialNotas: tradumaquetadoParcialNotas,
+      variasCopias: variasCopias,
       phash: phash,
       imageLocalPath: imageLocalPath,
       updatedAt: updatedAt,
       dirty: dirty,
       categoria: categoria,
+      categorias: categorias,
       ubicacion: ubicacion,
       propietarios: propietarios,
       expansiones: list,
@@ -161,10 +197,22 @@ class Juego {
       juegoBaseServerId: json['juego_base_id'],
       bggId: json['bgg_id'],
       noEnfundar: json['no_enfundar'] == true || json['no_enfundar'] == 1,
+      esExpansionFlag: json['es_expansion'] == true || json['es_expansion'] == 1,
+      idiomas: (json['idiomas'] as List?)?.cast<String>() ?? [],
+      idiomaOtro: json['idioma_otro'],
+      independienteIdioma: json['independiente_idioma'] == true || json['independiente_idioma'] == 1,
+      tradumaquetado: json['tradumaquetado'] == true || json['tradumaquetado'] == 1,
+      tradumaquetadoParcial: json['tradumaquetado_parcial'] == true || json['tradumaquetado_parcial'] == 1,
+      tradumaquetadoParcialNotas: json['tradumaquetado_parcial_notas'],
+      variasCopias: json['varias_copias'] == true || json['varias_copias'] == 1,
       updatedAt: json['updated_at'],
       categoria: json['categoria'] != null
           ? Categoria.fromJson(json['categoria'])
           : null,
+      categorias: (json['categorias'] as List?)
+              ?.map((c) => Categoria.fromJson(c))
+              .toList() ??
+          [],
       ubicacion: json['ubicacion'] != null
           ? Ubicacion.fromJson(json['ubicacion'])
           : null,
@@ -193,18 +241,25 @@ class Juego {
         'edad_maxima': edadMaxima,
         'num_jugadores_min': numJugadoresMin,
         'num_jugadores_max': numJugadoresMax,
-        'categoria_id': categoriaId,
+        'categoria_ids': categorias.map((c) => c.id).toList(),
         'estado': estado,
         'fecha_compra': fechaCompra,
         'juego_base_id': juegoBaseServerId ?? juegoBaseId,
         'ubicacion_id': ubicacion?.id,
         'no_enfundar': noEnfundar,
+        'es_expansion': esExpansionFlag,
+        'idiomas': idiomas,
+        'idioma_otro': idiomaOtro,
+        'independiente_idioma': independienteIdioma,
+        'tradumaquetado': tradumaquetado,
+        'tradumaquetado_parcial': tradumaquetadoParcial,
+        'tradumaquetado_parcial_notas': tradumaquetadoParcialNotas,
+        'varias_copias': variasCopias,
         'propietario_ids': propietarios.map((p) => p.id).toList(),
         'fundas': fundas.map((f) => f.toJson()).toList(),
       };
 
-  bool get esExpansion =>
-      (juegoBaseLocalId != null) || (juegoBaseServerId != null) || (juegoBaseId != null);
+  bool get esExpansion => esExpansionFlag;
   String get jugadoresTexto =>
       '${numJugadoresMin ?? '?'}\u2013${numJugadoresMax ?? '?'}';
   String get edadTexto => '${edadMinima ?? '?'}+';

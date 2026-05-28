@@ -151,14 +151,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _navigateToJuegos({String? estado, bool? esExpansion}) {
+    Navigator.of(context).pushNamed('/juegos', arguments: {
+      'estado': estado,
+      'esExpansion': esExpansion,
+    });
+  }
+
   Widget _buildStatsGrid(Map<String, dynamic> stats, ThemeData theme) {
     final items = [
       _StatItem('Juegos', '${stats['totalJuegos'] ?? 0}', Icons.casino,
-          Colors.blue),
+          Colors.blue, () => _navigateToJuegos()),
       _StatItem('Disponibles', '${stats['juegosDisponibles'] ?? 0}',
-          Icons.check_circle, Colors.green),
+          Icons.check_circle, Colors.green, () => _navigateToJuegos(estado: 'disponible')),
+      _StatItem('En venta', '${stats['juegosEnVenta'] ?? 0}',
+          Icons.sell, Colors.orange, () => _navigateToJuegos(estado: 'en_venta')),
+      _StatItem('Vendidos', '${stats['juegosVendidos'] ?? 0}',
+          Icons.money_off, Colors.red, () => _navigateToJuegos(estado: 'vendido')),
       _StatItem('Expansiones', '${stats['totalExpansiones'] ?? 0}',
-          Icons.extension, Colors.orange),
+          Icons.extension, Colors.purple, () => _navigateToJuegos(esExpansion: true)),
     ];
 
     return GridView.count(
@@ -169,32 +180,35 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisSpacing: 12,
       childAspectRatio: 0.95,
       children: items.map((item) {
-        return Card(
-          elevation: 0,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          color: item.color.withValues(alpha: 0.1),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Icon(item.icon, color: item.color, size: 24),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.value,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: item.color,
-                        )),
-                    Text(item.label,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.grey[600])),
-                  ],
-                ),
-              ],
+        return GestureDetector(
+          onTap: item.onTap,
+          child: Card(
+            elevation: 0,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            color: item.color.withValues(alpha: 0.1),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(item.icon, color: item.color, size: 24),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.value,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: item.color,
+                          )),
+                      Text(item.label,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: Colors.grey[600])),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -260,7 +274,8 @@ class _StatItem {
   final String value;
   final IconData icon;
   final Color color;
-  _StatItem(this.label, this.value, this.icon, this.color);
+  final VoidCallback? onTap;
+  _StatItem(this.label, this.value, this.icon, this.color, [this.onTap]);
 }
 
 class _ActionTile extends StatelessWidget {

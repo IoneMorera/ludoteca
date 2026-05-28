@@ -45,10 +45,11 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   List<UbicacionRow> _ubicaciones = [];
   List<TipoFundaRow> _tiposFunda = [];
 
-  int? _categoriaLocalId;
+  final Set<int> _categoriaLocalIds = {};
   int? _ubicacionLocalId;
   bool _ubicacionEnCajaBase = false;
   final Set<int> _propietariosLocalIds = {};
+  final Map<int, int?> _propietarioUbicaciones = {};
   int? _juegoBaseLocalId;
   String? _fechaCompra;
   String? _estado;
@@ -56,6 +57,14 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   File? _newImageFile;
   int? _bggId;
   bool _noEnfundar = false;
+  bool _esExpansion = false;
+  List<String> _idiomas = [];
+  final _idiomaOtroCtrl = TextEditingController();
+  bool _independienteIdioma = false;
+  bool _tradumaquetado = false;
+  bool _tradumaquetadoParcial = false;
+  final _tradumaquetadoNotasCtrl = TextEditingController();
+  bool _variasCopias = false;
   List<_FundaDraft> _fundas = [];
 
   @override
@@ -71,6 +80,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     _jugMin.dispose();
     _jugMax.dispose();
     _edadMin.dispose();
+    _idiomaOtroCtrl.dispose();
+    _tradumaquetadoNotasCtrl.dispose();
     super.dispose();
   }
 
@@ -89,9 +100,17 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         _jugMin.text = _existing!.numJugadoresMin?.toString() ?? '';
         _jugMax.text = _existing!.numJugadoresMax?.toString() ?? '';
         _edadMin.text = _existing!.edadMinima?.toString() ?? '';
-        _categoriaLocalId = _existing!.categoria != null
-            ? _findCategoriaLocalIdFromJuego()
-            : null;
+        // Categories (multi)
+        for (final c in _existing!.categorias) {
+          final found = _categorias.where(
+            (cat) => cat.serverId == c.id || cat.localId == -c.id,
+          );
+          if (found.isNotEmpty) _categoriaLocalIds.add(found.first.localId);
+        }
+        if (_categoriaLocalIds.isEmpty && _existing!.categoria != null) {
+          final catLocal = _findCategoriaLocalIdFromJuego();
+          if (catLocal != null) _categoriaLocalIds.add(catLocal);
+        }
         _ubicacionLocalId = _existing!.ubicacion != null
             ? _findUbicacionLocalIdFromJuego()
             : null;
@@ -101,6 +120,14 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         _imagenPath = _existing!.imagen;
         _bggId = _existing!.bggId;
         _noEnfundar = _existing!.noEnfundar;
+        _esExpansion = _existing!.esExpansionFlag;
+        _idiomas = List.from(_existing!.idiomas);
+        _idiomaOtroCtrl.text = _existing!.idiomaOtro ?? '';
+        _independienteIdioma = _existing!.independienteIdioma;
+        _tradumaquetado = _existing!.tradumaquetado;
+        _tradumaquetadoParcial = _existing!.tradumaquetadoParcial;
+        _tradumaquetadoNotasCtrl.text = _existing!.tradumaquetadoParcialNotas ?? '';
+        _variasCopias = _existing!.variasCopias;
         for (final p in _existing!.propietarios) {
           final localProp = _propietarios.firstWhere(
             (lp) => lp.serverId == p.id || lp.localId == -p.id,
@@ -224,9 +251,9 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       );
       return;
     }
-    if (_categoriaLocalId == null) {
+    if (_categoriaLocalIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona una categor\u00eda')),
+        const SnackBar(content: Text('Selecciona al menos una categoría')),
       );
       return;
     }
@@ -262,14 +289,22 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       edadMinima: int.tryParse(_edadMin.text),
       numJugadoresMin: int.tryParse(_jugMin.text),
       numJugadoresMax: int.tryParse(_jugMax.text),
-      categoriaLocalId: _categoriaLocalId,
+      categoriaLocalId: _categoriaLocalIds.isNotEmpty ? _categoriaLocalIds.first : null,
       ubicacionLocalId: ubicacionLocalIdToUse,
-      juegoBaseLocalId: _juegoBaseLocalId,
+      juegoBaseLocalId: _esExpansion ? _juegoBaseLocalId : null,
       estado: _estado ?? 'disponible',
       fechaCompra: _fechaCompra,
       bggId: _bggId,
       imagen: _imagenPath,
       noEnfundar: _noEnfundar,
+      esExpansionFlag: _esExpansion,
+      idiomas: _idiomas,
+      idiomaOtro: _idiomas.contains('otros') ? _idiomaOtroCtrl.text.trim() : null,
+      independienteIdioma: _independienteIdioma,
+      tradumaquetado: _tradumaquetado,
+      tradumaquetadoParcial: _tradumaquetadoParcial,
+      tradumaquetadoParcialNotas: _tradumaquetadoParcial ? _tradumaquetadoNotasCtrl.text.trim() : null,
+      variasCopias: _variasCopias,
     );
 
     final fundas = _fundas
@@ -285,6 +320,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         juego,
         propietarioLocalIds: _propietariosLocalIds.toList(),
         fundas: fundas,
+        categoriaLocalIds: _categoriaLocalIds.toList(),
+        propietarioUbicaciones: _propietarioUbicaciones,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -390,20 +427,11 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(
-            initialValue: _categoriaLocalId,
-            decoration: const InputDecoration(
-              labelText: 'Categor\u00eda *',
-              border: OutlineInputBorder(),
-            ),
-            items: _categorias
-                .map((c) => DropdownMenuItem(
-                    value: c.localId, child: Text(c.nombre)))
-                .toList(),
-            onChanged: (v) => setState(() => _categoriaLocalId = v),
-          ),
+          _buildCategoriasSection(),
           const SizedBox(height: 16),
-          _buildJuegoBaseSection(),
+          _buildExpansionSection(),
+          const SizedBox(height: 16),
+          _buildIdiomasSection(),
           const SizedBox(height: 16),
           _buildUbicacionSection(),
           const SizedBox(height: 16),
@@ -428,6 +456,11 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             subtitle: const Text('Oculta avisos de fundas para este juego'),
             value: _noEnfundar,
             onChanged: (v) => setState(() => _noEnfundar = v),
+          ),
+          SwitchListTile(
+            title: const Text('Independiente del idioma'),
+            value: _independienteIdioma,
+            onChanged: (v) => setState(() => _independienteIdioma = v),
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
@@ -490,7 +523,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     );
   }
 
-  Widget _buildJuegoBaseSection() {
+  Widget _buildExpansionSection() {
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -502,21 +535,176 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Juego base (si es expansi\u00f3n)',
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Es expansión'),
+              value: _esExpansion,
+              onChanged: (v) => setState(() {
+                _esExpansion = v;
+                if (!v) _juegoBaseLocalId = null;
+              }),
+            ),
+            if (_esExpansion) ...[
+              const SizedBox(height: 8),
+              Text('Juego base',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700])),
+              const SizedBox(height: 8),
+              _JuegoBasePicker(
+                initialLocalId: _juegoBaseLocalId,
+                onChanged: (id) {
+                  setState(() {
+                    _juegoBaseLocalId = id;
+                    if (id == null) _ubicacionEnCajaBase = false;
+                  });
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoriasSection() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Categorías *',
                 style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: Colors.grey[700])),
             const SizedBox(height: 8),
-            _JuegoBasePicker(
-              initialLocalId: _juegoBaseLocalId,
-              onChanged: (id) {
-                setState(() {
-                  _juegoBaseLocalId = id;
-                  if (id == null) _ubicacionEnCajaBase = false;
-                });
-              },
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: _categorias.map((c) {
+                final selected = _categoriaLocalIds.contains(c.localId);
+                return FilterChip(
+                  label: Text(c.nombre),
+                  selected: selected,
+                  onSelected: (v) => setState(() {
+                    if (v) {
+                      _categoriaLocalIds.add(c.localId);
+                    } else {
+                      _categoriaLocalIds.remove(c.localId);
+                    }
+                  }),
+                );
+              }).toList(),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIdiomasSection() {
+    const opciones = ['castellano', 'catalan', 'ingles', 'frances', 'aleman', 'portugues', 'otros'];
+    const labels = {
+      'castellano': 'Castellano',
+      'catalan': 'Catalán',
+      'ingles': 'Inglés',
+      'frances': 'Francés',
+      'aleman': 'Alemán',
+      'portugues': 'Portugués',
+      'otros': 'Otros',
+    };
+    final showTradu = !_idiomas.contains('castellano') && !_idiomas.contains('catalan');
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Idiomas',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700])),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: opciones.map((idioma) {
+                final selected = _idiomas.contains(idioma);
+                return FilterChip(
+                  label: Text(labels[idioma] ?? idioma),
+                  selected: selected,
+                  onSelected: (v) => setState(() {
+                    if (v) {
+                      _idiomas.add(idioma);
+                    } else {
+                      _idiomas.remove(idioma);
+                    }
+                  }),
+                );
+              }).toList(),
+            ),
+            if (_idiomas.contains('otros')) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: _idiomaOtroCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Especificar idioma',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+            if (showTradu && _idiomas.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Divider(),
+              Text('Tradumaquetación',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700])),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Tradumaquetado'),
+                value: _tradumaquetado,
+                onChanged: (v) => setState(() {
+                  _tradumaquetado = v;
+                  if (v) _tradumaquetadoParcial = false;
+                }),
+              ),
+              if (!_tradumaquetado) ...[
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Tradumaquetado Parcial'),
+                  value: _tradumaquetadoParcial,
+                  onChanged: (v) => setState(() => _tradumaquetadoParcial = v),
+                ),
+                if (_tradumaquetadoParcial) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _tradumaquetadoNotasCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Notas de traducción parcial',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ],
+            ],
           ],
         ),
       ),
@@ -618,11 +806,48 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         _propietariosLocalIds.add(p.localId);
                       } else {
                         _propietariosLocalIds.remove(p.localId);
+                        _propietarioUbicaciones.remove(p.localId);
                       }
                     }),
                   );
                 }).toList(),
               ),
+            if (_propietariosLocalIds.length > 1) ...[
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Varias copias'),
+                subtitle: const Text('Una copia por propietario'),
+                value: _variasCopias,
+                onChanged: (v) => setState(() => _variasCopias = v),
+              ),
+              if (_variasCopias)
+                ..._propietariosLocalIds.map((propId) {
+                  final prop = _propietarios.firstWhere((p) => p.localId == propId);
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: DropdownButtonFormField<int?>(
+                      value: _propietarioUbicaciones[propId],
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Ubicación de ${prop.nombre}',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Sin asignar', style: TextStyle(color: Colors.grey)),
+                        ),
+                        ..._ubicaciones.map((u) => DropdownMenuItem<int?>(
+                              value: u.localId,
+                              child: Text(u.rutaCompleta, overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
+                      onChanged: (v) => setState(() => _propietarioUbicaciones[propId] = v),
+                    ),
+                  );
+                }),
+            ],
           ],
         ),
       ),
