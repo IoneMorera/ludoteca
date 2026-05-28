@@ -98,6 +98,21 @@ class JuegoRepository {
     return list.firstOrNull;
   }
 
+  /// Returns a map of propietario_local_id -> ubicacion_local_id for a game's pivot.
+  Future<Map<int, int?>> getPropietarioUbicaciones(int juegoLocalId) async {
+    final db = await _dbService.database;
+    final rows = await db.query('juego_propietario',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+    final result = <int, int?>{};
+    for (final r in rows) {
+      final propLocal = r['propietario_local_id'] as int?;
+      if (propLocal != null) {
+        result[propLocal] = r['ubicacion_local_id'] as int?;
+      }
+    }
+    return result;
+  }
+
   Future<List<Juego>> getExpansionesOf(int juegoLocalId) async {
     final db = await _dbService.database;
     final rows = await db.query('juegos',
@@ -418,13 +433,27 @@ class JuegoRepository {
     };
     final existing = await db.query('juego_categoria',
         where: 'server_id = ?', whereArgs: [serverId], limit: 1);
-    if (existing.isEmpty) {
-      await db.insert('juego_categoria', values,
-          conflictAlgorithm: ConflictAlgorithm.replace);
-    } else {
+    if (existing.isNotEmpty) {
       await db.update('juego_categoria', values,
           where: 'server_id = ?', whereArgs: [serverId]);
+      return;
     }
+
+    // Reuse row created by local migration (no server_id yet).
+    if (juegoLocalId != null && catLocalId != null) {
+      final migrated = await db.query('juego_categoria',
+          where: 'juego_local_id = ? AND categoria_local_id = ?',
+          whereArgs: [juegoLocalId, catLocalId],
+          limit: 1);
+      if (migrated.isNotEmpty) {
+        await db.update('juego_categoria', values,
+            where: 'local_id = ?', whereArgs: [migrated.first['local_id']]);
+        return;
+      }
+    }
+
+    await db.insert('juego_categoria', values,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> deleteByServerIds(String table, List<int> serverIds) async {
@@ -579,9 +608,11 @@ class JuegoRepository {
       final juegoLocalId = r['juego_local_id'] as int;
       final catLocalId = r['categoria_local_id'] as int?;
       if (catLocalId != null && categoriaByLocal.containsKey(catLocalId)) {
-        categoriasByJuego
-            .putIfAbsent(juegoLocalId, () => [])
-            .add(categoriaByLocal[catLocalId]!);
+        final cat = categoriaByLocal[catLocalId]!;
+        final list = categoriasByJuego.putIfAbsent(juegoLocalId, () => []);
+        if (!list.any((c) => c.id == cat.id)) {
+          list.add(cat);
+        }
       }
     }
 

@@ -33,13 +33,6 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     });
   }
 
-  String _formatDate(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return '-';
-    final parts = dateStr.split('-');
-    if (parts.length != 3) return dateStr;
-    return '${parts[2]}-${parts[1]}-${parts[0]}';
-  }
-
   Future<void> _openEditor(BuildContext context, Juego juego) async {
     if (juego.localId == null) return;
     final result = await Navigator.of(context)
@@ -87,70 +80,6 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                               spacing: 8,
                               children: juego.propietarios
                                   .map((p) => Chip(label: Text(p.nombre)))
-                                  .toList(),
-                            )),
-                      ],
-                      if (juego.fundas.isNotEmpty) ...[
-                        const SizedBox(height: 20),
-                        _buildSection('Cartas y fundas', theme,
-                            child: Column(
-                              children: juego.fundas
-                                  .map((funda) => Card(
-                                        elevation: 0,
-                                        margin:
-                                            const EdgeInsets.only(bottom: 8),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                        child: ListTile(
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 4,
-                                          ),
-                                          leading: CircleAvatar(
-                                            backgroundColor: (funda.enfundadas
-                                                    ? Colors.green
-                                                    : Colors.orange)
-                                                .withValues(alpha: 0.1),
-                                            child: Icon(
-                                              Icons.style,
-                                              color: funda.enfundadas
-                                                  ? Colors.green
-                                                  : Colors.orange,
-                                            ),
-                                          ),
-                                          title: Text(
-                                            funda.tipoTexto,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                          subtitle: Text(
-                                            '${funda.cantidadCartas} cartas',
-                                          ),
-                                          trailing: Chip(
-                                            label: Text(
-                                              funda.enfundadas
-                                                  ? 'Enfundadas'
-                                                  : 'Faltan',
-                                            ),
-                                            backgroundColor: (funda.enfundadas
-                                                    ? Colors.green
-                                                    : Colors.orange)
-                                                .withValues(alpha: 0.1),
-                                            labelStyle: TextStyle(
-                                              color: funda.enfundadas
-                                                  ? Colors.green[700]
-                                                  : Colors.orange[700],
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                      ))
                                   .toList(),
                             )),
                       ],
@@ -258,56 +187,159 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
   }
 
   Widget _buildInfoGrid(Juego juego, ThemeData theme) {
+    final bool tieneCastellanoOCatalan = juego.idiomas.any(
+        (i) => i.toLowerCase() == 'castellano' || i.toLowerCase() == 'catalán' || i.toLowerCase() == 'catalan');
+
     final items = <_InfoItem>[
-      _InfoItem('Categor\u00eda', juego.categoria?.nombre ?? '-', Icons.category),
+      _InfoItem('Ubicación',
+          juego.ubicacion?.rutaCompleta ?? 'Sin asignar', Icons.location_on),
+      _InfoItem('Categorías',
+          juego.categorias.isNotEmpty
+              ? juego.categorias.map((c) => c.nombre).join(', ')
+              : juego.categoria?.nombre ?? '-',
+          Icons.category),
       _InfoItem('Jugadores', juego.jugadoresTexto, Icons.people),
       _InfoItem('Edad', juego.edadTexto, Icons.child_care),
-      _InfoItem('Estado', juego.estado ?? '-', Icons.info_outline),
-      _InfoItem('Fecha compra', _formatDate(juego.fechaCompra),
-          Icons.calendar_today),
-      _InfoItem('Ubicaci\u00f3n',
-          juego.ubicacion?.rutaCompleta ?? 'Sin asignar', Icons.location_on),
+      _InfoItem('Idioma',
+          juego.idiomas.isNotEmpty ? juego.idiomas.join(', ') : '-',
+          Icons.language),
+      _InfoItem('Ind. idioma',
+          juego.independienteIdioma ? 'Sí' : 'No', Icons.translate),
+      if (!tieneCastellanoOCatalan && juego.idiomas.isNotEmpty)
+        _InfoItem('Tradumaquetado',
+            juego.tradumaquetado
+                ? 'Sí'
+                : juego.tradumaquetadoParcial
+                    ? 'Parcial${juego.tradumaquetadoParcialNotas != null && juego.tradumaquetadoParcialNotas!.isNotEmpty ? ': ${juego.tradumaquetadoParcialNotas}' : ''}'
+                    : 'No',
+            Icons.auto_stories),
+      _InfoItem('Estado', _formatEstado(juego.estado), Icons.info_outline),
     ];
 
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
-      childAspectRatio: 2.5,
-      children: items.map((item) {
-        return Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.5,
+          children: items.map((item) {
+            return Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(item.icon, size: 14, color: Colors.grey[500]),
-                  const SizedBox(width: 4),
-                  Text(item.label,
+                  Row(
+                    children: [
+                      Icon(item.icon, size: 14, color: theme.colorScheme.primary),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(item.label,
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(item.value,
                       style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[500],
-                          fontWeight: FontWeight.w600)),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurface),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(item.value,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis),
-            ],
-          ),
-        );
-      }).toList(),
+            );
+          }).toList(),
+        ),
+        // Cartas y fundas
+        if (juego.fundas.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildSection('Cartas y fundas', theme,
+              child: Column(
+                children: juego.fundas
+                    .map((funda) => Card(
+                          elevation: 0,
+                          margin: const EdgeInsets.only(bottom: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            leading: CircleAvatar(
+                              backgroundColor: (funda.enfundadas
+                                      ? Colors.green
+                                      : Colors.orange)
+                                  .withValues(alpha: 0.1),
+                              child: Icon(
+                                Icons.style,
+                                color: funda.enfundadas
+                                    ? Colors.green
+                                    : Colors.orange,
+                              ),
+                            ),
+                            title: Text(
+                              funda.tipoTexto,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${funda.cantidadCartas} cartas',
+                            ),
+                            trailing: Chip(
+                              label: Text(
+                                funda.enfundadas ? 'Enfundadas' : 'Sin enfundar',
+                              ),
+                              backgroundColor: (funda.enfundadas
+                                      ? Colors.green
+                                      : Colors.orange)
+                                  .withValues(alpha: 0.1),
+                              labelStyle: TextStyle(
+                                color: funda.enfundadas
+                                    ? Colors.green[700]
+                                    : Colors.orange[700],
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ))
+                    .toList(),
+              )),
+        ],
+      ],
     );
+  }
+
+  String _formatEstado(String? estado) {
+    if (estado == null || estado.isEmpty) return '-';
+    switch (estado) {
+      case 'disponible':
+        return 'Disponible';
+      case 'en_venta':
+        return 'En venta';
+      case 'vendido':
+        return 'Vendido';
+      default:
+        return estado;
+    }
   }
 
   Widget _buildSection(String title, ThemeData theme, {required Widget child}) {
@@ -330,3 +362,4 @@ class _InfoItem {
   final IconData icon;
   _InfoItem(this.label, this.value, this.icon);
 }
+

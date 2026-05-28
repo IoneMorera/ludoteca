@@ -139,6 +139,12 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             _propietariosLocalIds.add(localProp.localId);
           }
         }
+        // Load per-owner locations from pivot
+        if (_variasCopias && _existing!.localId != null) {
+          final pivotUbicaciones = await provider.juegoRepository
+              .getPropietarioUbicaciones(_existing!.localId!);
+          _propietarioUbicaciones.addAll(pivotUbicaciones);
+        }
         _fundas = _existing!.fundas.map((f) {
           final tipo = _tiposFunda.firstWhere(
             (t) => t.serverId == f.tipoFundaId || t.localId == -f.tipoFundaId,
