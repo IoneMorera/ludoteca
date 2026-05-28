@@ -87,10 +87,105 @@ class UbicacionRow {
 
 class UbicacionRepository {
   final DatabaseService _dbService;
-  // ignore: unused_field
   final OutboxDao _outbox;
 
   UbicacionRepository(this._dbService, this._outbox);
+
+  Future<List<HabitacionRow>> listHabitaciones() async {
+    final db = await _dbService.database;
+    final rows = await db.query('habitaciones', orderBy: 'nombre');
+    return rows
+        .map((r) => HabitacionRow(
+              localId: r['local_id'] as int,
+              serverId: r['server_id'] as int?,
+              nombre: r['nombre'] as String,
+            ))
+        .toList();
+  }
+
+  Future<List<MuebleRow>> listMuebles() async {
+    final db = await _dbService.database;
+    final rows = await db.query('muebles', orderBy: 'nombre');
+    return rows.map((r) => MuebleRow.fromMap(r)).toList();
+  }
+
+  Future<int> createHabitacion({required String nombre}) async {
+    final db = await _dbService.database;
+    final localId = await db.insert('habitaciones', {
+      'nombre': nombre,
+      'dirty': 1,
+      'pending_action': 'create',
+    });
+    await _outbox.enqueue(
+      table: 'habitaciones',
+      action: SyncAction.create,
+      localId: localId,
+      payload: {'nombre': nombre},
+    );
+    return localId;
+  }
+
+  Future<int> createMueble({
+    required int habitacionLocalId,
+    required String nombre,
+  }) async {
+    final db = await _dbService.database;
+    final hab = await db.query('habitaciones',
+        where: 'local_id = ?', whereArgs: [habitacionLocalId], limit: 1);
+    if (hab.isEmpty) {
+      throw StateError('La habitaci\u00f3n no existe en la base local');
+    }
+    final habServerId = hab.first['server_id'] as int?;
+
+    final localId = await db.insert('muebles', {
+      'habitacion_local_id': habitacionLocalId,
+      'habitacion_server_id': habServerId,
+      'nombre': nombre,
+      'dirty': 1,
+      'pending_action': 'create',
+    });
+    await _outbox.enqueue(
+      table: 'muebles',
+      action: SyncAction.create,
+      localId: localId,
+      payload: {
+        'nombre': nombre,
+        ...?(habServerId != null ? {'habitacion_id': habServerId} : null),
+      },
+    );
+    return localId;
+  }
+
+  Future<int> createUbicacion({
+    required int muebleLocalId,
+    required String nombre,
+  }) async {
+    final db = await _dbService.database;
+    final rows = await db.query('muebles',
+        where: 'local_id = ?', whereArgs: [muebleLocalId], limit: 1);
+    if (rows.isEmpty) {
+      throw StateError('El mueble no existe en la base local');
+    }
+    final muebleServerId = rows.first['server_id'] as int?;
+
+    final localId = await db.insert('ubicaciones', {
+      'mueble_local_id': muebleLocalId,
+      'mueble_server_id': muebleServerId,
+      'nombre': nombre,
+      'dirty': 1,
+      'pending_action': 'create',
+    });
+    await _outbox.enqueue(
+      table: 'ubicaciones',
+      action: SyncAction.create,
+      localId: localId,
+      payload: {
+        'nombre': nombre,
+        ...?(muebleServerId != null ? {'mueble_id': muebleServerId} : null),
+      },
+    );
+    return localId;
+  }
 
   Future<List<UbicacionRow>> getAll() async {
     final db = await _dbService.database;

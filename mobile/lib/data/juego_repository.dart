@@ -268,15 +268,59 @@ class JuegoRepository {
       'dirty': 0,
       'pending_action': null,
     };
-    final existing = await db.query('juego_fundas',
+
+    // Evitar duplicar filas (mismo juego + tipo): antes se insertaba una fila
+    // nueva por server_id sin fusionar la fila local pendiente (server_id null).
+    Map<String, dynamic>? targetRow;
+    int? targetLocalId;
+
+    final byServer = await db.query('juego_fundas',
         where: 'server_id = ?', whereArgs: [serverId], limit: 1);
-    if (existing.isEmpty) {
-      await db.insert('juego_fundas', values,
-          conflictAlgorithm: ConflictAlgorithm.replace);
-    } else {
-      await db.update('juego_fundas', values,
-          where: 'server_id = ?', whereArgs: [serverId]);
+    if (byServer.isNotEmpty) {
+      targetRow = byServer.first;
+      targetLocalId = targetRow['local_id'] as int;
+    } else if (juegoLocalId != null && tipoLocalId != null) {
+      final byJuegoTipo = await db.query(
+        'juego_fundas',
+        where: 'juego_local_id = ? AND tipo_funda_local_id = ?',
+        whereArgs: [juegoLocalId, tipoLocalId],
+        orderBy: 'local_id ASC',
+      );
+      if (byJuegoTipo.isNotEmpty) {
+        targetRow = byJuegoTipo.first;
+        targetLocalId = targetRow['local_id'] as int;
+        for (var i = 1; i < byJuegoTipo.length; i++) {
+          final dupLocalId = byJuegoTipo[i]['local_id'] as int;
+          await db.delete('juego_fundas',
+              where: 'local_id = ?', whereArgs: [dupLocalId]);
+        }
+      }
     }
+
+    if (targetLocalId != null && targetRow != null) {
+      final hadNoServerId = (targetRow['server_id'] as int?) == null;
+      await db.update(
+        'juego_fundas',
+        values,
+        where: 'local_id = ?',
+        whereArgs: [targetLocalId],
+      );
+      if (hadNoServerId) {
+        await _outbox.removeForLocalRow('juego_fundas', targetLocalId);
+      }
+      if (juegoLocalId != null && tipoLocalId != null) {
+        await db.delete(
+          'juego_fundas',
+          where:
+              'juego_local_id = ? AND tipo_funda_local_id = ? AND local_id != ?',
+          whereArgs: [juegoLocalId, tipoLocalId, targetLocalId],
+        );
+      }
+      return;
+    }
+
+    await db.insert('juego_fundas', values,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> upsertJuegoPropietarioFromServer(
@@ -671,6 +715,8 @@ class JuegoRepository {
             localId: localId,
             serverId: serverId,
           );
+        } else {
+          await _outbox.removeForLocalRow('juego_propietario', localId);
         }
       }
     }
@@ -703,29 +749,48 @@ class JuegoRepository {
     }
   }
 
+  Future<int?> _tipoFundaLocalIdForRow(
+      Database db, Map<String, dynamic> r) async {
+    final direct = r['tipo_funda_local_id'] as int?;
+    if (direct != null) return direct;
+    final sid = r['tipo_funda_server_id'] as int?;
+    if (sid == null) return null;
+    return _localIdFor(db, 'tipos_funda', sid);
+  }
+
   Future<void> _syncFundas(
     int juegoLocalId,
     int? juegoServerId,
     List<JuegoFundaDraft> drafts,
   ) async {
     final db = await _dbService.database;
-    final existing = await db.query('juego_fundas',
+    var existing = await db.query('juego_fundas',
         where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
 
     final desiredByTipoLocal = {
       for (final d in drafts) d.tipoFundaLocalId: d,
     };
-    final existingByTipoLocal = <int, Map<String, dynamic>>{};
-    for (final r in existing) {
-      final tipoLocal = r['tipo_funda_local_id'] as int?;
-      if (tipoLocal != null) existingByTipoLocal[tipoLocal] = r;
-    }
 
-    // eliminar los que sobran
-    for (final entry in existingByTipoLocal.entries) {
-      if (!desiredByTipoLocal.containsKey(entry.key)) {
-        final localId = entry.value['local_id'] as int;
-        final serverId = entry.value['server_id'] as int?;
+    // Varias filas con el mismo tipo (p.ej. tras sincronizaciones fallidas).
+    final byTipo = <int, List<Map<String, dynamic>>>{};
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      if (tipoLocal == null) continue;
+      byTipo.putIfAbsent(tipoLocal, () => []).add(r);
+    }
+    for (final rows in byTipo.values) {
+      if (rows.length <= 1) continue;
+      rows.sort((a, b) {
+        final sa = a['server_id'] as int?;
+        final sb = b['server_id'] as int?;
+        if (sa != null && sb == null) return -1;
+        if (sa == null && sb != null) return 1;
+        return (a['local_id'] as int).compareTo(b['local_id'] as int);
+      });
+      for (var i = 1; i < rows.length; i++) {
+        final dup = rows[i];
+        final localId = dup['local_id'] as int;
+        final serverId = dup['server_id'] as int?;
         await db.delete('juego_fundas',
             where: 'local_id = ?', whereArgs: [localId]);
         if (serverId != null) {
@@ -735,8 +800,42 @@ class JuegoRepository {
             localId: localId,
             serverId: serverId,
           );
+        } else {
+          await _outbox.removeForLocalRow('juego_fundas', localId);
         }
       }
+    }
+    existing = await db.query('juego_fundas',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+
+    // eliminar los que sobran (incluye filas con tipo_funda_local_id null)
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      final shouldKeep =
+          tipoLocal != null && desiredByTipoLocal.containsKey(tipoLocal);
+      if (shouldKeep) continue;
+      final localId = r['local_id'] as int;
+      final serverId = r['server_id'] as int?;
+      await db.delete('juego_fundas',
+          where: 'local_id = ?', whereArgs: [localId]);
+      if (serverId != null) {
+        await _outbox.enqueue(
+          table: 'juego_fundas',
+          action: SyncAction.delete,
+          localId: localId,
+          serverId: serverId,
+        );
+      } else {
+        await _outbox.removeForLocalRow('juego_fundas', localId);
+      }
+    }
+
+    existing = await db.query('juego_fundas',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+    final existingByTipoLocal = <int, Map<String, dynamic>>{};
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      if (tipoLocal != null) existingByTipoLocal[tipoLocal] = r;
     }
 
     // upsert

@@ -110,6 +110,17 @@ class OutboxDao {
     await db.delete('sync_outbox', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Descarta operaciones pendientes asociadas a una fila local concreta
+  /// (p.ej. tras fusionar un create local con el registro recibido del servidor).
+  Future<void> removeForLocalRow(String table, int localId) async {
+    final db = await _dbService.database;
+    await db.delete(
+      'sync_outbox',
+      where: 'table_name = ? AND local_id = ?',
+      whereArgs: [table, localId],
+    );
+  }
+
   Future<void> markError(int id, String error) async {
     final db = await _dbService.database;
     await db.rawUpdate(

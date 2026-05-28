@@ -131,17 +131,19 @@ class SyncService {
     final pending = await _outbox.pending(limit: 200);
     if (pending.isEmpty) return;
 
-    final operations = pending.map((op) {
+    final operations = <Map<String, dynamic>>[];
+    for (final op in pending) {
+      final data = await _enrichedPayload(op);
       final action = syncActionToString(op.action);
-      return {
+      operations.add({
         'client_op_id': op.clientOpId,
         'table': op.table,
         'action': action,
         if (op.serverId != null) 'server_id': op.serverId,
         if (op.baseUpdatedAt != null) 'base_updated_at': op.baseUpdatedAt,
-        if (op.payload.isNotEmpty) 'data': op.payload,
-      };
-    }).toList();
+        if (data.isNotEmpty) 'data': data,
+      });
+    }
 
     final response =
         await _api.post('/sync/push', data: {'operations': operations});
@@ -202,6 +204,60 @@ class SyncService {
           break;
       }
     }
+  }
+
+  /// Rellena FK y campos desde SQLite para operaciones encoladas antes de que
+  /// existiera el server_id del padre (reintento tras un push parcial).
+  Future<Map<String, dynamic>> _enrichedPayload(OutboxOperation op) async {
+    final merged = Map<String, dynamic>.from(op.payload);
+    final localId = op.localId;
+    if (localId == null) return merged;
+    final db = await _dbService.database;
+
+    switch (op.table) {
+      case 'muebles':
+        final rows = await db.query('muebles',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final h = rows.first['habitacion_server_id'] as int?;
+          if (h != null) merged['habitacion_id'] = h;
+          merged['nombre'] = rows.first['nombre'] as String;
+        }
+        break;
+      case 'ubicaciones':
+        final rows = await db.query('ubicaciones',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final m = rows.first['mueble_server_id'] as int?;
+          if (m != null) merged['mueble_id'] = m;
+          merged['nombre'] = rows.first['nombre'] as String;
+        }
+        break;
+      case 'juego_fundas':
+        final rows = await db.query('juego_fundas',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final j = rows.first['juego_server_id'] as int?;
+          final t = rows.first['tipo_funda_server_id'] as int?;
+          if (j != null) merged['juego_id'] = j;
+          if (t != null) merged['tipo_funda_id'] = t;
+          merged['cantidad_cartas'] = rows.first['cantidad_cartas'];
+          merged['enfundadas'] =
+              ((rows.first['enfundadas'] as int?) ?? 0) == 1;
+        }
+        break;
+      case 'juego_propietario':
+        final rows = await db.query('juego_propietario',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final j = rows.first['juego_server_id'] as int?;
+          final p = rows.first['propietario_server_id'] as int?;
+          if (j != null) merged['juego_id'] = j;
+          if (p != null) merged['propietario_id'] = p;
+        }
+        break;
+    }
+    return merged;
   }
 
   Future<void> _backfillForeignKeyServerIds({
