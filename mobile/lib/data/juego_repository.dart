@@ -406,13 +406,29 @@ class JuegoRepository {
     };
     final existing = await db.query('juego_propietario',
         where: 'server_id = ?', whereArgs: [serverId], limit: 1);
-    if (existing.isEmpty) {
-      await db.insert('juego_propietario', values,
-          conflictAlgorithm: ConflictAlgorithm.replace);
-    } else {
+    if (existing.isNotEmpty) {
       await db.update('juego_propietario', values,
           where: 'server_id = ?', whereArgs: [serverId]);
+      return;
     }
+
+    // Reuse local row created before sync (no server_id yet).
+    if (juegoLocalId != null && propLocalId != null) {
+      final local = await db.query('juego_propietario',
+          where: 'juego_local_id = ? AND propietario_local_id = ?',
+          whereArgs: [juegoLocalId, propLocalId],
+          limit: 1);
+      if (local.isNotEmpty) {
+        final localId = local.first['local_id'] as int;
+        await db.update('juego_propietario', values,
+            where: 'local_id = ?', whereArgs: [localId]);
+        await _outbox.removeForLocalRow('juego_propietario', localId);
+        return;
+      }
+    }
+
+    await db.insert('juego_propietario', values,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> upsertJuegoCategoriaFromServer(
@@ -446,8 +462,10 @@ class JuegoRepository {
           whereArgs: [juegoLocalId, catLocalId],
           limit: 1);
       if (migrated.isNotEmpty) {
+        final localId = migrated.first['local_id'] as int;
         await db.update('juego_categoria', values,
-            where: 'local_id = ?', whereArgs: [migrated.first['local_id']]);
+            where: 'local_id = ?', whereArgs: [localId]);
+        await _outbox.removeForLocalRow('juego_categoria', localId);
         return;
       }
     }

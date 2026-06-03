@@ -131,8 +131,32 @@ class SyncService {
     final pending = await _outbox.pending(limit: 200);
     if (pending.isEmpty) return;
 
-    final operations = <Map<String, dynamic>>[];
+    // Discard stale CREATE ops whose local row already has a server_id
+    // (synced via a previous push or merged during pull).
+    final db = await _dbService.database;
+    final toSend = <OutboxOperation>[];
     for (final op in pending) {
+      if (op.action == SyncAction.create && op.localId != null) {
+        final rows = await db.query(op.table,
+            columns: ['server_id'],
+            where: 'local_id = ?',
+            whereArgs: [op.localId],
+            limit: 1);
+        if (rows.isNotEmpty && rows.first['server_id'] != null) {
+          await _outbox.remove(op.id);
+          continue;
+        }
+        if (rows.isEmpty) {
+          await _outbox.remove(op.id);
+          continue;
+        }
+      }
+      toSend.add(op);
+    }
+    if (toSend.isEmpty) return;
+
+    final operations = <Map<String, dynamic>>[];
+    for (final op in toSend) {
       final data = await _enrichedPayload(op);
       final action = syncActionToString(op.action);
       operations.add({
@@ -150,7 +174,7 @@ class SyncService {
     final results =
         (response.data['results'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
-    final byOpId = {for (final op in pending) op.clientOpId: op};
+    final byOpId = {for (final op in toSend) op.clientOpId: op};
 
     for (final result in results) {
       final clientOpId = result['client_op_id'] as String?;
