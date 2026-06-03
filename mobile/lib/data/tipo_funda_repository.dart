@@ -33,10 +33,31 @@ class TipoFundaRow {
 
 class TipoFundaRepository {
   final DatabaseService _dbService;
-  // ignore: unused_field
   final OutboxDao _outbox;
 
   TipoFundaRepository(this._dbService, this._outbox);
+
+  Future<int> create({
+    required String nombre,
+    required int anchoMm,
+    required int altoMm,
+  }) async {
+    final db = await _dbService.database;
+    final localId = await db.insert('tipos_funda', {
+      'nombre': nombre,
+      'ancho_mm': anchoMm,
+      'alto_mm': altoMm,
+      'dirty': 1,
+      'pending_action': 'create',
+    });
+    await _outbox.enqueue(
+      table: 'tipos_funda',
+      action: SyncAction.create,
+      localId: localId,
+      payload: {'nombre': nombre, 'ancho_mm': anchoMm, 'alto_mm': altoMm},
+    );
+    return localId;
+  }
 
   Future<List<TipoFundaRow>> getAll() async {
     final db = await _dbService.database;

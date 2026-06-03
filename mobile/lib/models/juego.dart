@@ -37,6 +37,8 @@ class Juego {
   final bool tradumaquetadoParcial;
   final String? tradumaquetadoParcialNotas;
   final bool variasCopias;
+  final double? precio;
+  final bool enCajaBase;
   final String? phash;
   final String? imageLocalPath;
   final String? updatedAt;
@@ -78,6 +80,8 @@ class Juego {
     this.tradumaquetadoParcial = false,
     this.tradumaquetadoParcialNotas,
     this.variasCopias = false,
+    this.precio,
+    this.enCajaBase = false,
     this.phash,
     this.imageLocalPath,
     this.updatedAt,
@@ -121,6 +125,8 @@ class Juego {
       tradumaquetadoParcial: tradumaquetadoParcial,
       tradumaquetadoParcialNotas: tradumaquetadoParcialNotas,
       variasCopias: variasCopias,
+      precio: precio,
+      enCajaBase: enCajaBase,
       phash: phash,
       imageLocalPath: imageLocalPath,
       updatedAt: updatedAt,
@@ -165,6 +171,8 @@ class Juego {
       tradumaquetadoParcial: tradumaquetadoParcial,
       tradumaquetadoParcialNotas: tradumaquetadoParcialNotas,
       variasCopias: variasCopias,
+      precio: precio,
+      enCajaBase: enCajaBase,
       phash: phash,
       imageLocalPath: imageLocalPath,
       updatedAt: updatedAt,
@@ -205,6 +213,8 @@ class Juego {
       tradumaquetadoParcial: json['tradumaquetado_parcial'] == true || json['tradumaquetado_parcial'] == 1,
       tradumaquetadoParcialNotas: json['tradumaquetado_parcial_notas'],
       variasCopias: json['varias_copias'] == true || json['varias_copias'] == 1,
+      precio: (json['precio'] is num) ? (json['precio'] as num).toDouble() : null,
+      enCajaBase: json['en_caja_base'] == true || json['en_caja_base'] == 1,
       updatedAt: json['updated_at'],
       categoria: json['categoria'] != null
           ? Categoria.fromJson(json['categoria'])
@@ -255,6 +265,8 @@ class Juego {
         'tradumaquetado_parcial': tradumaquetadoParcial,
         'tradumaquetado_parcial_notas': tradumaquetadoParcialNotas,
         'varias_copias': variasCopias,
+        'precio': precio,
+        'en_caja_base': enCajaBase,
         'propietario_ids': propietarios.map((p) => p.id).toList(),
         'fundas': fundas.map((f) => f.toJson()).toList(),
       };

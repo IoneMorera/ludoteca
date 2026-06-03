@@ -224,9 +224,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.refresh),
-                onTap: s.status == SyncStatus.syncing
-                    ? null
-                    : () => sync.syncNow(fullPull: true),
+                onTap: () => sync.syncNow(fullPull: true),
               );
             },
           ),

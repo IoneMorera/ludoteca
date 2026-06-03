@@ -4,8 +4,8 @@ class ApiConfig {
   static const String _defaultServerUrl = 'http://10.0.2.2:8000';
   static const String _prefsKey = 'server_url';
 
-  static const Duration connectTimeout = Duration(seconds: 15);
-  static const Duration receiveTimeout = Duration(seconds: 15);
+  static const Duration connectTimeout = Duration(seconds: 30);
+  static const Duration receiveTimeout = Duration(seconds: 60);
 
   static String _serverUrl = _defaultServerUrl;
 

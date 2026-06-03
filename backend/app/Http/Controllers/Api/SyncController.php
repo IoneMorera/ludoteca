@@ -200,7 +200,7 @@ class SyncController extends Controller
                 'juego_base_id', 'no_enfundar', 'es_expansion', 'idiomas',
                 'idioma_otro', 'independiente_idioma', 'tradumaquetado',
                 'tradumaquetado_parcial', 'tradumaquetado_parcial_notas',
-                'varias_copias',
+                'varias_copias', 'precio', 'en_caja_base',
             ],
             'categorias' => ['nombre', 'descripcion'],
             'propietarios' => ['nombre', 'bgg_username', 'es_principal'],

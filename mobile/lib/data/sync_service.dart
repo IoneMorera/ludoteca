@@ -131,8 +131,61 @@ class SyncService {
     final pending = await _outbox.pending(limit: 200);
     if (pending.isEmpty) return;
 
-    final operations = <Map<String, dynamic>>[];
+    final db = await _dbService.database;
+    final toSend = <OutboxOperation>[];
     for (final op in pending) {
+      // Discard ops that have failed too many times (stale/unrecoverable).
+      if (op.attempts >= 3) {
+        debugPrint('SYNC: discarding stuck op ${op.clientOpId} '
+            '(${op.table}/${op.action}, ${op.attempts} attempts, '
+            'error: ${op.lastError})');
+        await _outbox.remove(op.id);
+        continue;
+      }
+
+      if (op.action == SyncAction.create && op.localId != null) {
+        final rows = await db.query(op.table,
+            where: 'local_id = ?',
+            whereArgs: [op.localId],
+            limit: 1);
+        // Row already synced.
+        if (rows.isNotEmpty && rows.first['server_id'] != null) {
+          await _outbox.remove(op.id);
+          continue;
+        }
+        // Row was deleted locally.
+        if (rows.isEmpty) {
+          await _outbox.remove(op.id);
+          continue;
+        }
+        // Orphan duplicate in pivot tables.
+        if (await _isDuplicatePivotRow(db, op.table, rows.first)) {
+          await db.delete(op.table,
+              where: 'local_id = ?', whereArgs: [op.localId]);
+          await _outbox.remove(op.id);
+          continue;
+        }
+      }
+
+      // Discard UPDATE/DELETE ops whose local row no longer exists.
+      if (op.localId != null && op.action != SyncAction.create) {
+        final rows = await db.query(op.table,
+            columns: ['local_id'],
+            where: 'local_id = ?',
+            whereArgs: [op.localId],
+            limit: 1);
+        if (rows.isEmpty) {
+          await _outbox.remove(op.id);
+          continue;
+        }
+      }
+
+      toSend.add(op);
+    }
+    if (toSend.isEmpty) return;
+
+    final operations = <Map<String, dynamic>>[];
+    for (final op in toSend) {
       final data = await _enrichedPayload(op);
       final action = syncActionToString(op.action);
       operations.add({
@@ -150,7 +203,7 @@ class SyncService {
     final results =
         (response.data['results'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
-    final byOpId = {for (final op in pending) op.clientOpId: op};
+    final byOpId = {for (final op in toSend) op.clientOpId: op};
 
     for (final result in results) {
       final clientOpId = result['client_op_id'] as String?;
@@ -270,6 +323,47 @@ class SyncService {
         break;
     }
     return merged;
+  }
+
+  /// Returns true if [row] in a pivot table is an orphan duplicate — i.e.
+  /// another row with the same FK pair already exists with a server_id.
+  Future<bool> _isDuplicatePivotRow(
+      Database db, String table, Map<String, dynamic> row) async {
+    final localId = row['local_id'] as int;
+    switch (table) {
+      case 'juego_propietario':
+        final j = row['juego_local_id'] as int?;
+        final p = row['propietario_local_id'] as int?;
+        if (j == null || p == null) return false;
+        final dup = await db.query('juego_propietario',
+            where: 'juego_local_id = ? AND propietario_local_id = ? '
+                'AND local_id != ? AND server_id IS NOT NULL',
+            whereArgs: [j, p, localId],
+            limit: 1);
+        return dup.isNotEmpty;
+      case 'juego_categoria':
+        final j = row['juego_local_id'] as int?;
+        final c = row['categoria_local_id'] as int?;
+        if (j == null || c == null) return false;
+        final dup = await db.query('juego_categoria',
+            where: 'juego_local_id = ? AND categoria_local_id = ? '
+                'AND local_id != ? AND server_id IS NOT NULL',
+            whereArgs: [j, c, localId],
+            limit: 1);
+        return dup.isNotEmpty;
+      case 'juego_fundas':
+        final j = row['juego_local_id'] as int?;
+        final t = row['tipo_funda_local_id'] as int?;
+        if (j == null || t == null) return false;
+        final dup = await db.query('juego_fundas',
+            where: 'juego_local_id = ? AND tipo_funda_local_id = ? '
+                'AND local_id != ? AND server_id IS NOT NULL',
+            whereArgs: [j, t, localId],
+            limit: 1);
+        return dup.isNotEmpty;
+      default:
+        return false;
+    }
   }
 
   Future<void> _backfillForeignKeyServerIds({

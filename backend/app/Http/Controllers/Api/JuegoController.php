@@ -199,6 +199,29 @@ class JuegoController extends Controller
         return response()->json(null, 204);
     }
 
+    public function uploadImage(Request $request): JsonResponse
+    {
+        $request->validate([
+            'image' => 'required|image|max:5120',
+        ]);
+
+        $file = $request->file('image');
+        $extension = $file->getClientOriginalExtension() ?: 'jpg';
+        $filename = 'juego_' . time() . '_' . uniqid() . '.' . $extension;
+
+        if (config('filesystems.disks.r2.key')) {
+            $tenantId = tenant('id') ?? auth()->id();
+            $path = "tenants/{$tenantId}/juegos/{$filename}";
+            $file->storeAs(dirname($path), basename($path), 'r2');
+            $url = config('filesystems.disks.r2.url') . '/' . $path;
+        } else {
+            $path = $file->storeAs('juegos', $filename, 'public');
+            $url = '/storage/' . $path;
+        }
+
+        return response()->json(['url' => $url]);
+    }
+
     private function syncPropietarios(Juego $juego, array $propietarioIds, array $propietarioUbicaciones): void
     {
         $syncData = [];

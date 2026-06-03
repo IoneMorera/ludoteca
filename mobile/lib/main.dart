@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
@@ -26,6 +27,7 @@ import 'services/api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
   runApp(const LudotecaApp());
@@ -92,6 +94,7 @@ class LudotecaApp extends StatelessWidget {
                   builder: (_) => JuegosListScreen(
                         initialEstado: args?['estado'] as String?,
                         initialEsExpansion: args?['esExpansion'] as bool?,
+                        categoriaLocalId: args?['categoriaLocalId'] as int?,
                       ));
             case '/juego/nuevo':
               final prefill = settings.arguments as Map<String, dynamic>?;

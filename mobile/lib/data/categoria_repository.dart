@@ -43,6 +43,26 @@ class CategoriaRepository {
     return rows.map(CategoriaRow.fromMap).toList();
   }
 
+  /// Returns a map of categoria local_id -> count of games in that category.
+  Future<Map<int, int>> getJuegoCountByCategoria() async {
+    final db = await _dbService.database;
+    final rows = await db.rawQuery('''
+      SELECT jc.categoria_local_id, COUNT(DISTINCT jc.juego_local_id) AS cnt
+      FROM juego_categoria jc
+      INNER JOIN juegos j ON j.local_id = jc.juego_local_id
+      WHERE jc.categoria_local_id IS NOT NULL
+      GROUP BY jc.categoria_local_id
+    ''');
+    final result = <int, int>{};
+    for (final r in rows) {
+      final catLocalId = r['categoria_local_id'] as int?;
+      if (catLocalId != null) {
+        result[catLocalId] = (r['cnt'] as int?) ?? 0;
+      }
+    }
+    return result;
+  }
+
   Future<CategoriaRow?> getById(int localId) async {
     final db = await _dbService.database;
     final rows = await db.query('categorias',

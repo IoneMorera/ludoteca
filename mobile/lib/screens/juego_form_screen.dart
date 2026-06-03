@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,10 +9,12 @@ import 'package:provider/provider.dart';
 import '../data/categoria_repository.dart';
 import '../data/juego_repository.dart';
 import '../data/propietario_repository.dart';
+import '../data/sync_service.dart';
 import '../data/tipo_funda_repository.dart';
 import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
+import '../services/api_service.dart';
 import 'bgg_search_picker.dart';
 
 /// Pantalla \u00fanica para crear y editar juegos.
@@ -114,6 +117,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         _ubicacionLocalId = _existing!.ubicacion != null
             ? _findUbicacionLocalIdFromJuego()
             : null;
+        _ubicacionEnCajaBase = _existing!.enCajaBase;
         _juegoBaseLocalId = _existing!.juegoBaseLocalId;
         _fechaCompra = _existing!.fechaCompra;
         _estado = _existing!.estado;
@@ -138,6 +142,12 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               lp.serverId == p.id || lp.localId == -p.id)) {
             _propietariosLocalIds.add(localProp.localId);
           }
+        }
+        // Load per-owner locations from pivot
+        if (_variasCopias && _existing!.localId != null) {
+          final pivotUbicaciones = await provider.juegoRepository
+              .getPropietarioUbicaciones(_existing!.localId!);
+          _propietarioUbicaciones.addAll(pivotUbicaciones);
         }
         _fundas = _existing!.fundas.map((f) {
           final tipo = _tiposFunda.firstWhere(
@@ -260,24 +270,25 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     setState(() => _saving = true);
     final provider = context.read<JuegosProvider>();
 
-    int? ubicacionLocalIdToUse = _ubicacionLocalId;
-    if (_ubicacionEnCajaBase && _juegoBaseLocalId != null) {
-      final base = await provider.juegoRepository.getByLocalId(_juegoBaseLocalId!);
-      if (base != null && base.ubicacion != null) {
-        final baseUbic = _ubicaciones.firstWhere(
-          (u) =>
-              u.serverId == base.ubicacion!.id || u.localId == -base.ubicacion!.id,
-          orElse: () => _ubicaciones.isEmpty
-              ? throw StateError('empty')
-              : _ubicaciones.first,
-        );
-        if (_ubicaciones.any((u) =>
-            u.serverId == base.ubicacion!.id ||
-            u.localId == -base.ubicacion!.id)) {
-          ubicacionLocalIdToUse = baseUbic.localId;
+    // Upload new image if taken from camera/gallery
+    if (_newImageFile != null) {
+      try {
+        final formData = FormData.fromMap({
+          'image': await MultipartFile.fromFile(
+            _newImageFile!.path,
+            filename: _newImageFile!.path.split('/').last,
+          ),
+        });
+        final response = await ApiService().upload('/juegos/upload-image', formData);
+        if (response.statusCode == 200 && response.data['url'] != null) {
+          _imagenPath = response.data['url'] as String;
         }
+      } catch (e) {
+        debugPrint('Image upload failed (will save without image): $e');
       }
     }
+
+    int? ubicacionLocalIdToUse = _ubicacionEnCajaBase ? null : _ubicacionLocalId;
 
     final juego = Juego(
       id: _existing?.id ?? 0,
@@ -305,6 +316,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       tradumaquetadoParcial: _tradumaquetadoParcial,
       tradumaquetadoParcialNotas: _tradumaquetadoParcial ? _tradumaquetadoNotasCtrl.text.trim() : null,
       variasCopias: _variasCopias,
+      enCajaBase: _ubicacionEnCajaBase,
     );
 
     final fundas = _fundas
@@ -523,6 +535,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     );
   }
 
+  Juego? _juegoBaseData;
+
   Widget _buildExpansionSection() {
     return Card(
       elevation: 0,
@@ -541,7 +555,10 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               value: _esExpansion,
               onChanged: (v) => setState(() {
                 _esExpansion = v;
-                if (!v) _juegoBaseLocalId = null;
+                if (!v) {
+                  _juegoBaseLocalId = null;
+                  _juegoBaseData = null;
+                }
               }),
             ),
             if (_esExpansion) ...[
@@ -554,18 +571,132 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               const SizedBox(height: 8),
               _JuegoBasePicker(
                 initialLocalId: _juegoBaseLocalId,
-                onChanged: (id) {
+                onChanged: (id) async {
                   setState(() {
                     _juegoBaseLocalId = id;
-                    if (id == null) _ubicacionEnCajaBase = false;
+                    if (id == null) {
+                      _ubicacionEnCajaBase = false;
+                      _juegoBaseData = null;
+                    }
                   });
+                  if (id != null) {
+                    final provider = context.read<JuegosProvider>();
+                    final base = await provider.juegoRepository.getByLocalId(id);
+                    if (mounted) {
+                      setState(() => _juegoBaseData = base);
+                      if (base != null && base.variasCopias && base.propietarios.isNotEmpty) {
+                        _propietariosLocalIds.clear();
+                        final allProps = await provider.propietarioRepository.getAll();
+                        final firstOwner = base.propietarios.first;
+                        final match = allProps.where(
+                          (lp) => lp.serverId == firstOwner.id || lp.localId == -firstOwner.id,
+                        );
+                        if (match.isNotEmpty && mounted) {
+                          setState(() => _propietariosLocalIds.add(match.first.localId));
+                        }
+                      }
+                    }
+                  }
                 },
               ),
+              if (_juegoBaseData != null && _juegoBaseData!.variasCopias && _juegoBaseData!.propietarios.length > 1) ...[
+                const SizedBox(height: 12),
+                Text('Propietario de la copia base',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700])),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: _juegoBaseData!.propietarios.map((p) {
+                    final match = _propietarios.where(
+                      (lp) => lp.serverId == p.id || lp.localId == -p.id,
+                    );
+                    if (match.isEmpty) return const SizedBox.shrink();
+                    final propLocalId = match.first.localId;
+                    final selected = _propietariosLocalIds.contains(propLocalId);
+                    return ChoiceChip(
+                      label: Text(p.nombre),
+                      selected: selected,
+                      onSelected: (v) => setState(() {
+                        _propietariosLocalIds.clear();
+                        if (v) _propietariosLocalIds.add(propLocalId);
+                      }),
+                    );
+                  }).toList(),
+                ),
+              ],
             ],
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _showNewCategoriaDialog() async {
+    final nombreCtrl = TextEditingController();
+    bool saving = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Nueva categoría'),
+          content: TextField(
+            controller: nombreCtrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Nombre *',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (nombreCtrl.text.trim().isEmpty) return;
+                      setDialogState(() => saving = true);
+                      try {
+                        final repo = context.read<JuegosProvider>().categoriaRepository;
+                        final localId = await repo.create(nombre: nombreCtrl.text.trim());
+                        SyncService().syncAll();
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                        final updated = await repo.getAll();
+                        setState(() {
+                          _categorias = updated;
+                          _categoriaLocalIds.add(localId);
+                        });
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Crear'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true) {
+      final repo = context.read<JuegosProvider>().categoriaRepository;
+      final updated = await repo.getAll();
+      setState(() => _categorias = updated);
+    }
   }
 
   Widget _buildCategoriasSection() {
@@ -580,11 +711,22 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Categorías *',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[700])),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Categorías *',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700])),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 20),
+                  tooltip: 'Nueva categoría',
+                  onPressed: _showNewCategoriaDialog,
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
@@ -854,6 +996,107 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     );
   }
 
+  Future<void> _showNewTipoFundaDialog() async {
+    final nombreCtrl = TextEditingController();
+    final anchoCtrl = TextEditingController();
+    final altoCtrl = TextEditingController();
+    bool saving = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Nuevo tamaño de carta'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nombreCtrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre *',
+                  hintText: 'Ej: Standard, Mini Euro...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: anchoCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Ancho (mm) *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: altoCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Alto (mm) *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final nombre = nombreCtrl.text.trim();
+                      final ancho = int.tryParse(anchoCtrl.text.trim());
+                      final alto = int.tryParse(altoCtrl.text.trim());
+                      if (nombre.isEmpty || ancho == null || alto == null) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Completa todos los campos')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => saving = true);
+                      try {
+                        final repo = context.read<JuegosProvider>().tipoFundaRepository;
+                        await repo.create(nombre: nombre, anchoMm: ancho, altoMm: alto);
+                        SyncService().syncAll();
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Crear'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true) {
+      final repo = context.read<JuegosProvider>().tipoFundaRepository;
+      final updated = await repo.getAll();
+      setState(() => _tiposFunda = updated);
+    }
+  }
+
   Widget _buildFundasSection() {
     return Card(
       elevation: 0,
@@ -876,8 +1119,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                           color: Colors.grey[700])),
                 ),
                 IconButton(
+                  icon: const Icon(Icons.playlist_add, size: 20),
+                  tooltip: 'Nuevo tamaño de carta',
+                  onPressed: _showNewTipoFundaDialog,
+                ),
+                IconButton(
                   icon: const Icon(Icons.add),
-                  tooltip: 'A\u00f1adir',
+                  tooltip: 'Añadir fila',
                   onPressed: _tiposFunda.isEmpty
                       ? null
                       : () => setState(() {
@@ -891,7 +1139,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               ],
             ),
             if (_fundas.isEmpty)
-              Text('Sin tama\u00f1os de fundas asociados.',
+              Text('Sin tamaños de fundas asociados.',
                   style: TextStyle(color: Colors.grey[600], fontSize: 13))
             else
               ..._fundas.asMap().entries.map((e) => _buildFundaRow(e.key, e.value)),
