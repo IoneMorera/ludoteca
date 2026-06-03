@@ -14,6 +14,7 @@ class CategoriasScreen extends StatefulWidget {
 
 class _CategoriasScreenState extends State<CategoriasScreen> {
   List<CategoriaRow> _categorias = [];
+  Map<int, int> _juegoCount = {};
   bool _loading = true;
 
   @override
@@ -27,8 +28,10 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
     try {
       final repo = context.read<JuegosProvider>().categoriaRepository;
       final cats = await repo.getAll();
+      final counts = await repo.getJuegoCountByCategoria();
       setState(() {
         _categorias = cats;
+        _juegoCount = counts;
         _loading = false;
       });
     } catch (e) {
@@ -195,6 +198,7 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
                     itemCount: _categorias.length,
                     itemBuilder: (context, index) {
                       final cat = _categorias[index];
+                      final count = _juegoCount[cat.localId] ?? 0;
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
                         elevation: 0,
@@ -204,12 +208,16 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
                             backgroundColor: theme.colorScheme.primaryContainer,
                             child: Icon(Icons.category, color: theme.colorScheme.onPrimaryContainer, size: 20),
                           ),
-                          title: Text(cat.nombre,
+                          title: Text('${cat.nombre} ($count)',
                               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                           subtitle: cat.descripcion != null && cat.descripcion!.isNotEmpty
                               ? Text(cat.descripcion!, maxLines: 2, overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontSize: 12, color: Colors.grey[600]))
                               : null,
+                          onTap: () => Navigator.of(context).pushNamed(
+                            '/juegos',
+                            arguments: {'categoriaLocalId': cat.localId},
+                          ),
                           trailing: PopupMenuButton<String>(
                             onSelected: (action) {
                               if (action == 'edit') _showFormDialog(categoria: cat);

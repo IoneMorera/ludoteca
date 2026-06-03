@@ -35,6 +35,8 @@ class Juego extends Model
         'tradumaquetado_parcial',
         'tradumaquetado_parcial_notas',
         'varias_copias',
+        'precio',
+        'en_caja_base',
     ];
 
     protected $casts = [
@@ -52,6 +54,8 @@ class Juego extends Model
         'tradumaquetado' => 'boolean',
         'tradumaquetado_parcial' => 'boolean',
         'varias_copias' => 'boolean',
+        'precio' => 'decimal:2',
+        'en_caja_base' => 'boolean',
     ];
 
     public function categoria()

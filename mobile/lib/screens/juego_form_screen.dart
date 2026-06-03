@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
@@ -13,6 +14,7 @@ import '../data/tipo_funda_repository.dart';
 import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
+import '../services/api_service.dart';
 import 'bgg_search_picker.dart';
 
 /// Pantalla \u00fanica para crear y editar juegos.
@@ -115,6 +117,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         _ubicacionLocalId = _existing!.ubicacion != null
             ? _findUbicacionLocalIdFromJuego()
             : null;
+        _ubicacionEnCajaBase = _existing!.enCajaBase;
         _juegoBaseLocalId = _existing!.juegoBaseLocalId;
         _fechaCompra = _existing!.fechaCompra;
         _estado = _existing!.estado;
@@ -267,24 +270,25 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     setState(() => _saving = true);
     final provider = context.read<JuegosProvider>();
 
-    int? ubicacionLocalIdToUse = _ubicacionLocalId;
-    if (_ubicacionEnCajaBase && _juegoBaseLocalId != null) {
-      final base = await provider.juegoRepository.getByLocalId(_juegoBaseLocalId!);
-      if (base != null && base.ubicacion != null) {
-        final baseUbic = _ubicaciones.firstWhere(
-          (u) =>
-              u.serverId == base.ubicacion!.id || u.localId == -base.ubicacion!.id,
-          orElse: () => _ubicaciones.isEmpty
-              ? throw StateError('empty')
-              : _ubicaciones.first,
-        );
-        if (_ubicaciones.any((u) =>
-            u.serverId == base.ubicacion!.id ||
-            u.localId == -base.ubicacion!.id)) {
-          ubicacionLocalIdToUse = baseUbic.localId;
+    // Upload new image if taken from camera/gallery
+    if (_newImageFile != null) {
+      try {
+        final formData = FormData.fromMap({
+          'image': await MultipartFile.fromFile(
+            _newImageFile!.path,
+            filename: _newImageFile!.path.split('/').last,
+          ),
+        });
+        final response = await ApiService().upload('/juegos/upload-image', formData);
+        if (response.statusCode == 200 && response.data['url'] != null) {
+          _imagenPath = response.data['url'] as String;
         }
+      } catch (e) {
+        debugPrint('Image upload failed (will save without image): $e');
       }
     }
+
+    int? ubicacionLocalIdToUse = _ubicacionEnCajaBase ? null : _ubicacionLocalId;
 
     final juego = Juego(
       id: _existing?.id ?? 0,
@@ -312,6 +316,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       tradumaquetadoParcial: _tradumaquetadoParcial,
       tradumaquetadoParcialNotas: _tradumaquetadoParcial ? _tradumaquetadoNotasCtrl.text.trim() : null,
       variasCopias: _variasCopias,
+      enCajaBase: _ubicacionEnCajaBase,
     );
 
     final fundas = _fundas
@@ -530,6 +535,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     );
   }
 
+  Juego? _juegoBaseData;
+
   Widget _buildExpansionSection() {
     return Card(
       elevation: 0,
@@ -548,7 +555,10 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               value: _esExpansion,
               onChanged: (v) => setState(() {
                 _esExpansion = v;
-                if (!v) _juegoBaseLocalId = null;
+                if (!v) {
+                  _juegoBaseLocalId = null;
+                  _juegoBaseData = null;
+                }
               }),
             ),
             if (_esExpansion) ...[
@@ -561,13 +571,63 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               const SizedBox(height: 8),
               _JuegoBasePicker(
                 initialLocalId: _juegoBaseLocalId,
-                onChanged: (id) {
+                onChanged: (id) async {
                   setState(() {
                     _juegoBaseLocalId = id;
-                    if (id == null) _ubicacionEnCajaBase = false;
+                    if (id == null) {
+                      _ubicacionEnCajaBase = false;
+                      _juegoBaseData = null;
+                    }
                   });
+                  if (id != null) {
+                    final provider = context.read<JuegosProvider>();
+                    final base = await provider.juegoRepository.getByLocalId(id);
+                    if (mounted) {
+                      setState(() => _juegoBaseData = base);
+                      if (base != null && base.variasCopias && base.propietarios.isNotEmpty) {
+                        _propietariosLocalIds.clear();
+                        final allProps = await provider.propietarioRepository.getAll();
+                        final firstOwner = base.propietarios.first;
+                        final match = allProps.where(
+                          (lp) => lp.serverId == firstOwner.id || lp.localId == -firstOwner.id,
+                        );
+                        if (match.isNotEmpty && mounted) {
+                          setState(() => _propietariosLocalIds.add(match.first.localId));
+                        }
+                      }
+                    }
+                  }
                 },
               ),
+              if (_juegoBaseData != null && _juegoBaseData!.variasCopias && _juegoBaseData!.propietarios.length > 1) ...[
+                const SizedBox(height: 12),
+                Text('Propietario de la copia base',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700])),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: _juegoBaseData!.propietarios.map((p) {
+                    final match = _propietarios.where(
+                      (lp) => lp.serverId == p.id || lp.localId == -p.id,
+                    );
+                    if (match.isEmpty) return const SizedBox.shrink();
+                    final propLocalId = match.first.localId;
+                    final selected = _propietariosLocalIds.contains(propLocalId);
+                    return ChoiceChip(
+                      label: Text(p.nombre),
+                      selected: selected,
+                      onSelected: (v) => setState(() {
+                        _propietariosLocalIds.clear();
+                        if (v) _propietariosLocalIds.add(propLocalId);
+                      }),
+                    );
+                  }).toList(),
+                ),
+              ],
             ],
           ],
         ),

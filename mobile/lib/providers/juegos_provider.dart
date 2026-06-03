@@ -58,6 +58,7 @@ class JuegosProvider extends ChangeNotifier {
 
   String? _estadoFilter;
   bool? _esExpansionFilter;
+  int? _categoriaLocalId;
 
   String? get estadoFilter => _estadoFilter;
   bool? get esExpansionFilter => _esExpansionFilter;
@@ -67,12 +68,13 @@ class JuegosProvider extends ChangeNotifier {
     _esExpansionFilter = esExpansion;
   }
 
-  Future<void> fetchJuegos({int page = 1, String? buscar, String? estado, bool? esExpansion}) async {
+  Future<void> fetchJuegos({int page = 1, String? buscar, String? estado, bool? esExpansion, int? categoriaLocalId}) async {
     _loading = true;
     notifyListeners();
     if (buscar != null) _busqueda = buscar;
     if (estado != null) _estadoFilter = estado;
     if (esExpansion != null) _esExpansionFilter = esExpansion;
+    if (categoriaLocalId != null) _categoriaLocalId = categoriaLocalId;
     try {
       _items = await _juegos.search(
         buscar: _busqueda.isEmpty ? null : _busqueda,
@@ -80,11 +82,13 @@ class JuegosProvider extends ChangeNotifier {
         perPage: _perPage,
         estado: _estadoFilter,
         esExpansion: _esExpansionFilter,
+        categoriaLocalId: _categoriaLocalId,
       );
       _total = await _juegos.count(
         buscar: _busqueda.isEmpty ? null : _busqueda,
         estado: _estadoFilter,
         esExpansion: _esExpansionFilter,
+        categoriaLocalId: _categoriaLocalId,
       );
       _currentPage = page;
       _lastPage = ((_total / _perPage).ceil()).clamp(1, 9999);

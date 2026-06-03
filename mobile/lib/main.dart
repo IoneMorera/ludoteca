@@ -94,6 +94,7 @@ class LudotecaApp extends StatelessWidget {
                   builder: (_) => JuegosListScreen(
                         initialEstado: args?['estado'] as String?,
                         initialEsExpansion: args?['esExpansion'] as bool?,
+                        categoriaLocalId: args?['categoriaLocalId'] as int?,
                       ));
             case '/juego/nuevo':
               final prefill = settings.arguments as Map<String, dynamic>?;

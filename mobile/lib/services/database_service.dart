@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 4;
+  static const int _schemaVersion = 5;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -59,6 +59,9 @@ class DatabaseService {
         }
         if (oldVersion < 4) {
           await _migrateToV4(db);
+        }
+        if (oldVersion < 5) {
+          await _migrateToV5(db);
         }
       },
     );
@@ -196,6 +199,8 @@ class DatabaseService {
         tradumaquetado_parcial INTEGER NOT NULL DEFAULT 0,
         tradumaquetado_parcial_notas TEXT,
         varias_copias INTEGER NOT NULL DEFAULT 0,
+        precio REAL,
+        en_caja_base INTEGER NOT NULL DEFAULT 0,
         phash TEXT,
         image_local_path TEXT,
         updated_at TEXT,
@@ -326,6 +331,11 @@ class DatabaseService {
 
     // Force full re-pull to get new fields from server
     await db.delete('sync_state', where: "key = 'last_pull_at'");
+  }
+
+  Future<void> _migrateToV5(Database db) async {
+    await db.execute('ALTER TABLE juegos ADD COLUMN precio REAL');
+    await db.execute('ALTER TABLE juegos ADD COLUMN en_caja_base INTEGER NOT NULL DEFAULT 0');
   }
 
   // ---------- sync_state helpers ----------

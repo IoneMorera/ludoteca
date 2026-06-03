@@ -10,8 +10,9 @@ import '../widgets/game_image.dart';
 class JuegosListScreen extends StatefulWidget {
   final String? initialEstado;
   final bool? initialEsExpansion;
+  final int? categoriaLocalId;
 
-  const JuegosListScreen({super.key, this.initialEstado, this.initialEsExpansion});
+  const JuegosListScreen({super.key, this.initialEstado, this.initialEsExpansion, this.categoriaLocalId});
 
   @override
   State<JuegosListScreen> createState() => _JuegosListScreenState();
@@ -22,17 +23,24 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
   SyncStatus? _lastSyncStatus;
   String? _estadoFilter;
   bool? _esExpansionFilter;
+  int? _categoriaLocalId;
+
+  bool get _isStandaloneRoute =>
+      widget.initialEstado != null ||
+      widget.initialEsExpansion != null ||
+      widget.categoriaLocalId != null;
 
   @override
   void initState() {
     super.initState();
     _estadoFilter = widget.initialEstado;
     _esExpansionFilter = widget.initialEsExpansion;
+    _categoriaLocalId = widget.categoriaLocalId;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<JuegosProvider>();
       provider.clearBusqueda();
       provider.setFilters(estado: _estadoFilter, esExpansion: _esExpansionFilter);
-      provider.fetchJuegos(estado: _estadoFilter, esExpansion: _esExpansionFilter);
+      provider.fetchJuegos(estado: _estadoFilter, esExpansion: _esExpansionFilter, categoriaLocalId: _categoriaLocalId);
       _lastSyncStatus = context.read<SyncProvider>().status;
       context.read<SyncProvider>().addListener(_onSyncChanged);
     });
@@ -69,6 +77,15 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     final provider = context.watch<JuegosProvider>();
 
     return Scaffold(
+      appBar: _isStandaloneRoute
+          ? AppBar(
+              title: const Text('Juegos'),
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            )
+          : null,
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final created = await Navigator.of(context).pushNamed('/juego/nuevo');
@@ -297,7 +314,7 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
 
   List<Widget> _buildBadges(Juego juego) {
     final badges = <Widget>[];
-    if (juego.propietarios.length > 1) {
+    if (juego.propietarios.length > 1 && !juego.variasCopias) {
       badges.add(Container(
         margin: const EdgeInsets.only(left: 4),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

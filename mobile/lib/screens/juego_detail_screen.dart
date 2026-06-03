@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
+import '../data/sync_service.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../widgets/game_image.dart';
@@ -40,6 +41,133 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     if (!mounted) return;
     if (result == true) {
       await this.context.read<JuegosProvider>().refreshDetail();
+    }
+  }
+
+  Future<void> _showEstadoDialog(Juego juego) async {
+    if (juego.localId == null) return;
+    String selectedEstado = juego.estado ?? 'disponible';
+    final precioCtrl = TextEditingController(
+      text: juego.precio != null ? juego.precio!.toStringAsFixed(2) : '',
+    );
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Cambiar estado'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ...['disponible', 'en_venta', 'vendido'].map((estado) {
+                return RadioListTile<String>(
+                  title: Text(_formatEstado(estado)),
+                  value: estado,
+                  groupValue: selectedEstado,
+                  onChanged: (v) => setDialogState(() => selectedEstado = v!),
+                );
+              }),
+              if (selectedEstado == 'en_venta') ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: precioCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Precio',
+                    prefixText: '€ ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final p = selectedEstado == 'en_venta'
+                    ? double.tryParse(precioCtrl.text)
+                    : null;
+                Navigator.pop(ctx, {'estado': selectedEstado, 'precio': p});
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      final provider = context.read<JuegosProvider>();
+      await provider.juegoRepository.updateEstado(
+        juego.localId!,
+        estado: result['estado'] as String,
+        precio: result['precio'] as double?,
+      );
+      SyncService().syncAll();
+      await provider.refreshDetail();
+    }
+  }
+
+  Future<void> _showUbicacionDialog(Juego juego) async {
+    if (juego.localId == null) return;
+    final provider = context.read<JuegosProvider>();
+    final ubicaciones = await provider.ubicacionRepository.getAll();
+    int? selectedLocalId = juego.ubicacionLocalId;
+
+    if (!mounted) return;
+    final result = await showDialog<int?>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Cambiar ubicación'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                RadioListTile<int?>(
+                  title: const Text('Sin asignar',
+                      style: TextStyle(color: Colors.grey)),
+                  value: null,
+                  groupValue: selectedLocalId,
+                  onChanged: (v) => setDialogState(() => selectedLocalId = v),
+                ),
+                ...ubicaciones.map((u) => RadioListTile<int?>(
+                      title: Text(u.rutaCompleta),
+                      value: u.localId,
+                      groupValue: selectedLocalId,
+                      onChanged: (v) =>
+                          setDialogState(() => selectedLocalId = v),
+                    )),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, selectedLocalId ?? -1),
+              child: const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      final newUbicLocalId = result == -1 ? null : result;
+      await provider.juegoRepository.updateUbicacion(
+        juego.localId!,
+        ubicacionLocalId: newUbicLocalId,
+      );
+      SyncService().syncAll();
+      await provider.refreshDetail();
     }
   }
 
@@ -114,6 +242,10 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     );
   }
 
+  bool _isCompartido(Juego juego) {
+    return juego.propietarios.length > 1 && !juego.variasCopias;
+  }
+
   Widget _buildHeader(Juego juego, ThemeData theme) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,20 +276,40 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     ),
                 ],
               ),
-              if (juego.esExpansion) ...[
+              if (juego.esExpansion || _isCompartido(juego)) ...[
                 const SizedBox(height: 4),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text('Expansi\u00f3n',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[700],
-                          fontWeight: FontWeight.w600)),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    if (juego.esExpansion)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('Expansi\u00f3n',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[700],
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    if (_isCompartido(juego))
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.lightBlue[50],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('Compartido',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.lightBlue[700],
+                                fontWeight: FontWeight.w600)),
+                      ),
+                  ],
                 ),
               ],
               if (juego.descripcion != null &&
@@ -170,13 +322,27 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
               if (juego.esExpansion && juego.juegoBase != null) ...[
                 const SizedBox(height: 8),
                 InkWell(
-                  onTap: () => Navigator.of(context).pushNamed('/juego',
-                      arguments: juego.juegoBase!.localId),
-                  child: Text('Juego base: ${juego.juegoBase!.nombre}',
-                      style: TextStyle(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13)),
+                  onTap: () {
+                    if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    } else {
+                      Navigator.of(context).pushReplacementNamed('/juego',
+                          arguments: juego.juegoBase!.localId);
+                    }
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_back, size: 14,
+                          color: theme.colorScheme.primary),
+                      const SizedBox(width: 4),
+                      Text('Juego base: ${juego.juegoBase!.nombre}',
+                          style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13)),
+                    ],
+                  ),
                 ),
               ],
             ],
@@ -190,9 +356,21 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     final bool tieneCastellanoOCatalan = juego.idiomas.any(
         (i) => i.toLowerCase() == 'castellano' || i.toLowerCase() == 'catalán' || i.toLowerCase() == 'catalan');
 
+    String ubicacionTexto;
+    if (juego.enCajaBase) {
+      ubicacionTexto = 'En la caja del base';
+    } else {
+      ubicacionTexto = juego.ubicacion?.rutaCompleta ?? 'Sin asignar';
+    }
+
+    String estadoTexto = _formatEstado(juego.estado);
+    if (juego.estado == 'en_venta' && juego.precio != null) {
+      estadoTexto += ' (${juego.precio!.toStringAsFixed(2)} €)';
+    }
+
     final items = <_InfoItem>[
-      _InfoItem('Ubicación',
-          juego.ubicacion?.rutaCompleta ?? 'Sin asignar', Icons.location_on),
+      _InfoItem('Ubicación', ubicacionTexto, Icons.location_on,
+          onTap: () => _showUbicacionDialog(juego)),
       _InfoItem('Categorías',
           juego.categorias.isNotEmpty
               ? juego.categorias.map((c) => c.nombre).join(', ')
@@ -213,7 +391,8 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     ? 'Parcial${juego.tradumaquetadoParcialNotas != null && juego.tradumaquetadoParcialNotas!.isNotEmpty ? ': ${juego.tradumaquetadoParcialNotas}' : ''}'
                     : 'No',
             Icons.auto_stories),
-      _InfoItem('Estado', _formatEstado(juego.estado), Icons.info_outline),
+      _InfoItem('Estado', estadoTexto, Icons.info_outline,
+          onTap: () => _showEstadoDialog(juego)),
     ];
 
     return Column(
@@ -227,7 +406,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
           crossAxisSpacing: 8,
           childAspectRatio: 2.5,
           children: items.map((item) {
-            return Container(
+            final child = Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest,
@@ -249,6 +428,11 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                                 fontWeight: FontWeight.w600),
                             overflow: TextOverflow.ellipsis),
                       ),
+                      if (item.onTap != null) ...[
+                        const Spacer(),
+                        Icon(Icons.edit_outlined, size: 12,
+                            color: theme.colorScheme.primary),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -262,6 +446,14 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                 ],
               ),
             );
+            if (item.onTap != null) {
+              return InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: item.onTap,
+                child: child,
+              );
+            }
+            return child;
           }).toList(),
         ),
         // Cartas y fundas
@@ -360,6 +552,7 @@ class _InfoItem {
   final String label;
   final String value;
   final IconData icon;
-  _InfoItem(this.label, this.value, this.icon);
+  final VoidCallback? onTap;
+  _InfoItem(this.label, this.value, this.icon, {this.onTap});
 }
 

@@ -85,6 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('tipos-funda', TipoFundaController::class)
             ->parameters(['tipos-funda' => 'tipoFunda']);
         Route::apiResource('juegos', JuegoController::class);
+        Route::post('juegos/upload-image', [JuegoController::class, 'uploadImage']);
         Route::apiResource('habitaciones', HabitacionController::class)->except(['show']);
         Route::apiResource('muebles', MuebleController::class)->except(['show']);
 
