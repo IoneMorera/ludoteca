@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../data/categoria_repository.dart';
 import '../data/juego_repository.dart';
 import '../data/propietario_repository.dart';
+import '../data/sync_service.dart';
 import '../data/tipo_funda_repository.dart';
 import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
@@ -574,6 +575,70 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     );
   }
 
+  Future<void> _showNewCategoriaDialog() async {
+    final nombreCtrl = TextEditingController();
+    bool saving = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Nueva categoría'),
+          content: TextField(
+            controller: nombreCtrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Nombre *',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (nombreCtrl.text.trim().isEmpty) return;
+                      setDialogState(() => saving = true);
+                      try {
+                        final repo = context.read<JuegosProvider>().categoriaRepository;
+                        final localId = await repo.create(nombre: nombreCtrl.text.trim());
+                        SyncService().syncAll();
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                        final updated = await repo.getAll();
+                        setState(() {
+                          _categorias = updated;
+                          _categoriaLocalIds.add(localId);
+                        });
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Crear'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true) {
+      final repo = context.read<JuegosProvider>().categoriaRepository;
+      final updated = await repo.getAll();
+      setState(() => _categorias = updated);
+    }
+  }
+
   Widget _buildCategoriasSection() {
     return Card(
       elevation: 0,
@@ -586,11 +651,22 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Categorías *',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[700])),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Categorías *',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700])),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 20),
+                  tooltip: 'Nueva categoría',
+                  onPressed: _showNewCategoriaDialog,
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
@@ -860,6 +936,107 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     );
   }
 
+  Future<void> _showNewTipoFundaDialog() async {
+    final nombreCtrl = TextEditingController();
+    final anchoCtrl = TextEditingController();
+    final altoCtrl = TextEditingController();
+    bool saving = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Nuevo tamaño de carta'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nombreCtrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre *',
+                  hintText: 'Ej: Standard, Mini Euro...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: anchoCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Ancho (mm) *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: altoCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Alto (mm) *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final nombre = nombreCtrl.text.trim();
+                      final ancho = int.tryParse(anchoCtrl.text.trim());
+                      final alto = int.tryParse(altoCtrl.text.trim());
+                      if (nombre.isEmpty || ancho == null || alto == null) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Completa todos los campos')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => saving = true);
+                      try {
+                        final repo = context.read<JuegosProvider>().tipoFundaRepository;
+                        await repo.create(nombre: nombre, anchoMm: ancho, altoMm: alto);
+                        SyncService().syncAll();
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Crear'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true) {
+      final repo = context.read<JuegosProvider>().tipoFundaRepository;
+      final updated = await repo.getAll();
+      setState(() => _tiposFunda = updated);
+    }
+  }
+
   Widget _buildFundasSection() {
     return Card(
       elevation: 0,
@@ -882,8 +1059,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                           color: Colors.grey[700])),
                 ),
                 IconButton(
+                  icon: const Icon(Icons.playlist_add, size: 20),
+                  tooltip: 'Nuevo tamaño de carta',
+                  onPressed: _showNewTipoFundaDialog,
+                ),
+                IconButton(
                   icon: const Icon(Icons.add),
-                  tooltip: 'A\u00f1adir',
+                  tooltip: 'Añadir fila',
                   onPressed: _tiposFunda.isEmpty
                       ? null
                       : () => setState(() {
@@ -897,7 +1079,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               ],
             ),
             if (_fundas.isEmpty)
-              Text('Sin tama\u00f1os de fundas asociados.',
+              Text('Sin tamaños de fundas asociados.',
                   style: TextStyle(color: Colors.grey[600], fontSize: 13))
             else
               ..._fundas.asMap().entries.map((e) => _buildFundaRow(e.key, e.value)),

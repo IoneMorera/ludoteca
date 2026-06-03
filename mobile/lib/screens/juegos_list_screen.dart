@@ -297,6 +297,21 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
 
   List<Widget> _buildBadges(Juego juego) {
     final badges = <Widget>[];
+    if (juego.propietarios.length > 1) {
+      badges.add(Container(
+        margin: const EdgeInsets.only(left: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.lightBlue[50],
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text('Compartido',
+            style: TextStyle(
+                fontSize: 11,
+                color: Colors.lightBlue[700],
+                fontWeight: FontWeight.w600)),
+      ));
+    }
     if (juego.esExpansion) {
       badges.add(Container(
         margin: const EdgeInsets.only(left: 4),

@@ -68,7 +68,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
               : RefreshIndicator(
                   onRefresh: () => provider.refreshDetail(),
                   child: ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
                     children: [
                       _buildHeader(juego, theme),
                       const SizedBox(height: 20),
