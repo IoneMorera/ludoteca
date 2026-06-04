@@ -270,7 +270,11 @@ class JuegoRepository {
   }
 
   /// Updates only the ubicacion (quick update from detail screen).
-  Future<void> updateUbicacion(int localId, {int? ubicacionLocalId}) async {
+  Future<void> updateUbicacion(
+    int localId, {
+    int? ubicacionLocalId,
+    bool? enCajaBase,
+  }) async {
     final db = await _dbService.database;
     final existing = await db.query('juegos',
         where: 'local_id = ?', whereArgs: [localId], limit: 1);
@@ -285,9 +289,15 @@ class JuegoRepository {
       ubicacionServerId = row.isEmpty ? null : row.first['server_id'] as int?;
     }
 
+    final resolvedEnCajaBase = enCajaBase ??
+        (ubicacionLocalId != null
+            ? false
+            : ((existing.first['en_caja_base'] as int?) ?? 0) == 1);
+
     await db.update('juegos', {
-      'ubicacion_local_id': ubicacionLocalId,
-      'ubicacion_server_id': ubicacionServerId,
+      'ubicacion_local_id': resolvedEnCajaBase ? null : ubicacionLocalId,
+      'ubicacion_server_id': resolvedEnCajaBase ? null : ubicacionServerId,
+      'en_caja_base': resolvedEnCajaBase ? 1 : 0,
       'dirty': 1,
       'pending_action': 'update',
     }, where: 'local_id = ?', whereArgs: [localId]);
@@ -298,7 +308,10 @@ class JuegoRepository {
         action: SyncAction.update,
         localId: localId,
         serverId: serverId,
-        payload: {'ubicacion_id': ubicacionServerId},
+        payload: {
+          'ubicacion_id': resolvedEnCajaBase ? null : ubicacionServerId,
+          'en_caja_base': resolvedEnCajaBase,
+        },
         baseUpdatedAt: baseUpdatedAt,
       );
     }
@@ -342,6 +355,19 @@ class JuegoRepository {
           : jsonEncode(data['idiomas']);
     }
 
+    final existing = await db.query('juegos',
+        where: 'server_id = ?', whereArgs: [serverId], limit: 1);
+
+    final enCajaBase = data.containsKey('en_caja_base')
+        ? (data['en_caja_base'] == true || data['en_caja_base'] == 1)
+        : (existing.isNotEmpty
+            ? ((existing.first['en_caja_base'] as int?) ?? 0) == 1
+            : false);
+
+    final precio = data.containsKey('precio') && data['precio'] is num
+        ? (data['precio'] as num).toDouble()
+        : (existing.isNotEmpty ? existing.first['precio'] as double? : null);
+
     final values = {
       'server_id': serverId,
       'nombre': data['nombre'],
@@ -369,15 +395,13 @@ class JuegoRepository {
       'tradumaquetado_parcial': (data['tradumaquetado_parcial'] == true) ? 1 : 0,
       'tradumaquetado_parcial_notas': data['tradumaquetado_parcial_notas'],
       'varias_copias': (data['varias_copias'] == true) ? 1 : 0,
-      'precio': data['precio'] is num ? (data['precio'] as num).toDouble() : null,
-      'en_caja_base': (data['en_caja_base'] == true) ? 1 : 0,
+      'precio': precio,
+      'en_caja_base': enCajaBase ? 1 : 0,
       'updated_at': data['updated_at'],
       'dirty': 0,
       'pending_action': null,
     };
 
-    final existing = await db.query('juegos',
-        where: 'server_id = ?', whereArgs: [serverId], limit: 1);
     if (existing.isEmpty) {
       await db.insert('juegos', values,
           conflictAlgorithm: ConflictAlgorithm.replace);

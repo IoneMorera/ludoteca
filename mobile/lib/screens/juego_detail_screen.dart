@@ -116,10 +116,19 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     if (juego.localId == null) return;
     final provider = context.read<JuegosProvider>();
     final ubicaciones = await provider.ubicacionRepository.getAll();
-    int? selectedLocalId = juego.ubicacionLocalId;
+    final canUseCajaBase = juego.esExpansion;
+
+    String selectedKey;
+    if (juego.enCajaBase && canUseCajaBase) {
+      selectedKey = 'en_caja_base';
+    } else if (juego.ubicacionLocalId != null) {
+      selectedKey = 'ubicacion:${juego.ubicacionLocalId}';
+    } else {
+      selectedKey = 'sin_asignar';
+    }
 
     if (!mounted) return;
-    final result = await showDialog<int?>(
+    final result = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
@@ -129,19 +138,25 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
             child: ListView(
               shrinkWrap: true,
               children: [
-                RadioListTile<int?>(
+                if (canUseCajaBase)
+                  RadioListTile<String>(
+                    title: const Text('En la caja del base'),
+                    value: 'en_caja_base',
+                    groupValue: selectedKey,
+                    onChanged: (v) => setDialogState(() => selectedKey = v!),
+                  ),
+                RadioListTile<String>(
                   title: const Text('Sin asignar',
                       style: TextStyle(color: Colors.grey)),
-                  value: null,
-                  groupValue: selectedLocalId,
-                  onChanged: (v) => setDialogState(() => selectedLocalId = v),
+                  value: 'sin_asignar',
+                  groupValue: selectedKey,
+                  onChanged: (v) => setDialogState(() => selectedKey = v!),
                 ),
-                ...ubicaciones.map((u) => RadioListTile<int?>(
+                ...ubicaciones.map((u) => RadioListTile<String>(
                       title: Text(u.rutaCompleta),
-                      value: u.localId,
-                      groupValue: selectedLocalId,
-                      onChanged: (v) =>
-                          setDialogState(() => selectedLocalId = v),
+                      value: 'ubicacion:${u.localId}',
+                      groupValue: selectedKey,
+                      onChanged: (v) => setDialogState(() => selectedKey = v!),
                     )),
               ],
             ),
@@ -152,7 +167,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, selectedLocalId ?? -1),
+              onPressed: () => Navigator.pop(ctx, selectedKey),
               child: const Text('Guardar'),
             ),
           ],
@@ -161,11 +176,25 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     );
 
     if (result != null && mounted) {
-      final newUbicLocalId = result == -1 ? null : result;
-      await provider.juegoRepository.updateUbicacion(
-        juego.localId!,
-        ubicacionLocalId: newUbicLocalId,
-      );
+      if (result == 'en_caja_base') {
+        await provider.juegoRepository.updateUbicacion(
+          juego.localId!,
+          enCajaBase: true,
+        );
+      } else if (result == 'sin_asignar') {
+        await provider.juegoRepository.updateUbicacion(
+          juego.localId!,
+          ubicacionLocalId: null,
+          enCajaBase: false,
+        );
+      } else if (result.startsWith('ubicacion:')) {
+        final localId = int.parse(result.substring('ubicacion:'.length));
+        await provider.juegoRepository.updateUbicacion(
+          juego.localId!,
+          ubicacionLocalId: localId,
+          enCajaBase: false,
+        );
+      }
       SyncService().syncAll();
       await provider.refreshDetail();
     }

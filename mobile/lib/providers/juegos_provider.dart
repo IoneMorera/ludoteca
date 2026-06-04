@@ -63,9 +63,17 @@ class JuegosProvider extends ChangeNotifier {
   String? get estadoFilter => _estadoFilter;
   bool? get esExpansionFilter => _esExpansionFilter;
 
-  void setFilters({String? estado, bool? esExpansion}) {
+  void setFilters({String? estado, bool? esExpansion, int? categoriaLocalId}) {
     _estadoFilter = estado;
     _esExpansionFilter = esExpansion;
+    _categoriaLocalId = categoriaLocalId;
+  }
+
+  void resetFilters() {
+    _estadoFilter = null;
+    _esExpansionFilter = null;
+    _categoriaLocalId = null;
+    _busqueda = '';
   }
 
   Future<void> fetchJuegos({int page = 1, String? buscar, String? estado, bool? esExpansion, int? categoriaLocalId}) async {
