@@ -189,12 +189,12 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
-  final _screens = const [
-    HomeScreen(),
-    JuegosListScreen(),
-    SizedBox(), // placeholder para "Reconocer" (se abre como pantalla completa)
-    ColeccionesScreen(),
-    SettingsScreen(),
+  late final List<Widget> _screens = [
+    const HomeScreen(),
+    JuegosListScreen(onBack: () => setState(() => _currentIndex = 0)),
+    const SizedBox(),
+    const ColeccionesScreen(),
+    const SettingsScreen(),
   ];
 
   @override

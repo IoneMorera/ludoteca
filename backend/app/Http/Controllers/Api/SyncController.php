@@ -370,6 +370,8 @@ class SyncController extends Controller
                 'tradumaquetado_parcial' => (bool) $j->tradumaquetado_parcial,
                 'tradumaquetado_parcial_notas' => $j->tradumaquetado_parcial_notas,
                 'varias_copias' => (bool) $j->varias_copias,
+                'precio' => $j->precio,
+                'en_caja_base' => (bool) $j->en_caja_base,
                 'created_at' => $j->created_at?->toIso8601String(),
                 'updated_at' => $j->updated_at?->toIso8601String(),
             ])->all();

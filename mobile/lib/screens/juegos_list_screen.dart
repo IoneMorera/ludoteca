@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart' show SyncStatus;
+import '../data/categoria_repository.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
 import '../models/juego.dart';
@@ -11,8 +12,15 @@ class JuegosListScreen extends StatefulWidget {
   final String? initialEstado;
   final bool? initialEsExpansion;
   final int? categoriaLocalId;
+  final VoidCallback? onBack;
 
-  const JuegosListScreen({super.key, this.initialEstado, this.initialEsExpansion, this.categoriaLocalId});
+  const JuegosListScreen({
+    super.key,
+    this.initialEstado,
+    this.initialEsExpansion,
+    this.categoriaLocalId,
+    this.onBack,
+  });
 
   @override
   State<JuegosListScreen> createState() => _JuegosListScreenState();
@@ -24,11 +32,8 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
   String? _estadoFilter;
   bool? _esExpansionFilter;
   int? _categoriaLocalId;
-
-  bool get _isStandaloneRoute =>
-      widget.initialEstado != null ||
-      widget.initialEsExpansion != null ||
-      widget.categoriaLocalId != null;
+  List<CategoriaRow> _categorias = [];
+  String? _categoriaNombre;
 
   @override
   void initState() {
@@ -38,12 +43,36 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     _categoriaLocalId = widget.categoriaLocalId;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<JuegosProvider>();
-      provider.clearBusqueda();
-      provider.setFilters(estado: _estadoFilter, esExpansion: _esExpansionFilter);
-      provider.fetchJuegos(estado: _estadoFilter, esExpansion: _esExpansionFilter, categoriaLocalId: _categoriaLocalId);
+      provider.resetFilters();
+      if (_estadoFilter != null || _esExpansionFilter != null || _categoriaLocalId != null) {
+        provider.setFilters(
+          estado: _estadoFilter,
+          esExpansion: _esExpansionFilter,
+          categoriaLocalId: _categoriaLocalId,
+        );
+      }
+      provider.fetchJuegos(
+        estado: _estadoFilter,
+        esExpansion: _esExpansionFilter,
+        categoriaLocalId: _categoriaLocalId,
+      );
       _lastSyncStatus = context.read<SyncProvider>().status;
       context.read<SyncProvider>().addListener(_onSyncChanged);
+      _loadCategorias();
     });
+  }
+
+  Future<void> _loadCategorias() async {
+    final cats = await context.read<JuegosProvider>().categoriaRepository.getAll();
+    if (mounted) {
+      setState(() => _categorias = cats);
+      if (_categoriaLocalId != null) {
+        final match = cats.where((c) => c.localId == _categoriaLocalId);
+        if (match.isNotEmpty) {
+          setState(() => _categoriaNombre = match.first.nombre);
+        }
+      }
+    }
   }
 
   void _onSyncChanged() {
@@ -55,14 +84,199 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     _lastSyncStatus = syncStatus;
   }
 
-  void _applyFilter(String? estado, bool? esExpansion) {
-    setState(() {
-      _estadoFilter = estado;
-      _esExpansionFilter = esExpansion;
-    });
+  void _applyFilters() {
     final provider = context.read<JuegosProvider>();
-    provider.setFilters(estado: estado, esExpansion: esExpansion);
-    provider.fetchJuegos(estado: estado, esExpansion: esExpansion);
+    provider.setFilters(
+      estado: _estadoFilter,
+      esExpansion: _esExpansionFilter,
+      categoriaLocalId: _categoriaLocalId,
+    );
+    provider.fetchJuegos(
+      estado: _estadoFilter,
+      esExpansion: _esExpansionFilter,
+      categoriaLocalId: _categoriaLocalId,
+    );
+  }
+
+  void _clearAllFilters() {
+    setState(() {
+      _estadoFilter = null;
+      _esExpansionFilter = null;
+      _categoriaLocalId = null;
+      _categoriaNombre = null;
+    });
+    _applyFilters();
+  }
+
+  bool get _hasActiveFilters =>
+      _estadoFilter != null || _esExpansionFilter != null || _categoriaLocalId != null;
+
+  void _showFilterSheet() {
+    String? tempEstado = _estadoFilter;
+    bool? tempEsExpansion = _esExpansionFilter;
+    int? tempCategoriaId = _categoriaLocalId;
+    String? tempCategoriaNombre = _categoriaNombre;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.6,
+              minChildSize: 0.4,
+              maxChildSize: 0.85,
+              expand: false,
+              builder: (_, scrollController) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Filtros',
+                              style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  )),
+                          TextButton(
+                            onPressed: () {
+                              setSheetState(() {
+                                tempEstado = null;
+                                tempEsExpansion = null;
+                                tempCategoriaId = null;
+                                tempCategoriaNombre = null;
+                              });
+                            },
+                            child: const Text('Limpiar'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Text('Estado',
+                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              )),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Todos'),
+                            selected: tempEstado == null,
+                            onSelected: (_) => setSheetState(() => tempEstado = null),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Disponible'),
+                            selected: tempEstado == 'disponible',
+                            selectedColor: Colors.green[100],
+                            onSelected: (_) =>
+                                setSheetState(() => tempEstado = 'disponible'),
+                          ),
+                          ChoiceChip(
+                            label: const Text('En venta'),
+                            selected: tempEstado == 'en_venta',
+                            selectedColor: Colors.orange[100],
+                            onSelected: (_) =>
+                                setSheetState(() => tempEstado = 'en_venta'),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Vendido'),
+                            selected: tempEstado == 'vendido',
+                            selectedColor: Colors.red[100],
+                            onSelected: (_) =>
+                                setSheetState(() => tempEstado = 'vendido'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Text('Tipo de juego',
+                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              )),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Todos'),
+                            selected: tempEsExpansion == null,
+                            onSelected: (_) =>
+                                setSheetState(() => tempEsExpansion = null),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Base'),
+                            selected: tempEsExpansion == false,
+                            onSelected: (_) =>
+                                setSheetState(() => tempEsExpansion = false),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Expansión'),
+                            selected: tempEsExpansion == true,
+                            selectedColor: Colors.purple[100],
+                            onSelected: (_) =>
+                                setSheetState(() => tempEsExpansion = true),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Text('Categoría',
+                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              )),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Todas'),
+                            selected: tempCategoriaId == null,
+                            onSelected: (_) => setSheetState(() {
+                              tempCategoriaId = null;
+                              tempCategoriaNombre = null;
+                            }),
+                          ),
+                          ..._categorias.map((cat) => ChoiceChip(
+                                label: Text(cat.nombre),
+                                selected: tempCategoriaId == cat.localId,
+                                onSelected: (_) => setSheetState(() {
+                                  tempCategoriaId = cat.localId;
+                                  tempCategoriaNombre = cat.nombre;
+                                }),
+                              )),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          setState(() {
+                            _estadoFilter = tempEstado;
+                            _esExpansionFilter = tempEsExpansion;
+                            _categoriaLocalId = tempCategoriaId;
+                            _categoriaNombre = tempCategoriaNombre;
+                          });
+                          _applyFilters();
+                        },
+                        child: const Text('Aplicar filtros'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -77,15 +291,19 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     final provider = context.watch<JuegosProvider>();
 
     return Scaffold(
-      appBar: _isStandaloneRoute
-          ? AppBar(
-              title: const Text('Juegos'),
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            )
-          : null,
+      appBar: AppBar(
+        title: Text(_categoriaNombre ?? 'Juegos'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (widget.onBack != null) {
+              widget.onBack!();
+            } else {
+              Navigator.of(context).pop();
+            }
+          },
+        ),
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final created = await Navigator.of(context).pushNamed('/juego/nuevo');
@@ -99,78 +317,64 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Buscar juegos...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          provider.fetchJuegos(buscar: '');
-                        },
-                      )
-                    : null,
-              ),
-              onChanged: (value) {
-                provider.fetchJuegos(buscar: value);
-              },
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Buscar juegos...',
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                provider.fetchJuegos(buscar: '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (value) {
+                      provider.fetchJuegos(buscar: value);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Badge(
+                  isLabelVisible: _hasActiveFilters,
+                  child: IconButton(
+                    icon: const Icon(Icons.filter_list),
+                    onPressed: _showFilterSheet,
+                    tooltip: 'Filtros',
+                  ),
+                ),
+              ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  FilterChip(
-                    label: const Text('Todos'),
-                    selected: _estadoFilter == null && _esExpansionFilter == null,
-                    onSelected: (_) => _applyFilter(null, null),
-                  ),
-                  const SizedBox(width: 6),
-                  FilterChip(
-                    label: const Text('Disponible'),
-                    selected: _estadoFilter == 'disponible',
-                    selectedColor: Colors.green[100],
-                    onSelected: (_) => _applyFilter('disponible', null),
-                  ),
-                  const SizedBox(width: 6),
-                  FilterChip(
-                    label: const Text('En venta'),
-                    selected: _estadoFilter == 'en_venta',
-                    selectedColor: Colors.orange[100],
-                    onSelected: (_) => _applyFilter('en_venta', null),
-                  ),
-                  const SizedBox(width: 6),
-                  FilterChip(
-                    label: const Text('Vendido'),
-                    selected: _estadoFilter == 'vendido',
-                    selectedColor: Colors.red[100],
-                    onSelected: (_) => _applyFilter('vendido', null),
-                  ),
-                  const SizedBox(width: 6),
-                  FilterChip(
-                    label: const Text('Expansiones'),
-                    selected: _esExpansionFilter == true,
-                    selectedColor: Colors.purple[100],
-                    onSelected: (_) => _applyFilter(null, true),
-                  ),
-                  const SizedBox(width: 6),
-                  FilterChip(
-                    label: const Text('Juegos base'),
-                    selected: _esExpansionFilter == false,
-                    onSelected: (_) => _applyFilter(null, false),
-                  ),
-                ],
+          if (_hasActiveFilters)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    ..._buildActiveFilterChips(),
+                    const SizedBox(width: 4),
+                    ActionChip(
+                      avatar: const Icon(Icons.clear_all, size: 16),
+                      label: const Text('Limpiar'),
+                      onPressed: _clearAllFilters,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
           if (provider.loading && provider.juegos.isEmpty)
             const Expanded(
                 child: Center(child: CircularProgressIndicator()))
@@ -207,6 +411,74 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
         ],
       ),
     );
+  }
+
+  List<Widget> _buildActiveFilterChips() {
+    final chips = <Widget>[];
+    if (_estadoFilter != null) {
+      String label;
+      Color? color;
+      switch (_estadoFilter) {
+        case 'disponible':
+          label = 'Disponible';
+          color = Colors.green[100];
+          break;
+        case 'en_venta':
+          label = 'En venta';
+          color = Colors.orange[100];
+          break;
+        case 'vendido':
+          label = 'Vendido';
+          color = Colors.red[100];
+          break;
+        default:
+          label = _estadoFilter!;
+          color = null;
+      }
+      chips.add(Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InputChip(
+          label: Text(label),
+          backgroundColor: color,
+          onDeleted: () {
+            setState(() => _estadoFilter = null);
+            _applyFilters();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+      ));
+    }
+    if (_esExpansionFilter != null) {
+      chips.add(Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InputChip(
+          label: Text(_esExpansionFilter! ? 'Expansión' : 'Base'),
+          backgroundColor: _esExpansionFilter! ? Colors.purple[100] : null,
+          onDeleted: () {
+            setState(() => _esExpansionFilter = null);
+            _applyFilters();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+      ));
+    }
+    if (_categoriaLocalId != null) {
+      chips.add(Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InputChip(
+          label: Text(_categoriaNombre ?? 'Categoría'),
+          onDeleted: () {
+            setState(() {
+              _categoriaLocalId = null;
+              _categoriaNombre = null;
+            });
+            _applyFilters();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+      ));
+    }
+    return chips;
   }
 
   Widget _buildJuegoCard(BuildContext context, Juego juego) {
