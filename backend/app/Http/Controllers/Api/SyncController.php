@@ -8,6 +8,7 @@ use App\Models\Habitacion;
 use App\Models\Juego;
 use App\Models\JuegoFunda;
 use App\Models\JuegoCategoriaPivot;
+use App\Models\JuegoPropietarioFunda;
 use App\Models\JuegoPropietarioPivot;
 use App\Models\Mueble;
 use App\Models\Propietario;
@@ -41,6 +42,7 @@ class SyncController extends Controller
             'juegos' => $this->fetchJuegos($since),
             'juego_fundas' => $this->fetchJuegoFundas($since),
             'juego_propietario' => $this->fetchJuegoPropietario($since),
+            'juego_propietario_fundas' => $this->fetchJuegoPropietarioFundas($since),
             'juego_categoria' => $this->fetchJuegoCategoria($since),
         ];
 
@@ -234,7 +236,15 @@ class SyncController extends Controller
             'ubicaciones' => ['mueble_id', 'nombre'],
             'tipos_funda' => ['nombre', 'ancho_mm', 'alto_mm', 'descripcion'],
             'juego_fundas' => ['juego_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas'],
-            'juego_propietario' => ['juego_id', 'propietario_id', 'ubicacion_id'],
+            'juego_propietario' => [
+                'juego_id', 'propietario_id', 'ubicacion_id', 'es_principal',
+                'estado', 'no_enfundar', 'idiomas', 'idioma_otro',
+                'independiente_idioma', 'tradumaquetado', 'tradumaquetado_parcial',
+                'tradumaquetado_parcial_notas',
+            ],
+            'juego_propietario_fundas' => [
+                'juego_propietario_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas',
+            ],
             'juego_categoria' => ['juego_id', 'categoria_id'],
             default => [],
         };
@@ -254,6 +264,7 @@ class SyncController extends Controller
             'tipos_funda' => TipoFunda::class,
             'juego_fundas' => JuegoFunda::class,
             'juego_propietario' => JuegoPropietarioPivot::class,
+            'juego_propietario_fundas' => JuegoPropietarioFunda::class,
             'juego_categoria' => JuegoCategoriaPivot::class,
             default => throw new \InvalidArgumentException("Unknown table: {$table}"),
         };
@@ -428,8 +439,33 @@ class SyncController extends Controller
                 'juego_id' => $row->juego_id,
                 'propietario_id' => $row->propietario_id,
                 'ubicacion_id' => $row->ubicacion_id ?? null,
+                'es_principal' => (bool) ($row->es_principal ?? false),
+                'estado' => $row->estado ?? null,
+                'no_enfundar' => (bool) ($row->no_enfundar ?? false),
+                'idiomas' => $row->idiomas ? json_decode($row->idiomas, true) : null,
+                'idioma_otro' => $row->idioma_otro ?? null,
+                'independiente_idioma' => (bool) ($row->independiente_idioma ?? false),
+                'tradumaquetado' => (bool) ($row->tradumaquetado ?? false),
+                'tradumaquetado_parcial' => (bool) ($row->tradumaquetado_parcial ?? false),
+                'tradumaquetado_parcial_notas' => $row->tradumaquetado_parcial_notas ?? null,
                 'created_at' => $row->created_at,
                 'updated_at' => $row->updated_at,
+            ])->all();
+    }
+
+    private function fetchJuegoPropietarioFundas(?Carbon $since): array
+    {
+        return JuegoPropietarioFunda::query()
+            ->when($since, fn ($q) => $q->where('updated_at', '>', $since))
+            ->get()
+            ->map(fn ($f) => [
+                'id' => $f->id,
+                'juego_propietario_id' => $f->juego_propietario_id,
+                'tipo_funda_id' => $f->tipo_funda_id,
+                'cantidad_cartas' => $f->cantidad_cartas,
+                'enfundadas' => (bool) $f->enfundadas,
+                'created_at' => $f->created_at?->toIso8601String(),
+                'updated_at' => $f->updated_at?->toIso8601String(),
             ])->all();
     }
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -305,12 +306,44 @@ class SyncService {
         final rows = await db.query('juego_propietario',
             where: 'local_id = ?', whereArgs: [localId], limit: 1);
         if (rows.isNotEmpty) {
-          final j = rows.first['juego_server_id'] as int?;
-          final p = rows.first['propietario_server_id'] as int?;
-          final u = rows.first['ubicacion_server_id'] as int?;
+          final r = rows.first;
+          final j = r['juego_server_id'] as int?;
+          final p = r['propietario_server_id'] as int?;
+          final u = r['ubicacion_server_id'] as int?;
           if (j != null) merged['juego_id'] = j;
           if (p != null) merged['propietario_id'] = p;
           if (u != null) merged['ubicacion_id'] = u;
+          merged['es_principal'] = ((r['es_principal'] as int?) ?? 0) == 1;
+          merged['estado'] = r['estado'];
+          merged['no_enfundar'] = ((r['no_enfundar'] as int?) ?? 0) == 1;
+          final idiomasRaw = r['idiomas'] as String?;
+          if (idiomasRaw != null && idiomasRaw.isNotEmpty) {
+            try {
+              merged['idiomas'] = jsonDecode(idiomasRaw);
+            } catch (_) {}
+          }
+          merged['idioma_otro'] = r['idioma_otro'];
+          merged['independiente_idioma'] =
+              ((r['independiente_idioma'] as int?) ?? 0) == 1;
+          merged['tradumaquetado'] =
+              ((r['tradumaquetado'] as int?) ?? 0) == 1;
+          merged['tradumaquetado_parcial'] =
+              ((r['tradumaquetado_parcial'] as int?) ?? 0) == 1;
+          merged['tradumaquetado_parcial_notas'] =
+              r['tradumaquetado_parcial_notas'];
+        }
+        break;
+      case 'juego_propietario_fundas':
+        final rows = await db.query('juego_propietario_fundas',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final r = rows.first;
+          final jp = r['juego_propietario_server_id'] as int?;
+          final t = r['tipo_funda_server_id'] as int?;
+          if (jp != null) merged['juego_propietario_id'] = jp;
+          if (t != null) merged['tipo_funda_id'] = t;
+          merged['cantidad_cartas'] = r['cantidad_cartas'];
+          merged['enfundadas'] = ((r['enfundadas'] as int?) ?? 0) == 1;
         }
         break;
       case 'juego_categoria':
@@ -363,6 +396,16 @@ class SyncService {
             whereArgs: [j, t, localId],
             limit: 1);
         return dup.isNotEmpty;
+      case 'juego_propietario_fundas':
+        final jp = row['juego_propietario_local_id'] as int?;
+        final tf = row['tipo_funda_local_id'] as int?;
+        if (jp == null || tf == null) return false;
+        final dup = await db.query('juego_propietario_fundas',
+            where: 'juego_propietario_local_id = ? AND tipo_funda_local_id = ? '
+                'AND local_id != ? AND server_id IS NOT NULL',
+            whereArgs: [jp, tf, localId],
+            limit: 1);
+        return dup.isNotEmpty;
       default:
         return false;
     }
@@ -376,8 +419,9 @@ class SyncService {
     final db = await _dbService.database;
     final fkMappings = <String, List<String>>{
       'juegos': ['juego_fundas.juego', 'juego_propietario.juego', 'juego_categoria.juego', 'juegos.juego_base'],
-      'tipos_funda': ['juego_fundas.tipo_funda'],
+      'tipos_funda': ['juego_fundas.tipo_funda', 'juego_propietario_fundas.tipo_funda'],
       'propietarios': ['juego_propietario.propietario'],
+      'juego_propietario': ['juego_propietario_fundas.juego_propietario'],
       'categorias': ['juegos.categoria', 'juego_categoria.categoria'],
       'ubicaciones': ['juegos.ubicacion', 'juego_propietario.ubicacion'],
       'habitaciones': ['muebles.habitacion'],
@@ -466,6 +510,11 @@ class SyncService {
     for (final r in jp) {
       await _juegos.upsertJuegoPropietarioFromServer(r);
     }
+    final jpf =
+        (tables['juego_propietario_fundas'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    for (final r in jpf) {
+      await _juegos.upsertJuegoPropietarioFundaFromServer(r);
+    }
     final jc =
         (tables['juego_categoria'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     for (final r in jc) {
@@ -495,6 +544,7 @@ class SyncService {
         case 'juegos':
         case 'juego_fundas':
         case 'juego_propietario':
+        case 'juego_propietario_fundas':
         case 'juego_categoria':
           await _juegos.deleteByServerIds(table, ids);
           break;
