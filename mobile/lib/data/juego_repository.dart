@@ -107,6 +107,53 @@ class JuegoRepository {
     return list.firstOrNull;
   }
 
+  /// Returns extended per-owner copy data for a game.
+  Future<Map<int, CopiaPropietarioDraft>> getCopiaData(int juegoLocalId) async {
+    final db = await _dbService.database;
+    final rows = await db.query('juego_propietario',
+        where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
+    final result = <int, CopiaPropietarioDraft>{};
+    for (final r in rows) {
+      final propLocal = r['propietario_local_id'] as int?;
+      if (propLocal == null) continue;
+      final jpLocalId = r['local_id'] as int;
+      final fundaRows = await db.query('juego_propietario_fundas',
+          where: 'juego_propietario_local_id = ?', whereArgs: [jpLocalId]);
+      final fundas = <JuegoFundaDraft>[];
+      for (final fr in fundaRows) {
+        final tipoLocal = await _tipoFundaLocalIdForRow(db, fr);
+        if (tipoLocal == null) continue;
+        fundas.add(JuegoFundaDraft(
+          tipoFundaLocalId: tipoLocal,
+          cantidadCartas: fr['cantidad_cartas'] as int? ?? 0,
+          enfundadas: (fr['enfundadas'] as int?) == 1,
+        ));
+      }
+      var idiomas = <String>[];
+      final idiomasRaw = r['idiomas'] as String?;
+      if (idiomasRaw != null && idiomasRaw.isNotEmpty) {
+        try {
+          idiomas = (jsonDecode(idiomasRaw) as List).cast<String>();
+        } catch (_) {}
+      }
+      result[propLocal] = CopiaPropietarioDraft(
+        propietarioLocalId: propLocal,
+        ubicacionLocalId: r['ubicacion_local_id'] as int?,
+        esPrincipal: (r['es_principal'] as int?) == 1,
+        estado: r['estado'] as String?,
+        noEnfundar: (r['no_enfundar'] as int?) == 1,
+        idiomas: idiomas,
+        idiomaOtro: r['idioma_otro'] as String?,
+        independienteIdioma: (r['independiente_idioma'] as int?) == 1,
+        tradumaquetado: (r['tradumaquetado'] as int?) == 1,
+        tradumaquetadoParcial: (r['tradumaquetado_parcial'] as int?) == 1,
+        tradumaquetadoParcialNotas: r['tradumaquetado_parcial_notas'] as String?,
+        fundas: fundas,
+      );
+    }
+    return result;
+  }
+
   /// Returns a map of propietario_local_id -> ubicacion_local_id for a game's pivot.
   Future<Map<int, int?>> getPropietarioUbicaciones(int juegoLocalId) async {
     final db = await _dbService.database;
@@ -175,6 +222,26 @@ class JuegoRepository {
     };
   }
 
+  Future<bool> existsWithNombre(String nombre, {int? excludeLocalId}) async {
+    final db = await _dbService.database;
+    final args = <dynamic>[nombre.trim()];
+    var excludeSql = '';
+    if (excludeLocalId != null) {
+      excludeSql = 'AND local_id != ?';
+      args.add(excludeLocalId);
+    }
+    final rows = await db.rawQuery(
+      '''
+      SELECT local_id FROM juegos
+      WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+      $excludeSql
+      LIMIT 1
+      ''',
+      args,
+    );
+    return rows.isNotEmpty;
+  }
+
   // ---------- escritura ----------
 
   /// Crea o actualiza un juego completo (con propietarios y fundas).
@@ -185,10 +252,42 @@ class JuegoRepository {
     required List<JuegoFundaDraft> fundas,
     List<int> categoriaLocalIds = const [],
     Map<int, int?> propietarioUbicaciones = const {},
+    Map<int, CopiaPropietarioDraft>? copiasData,
   }) async {
     final db = await _dbService.database;
 
-    final isCreate = juego.localId == null;
+    var isCreate = juego.localId == null;
+    int? reuseLocalId;
+
+    if (isCreate && juego.bggId != null) {
+      final bggDup = await db.query(
+        'juegos',
+        where: 'bgg_id = ?',
+        whereArgs: [juego.bggId],
+        limit: 1,
+      );
+      if (bggDup.isNotEmpty) {
+        throw StateError('Ya existe un juego con este ID de BGG en la ludoteca.');
+      }
+    }
+
+    if (isCreate) {
+      final pendingDup = await db.rawQuery(
+        '''
+        SELECT local_id FROM juegos
+        WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+          AND dirty = 1
+          AND pending_action = 'create'
+        LIMIT 1
+        ''',
+        [juego.nombre],
+      );
+      if (pendingDup.isNotEmpty) {
+        reuseLocalId = pendingDup.first['local_id'] as int;
+        isCreate = false;
+      }
+    }
+
     final values = await _serializeJuego(juego);
 
     int localId;
@@ -203,7 +302,7 @@ class JuegoRepository {
         payload: _payloadForServer(values),
       );
     } else {
-      localId = juego.localId!;
+      localId = reuseLocalId ?? juego.localId!;
       values['dirty'] = 1;
       values['pending_action'] = 'update';
       await db.update('juegos', values,
@@ -212,31 +311,60 @@ class JuegoRepository {
       final existing = await db
           .query('juegos', where: 'local_id = ?', whereArgs: [localId], limit: 1);
       final baseUpdatedAt = existing.first['updated_at'] as String?;
+      final serverId = existing.first['server_id'] as int? ?? juego.serverId;
 
-      if (juego.serverId != null) {
+      if (serverId != null) {
         await _outbox.enqueue(
           table: 'juegos',
           action: SyncAction.update,
           localId: localId,
-          serverId: juego.serverId,
+          serverId: serverId,
           payload: _payloadForServer(values),
           baseUpdatedAt: baseUpdatedAt,
         );
       } else {
         // a\u00fan no se ha sincronizado el create; basta con que el create
         // pendiente lleve el payload m\u00e1s reciente.
+        await _outbox.removeForLocalRow('juegos', localId);
         await _outbox.enqueue(
           table: 'juegos',
-          action: SyncAction.update,
+          action: SyncAction.create,
           localId: localId,
           payload: _payloadForServer(values),
         );
       }
     }
 
-    await _syncPropietarios(localId, juego.serverId, propietarioLocalIds, propietarioUbicaciones);
-    await _syncFundas(localId, juego.serverId, fundas);
-    await _syncCategorias(localId, juego.serverId, categoriaLocalIds);
+    final savedRow = await db.query(
+      'juegos',
+      where: 'local_id = ?',
+      whereArgs: [localId],
+      limit: 1,
+    );
+    final effectiveServerId =
+        savedRow.isEmpty ? juego.serverId : savedRow.first['server_id'] as int?;
+
+    final effectiveCopias = <int, CopiaPropietarioDraft>{};
+    if (copiasData != null && copiasData.isNotEmpty) {
+      effectiveCopias.addAll(copiasData);
+    } else {
+      for (final propId in propietarioLocalIds) {
+        effectiveCopias[propId] = CopiaPropietarioDraft(
+          propietarioLocalId: propId,
+          ubicacionLocalId: propietarioUbicaciones[propId],
+        );
+      }
+    }
+
+    await _syncPropietarios(
+      localId,
+      effectiveServerId,
+      propietarioLocalIds,
+      effectiveCopias,
+      variasCopias: juego.variasCopias,
+    );
+    await _syncFundas(localId, effectiveServerId, fundas);
+    await _syncCategorias(localId, effectiveServerId, categoriaLocalIds);
 
     return localId;
   }
@@ -323,9 +451,15 @@ class JuegoRepository {
         where: 'local_id = ?', whereArgs: [localId], limit: 1);
     if (existing.isEmpty) return;
     final serverId = existing.first['server_id'] as int?;
+    await db.delete('juego_propietario_fundas',
+        where:
+            'juego_propietario_local_id IN (SELECT local_id FROM juego_propietario WHERE juego_local_id = ?)',
+        whereArgs: [localId]);
     await db.delete('juego_propietario',
         where: 'juego_local_id = ?', whereArgs: [localId]);
     await db.delete('juego_fundas',
+        where: 'juego_local_id = ?', whereArgs: [localId]);
+    await db.delete('juego_categoria',
         where: 'juego_local_id = ?', whereArgs: [localId]);
     await db.delete('juegos', where: 'local_id = ?', whereArgs: [localId]);
     if (serverId != null) {
@@ -335,6 +469,8 @@ class JuegoRepository {
         localId: localId,
         serverId: serverId,
       );
+    } else {
+      await _outbox.removeForLocalRow('juegos', localId);
     }
   }
 
@@ -406,6 +542,20 @@ class JuegoRepository {
       await db.insert('juegos', values,
           conflictAlgorithm: ConflictAlgorithm.replace);
     } else {
+      final isDirty = ((existing.first['dirty'] as int?) ?? 0) == 1;
+      if (isDirty) {
+        // Only update non-conflicting fields; preserve local changes
+        // that haven't been pushed yet.
+        values.remove('estado');
+        values.remove('precio');
+        values.remove('ubicacion_local_id');
+        values.remove('ubicacion_server_id');
+        values.remove('en_caja_base');
+        values.remove('categoria_local_id');
+        values.remove('categoria_server_id');
+        values.remove('dirty');
+        values.remove('pending_action');
+      }
       await db.update('juegos', values,
           where: 'server_id = ?', whereArgs: [serverId]);
     }
@@ -490,6 +640,7 @@ class JuegoRepository {
     final juegoLocalId = await _localIdFor(db, 'juegos', data['juego_id']);
     final propLocalId = await _localIdFor(db, 'propietarios', data['propietario_id']);
     final ubicLocalId = await _localIdFor(db, 'ubicaciones', data['ubicacion_id']);
+    final idiomas = data['idiomas'];
     final values = {
       'server_id': serverId,
       'juego_server_id': data['juego_id'],
@@ -498,6 +649,15 @@ class JuegoRepository {
       'propietario_local_id': propLocalId,
       'ubicacion_server_id': data['ubicacion_id'],
       'ubicacion_local_id': ubicLocalId,
+      'es_principal': (data['es_principal'] == true) ? 1 : 0,
+      'estado': data['estado'],
+      'no_enfundar': (data['no_enfundar'] == true) ? 1 : 0,
+      'idiomas': idiomas is List ? jsonEncode(idiomas) : null,
+      'idioma_otro': data['idioma_otro'],
+      'independiente_idioma': (data['independiente_idioma'] == true) ? 1 : 0,
+      'tradumaquetado': (data['tradumaquetado'] == true) ? 1 : 0,
+      'tradumaquetado_parcial': (data['tradumaquetado_parcial'] == true) ? 1 : 0,
+      'tradumaquetado_parcial_notas': data['tradumaquetado_parcial_notas'],
       'updated_at': data['updated_at'],
       'dirty': 0,
       'pending_action': null,
@@ -526,6 +686,66 @@ class JuegoRepository {
     }
 
     await db.insert('juego_propietario', values,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> upsertJuegoPropietarioFundaFromServer(
+      Map<String, dynamic> data) async {
+    final db = await _dbService.database;
+    final serverId = data['id'] as int;
+    final jpLocalId =
+        await _localIdFor(db, 'juego_propietario', data['juego_propietario_id']);
+    final tipoLocalId =
+        await _localIdFor(db, 'tipos_funda', data['tipo_funda_id']);
+    final values = {
+      'server_id': serverId,
+      'juego_propietario_server_id': data['juego_propietario_id'],
+      'juego_propietario_local_id': jpLocalId,
+      'tipo_funda_server_id': data['tipo_funda_id'],
+      'tipo_funda_local_id': tipoLocalId,
+      'cantidad_cartas': data['cantidad_cartas'],
+      'enfundadas': (data['enfundadas'] == true) ? 1 : 0,
+      'updated_at': data['updated_at'],
+      'dirty': 0,
+      'pending_action': null,
+    };
+
+    Map<String, dynamic>? targetRow;
+    int? targetLocalId;
+
+    final byServer = await db.query('juego_propietario_fundas',
+        where: 'server_id = ?', whereArgs: [serverId], limit: 1);
+    if (byServer.isNotEmpty) {
+      targetRow = byServer.first;
+      targetLocalId = targetRow['local_id'] as int;
+    } else if (jpLocalId != null && tipoLocalId != null) {
+      final byJpTipo = await db.query(
+        'juego_propietario_fundas',
+        where: 'juego_propietario_local_id = ? AND tipo_funda_local_id = ?',
+        whereArgs: [jpLocalId, tipoLocalId],
+        orderBy: 'local_id ASC',
+      );
+      if (byJpTipo.isNotEmpty) {
+        targetRow = byJpTipo.first;
+        targetLocalId = targetRow['local_id'] as int;
+        for (var i = 1; i < byJpTipo.length; i++) {
+          await db.delete('juego_propietario_fundas',
+              where: 'local_id = ?', whereArgs: [byJpTipo[i]['local_id']]);
+        }
+      }
+    }
+
+    if (targetLocalId != null && targetRow != null) {
+      final hadNoServerId = (targetRow['server_id'] as int?) == null;
+      await db.update('juego_propietario_fundas', values,
+          where: 'local_id = ?', whereArgs: [targetLocalId]);
+      if (hadNoServerId) {
+        await _outbox.removeForLocalRow('juego_propietario_fundas', targetLocalId);
+      }
+      return;
+    }
+
+    await db.insert('juego_propietario_fundas', values,
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -730,6 +950,9 @@ class JuegoRepository {
           list.add(cat);
         }
       }
+    }
+    for (final list in categoriasByJuego.values) {
+      list.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
     }
 
     final juegosByServerId = <int, Juego>{};
@@ -985,7 +1208,12 @@ class JuegoRepository {
   }
 
   Future<void> _syncPropietarios(
-      int juegoLocalId, int? juegoServerId, List<int> propLocalIds, Map<int, int?> propUbicaciones) async {
+    int juegoLocalId,
+    int? juegoServerId,
+    List<int> propLocalIds,
+    Map<int, CopiaPropietarioDraft> copiasData, {
+    required bool variasCopias,
+  }) async {
     final db = await _dbService.database;
     final existing = await db.query('juego_propietario',
         where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
@@ -995,10 +1223,31 @@ class JuegoRepository {
     };
     final desired = propLocalIds.toSet();
 
-    // remover los que sobran
+    Future<void> deletePivotFundas(int jpLocalId) async {
+      final fundaRows = await db.query('juego_propietario_fundas',
+          where: 'juego_propietario_local_id = ?', whereArgs: [jpLocalId]);
+      for (final fr in fundaRows) {
+        final localId = fr['local_id'] as int;
+        final serverId = fr['server_id'] as int?;
+        await db.delete('juego_propietario_fundas',
+            where: 'local_id = ?', whereArgs: [localId]);
+        if (serverId != null) {
+          await _outbox.enqueue(
+            table: 'juego_propietario_fundas',
+            action: SyncAction.delete,
+            localId: localId,
+            serverId: serverId,
+          );
+        } else {
+          await _outbox.removeForLocalRow('juego_propietario_fundas', localId);
+        }
+      }
+    }
+
     for (final entry in existingByPropLocal.entries) {
       if (!desired.contains(entry.key)) {
         final localId = entry.value['local_id'] as int;
+        await deletePivotFundas(localId);
         final serverId = entry.value['server_id'] as int?;
         await db.delete('juego_propietario',
             where: 'local_id = ?', whereArgs: [localId]);
@@ -1015,32 +1264,34 @@ class JuegoRepository {
       }
     }
 
-    // añadir los nuevos o actualizar ubicacion
     for (final propLocalId in propLocalIds) {
+      final copia = copiasData[propLocalId] ??
+          CopiaPropietarioDraft(propietarioLocalId: propLocalId);
       final propRow = await db.query('propietarios',
           where: 'local_id = ?', whereArgs: [propLocalId], limit: 1);
       if (propRow.isEmpty) continue;
       final propServerId = propRow.first['server_id'] as int?;
 
-      final ubicLocalId = propUbicaciones[propLocalId];
       int? ubicServerId;
-      if (ubicLocalId != null) {
+      if (copia.ubicacionLocalId != null) {
         final ubicRow = await db.query('ubicaciones',
-            where: 'local_id = ?', whereArgs: [ubicLocalId], limit: 1);
+            where: 'local_id = ?', whereArgs: [copia.ubicacionLocalId], limit: 1);
         if (ubicRow.isNotEmpty) {
           ubicServerId = ubicRow.first['server_id'] as int?;
         }
       }
 
+      final rowValues = _copiaDraftToPivotRow(
+        copia,
+        ubicServerId: ubicServerId,
+      );
+
       if (existingByPropLocal.containsKey(propLocalId)) {
-        // Update ubicacion if changed
         final existingRow = existingByPropLocal[propLocalId]!;
-        final existingUbicLocal = existingRow['ubicacion_local_id'] as int?;
-        if (existingUbicLocal != ubicLocalId) {
-          final localId = existingRow['local_id'] as int;
+        final localId = existingRow['local_id'] as int;
+        if (_pivotRowChanged(existingRow, rowValues)) {
           await db.update('juego_propietario', {
-            'ubicacion_local_id': ubicLocalId,
-            'ubicacion_server_id': ubicServerId,
+            ...rowValues,
             'dirty': 1,
             'pending_action': 'update',
           }, where: 'local_id = ?', whereArgs: [localId]);
@@ -1051,13 +1302,22 @@ class JuegoRepository {
               action: SyncAction.update,
               localId: localId,
               serverId: sid,
-              payload: {
-                'juego_id': juegoServerId,
-                'propietario_id': propServerId,
-                'ubicacion_id': ubicServerId,
-              },
+              payload: await _propietarioPivotPayload(
+                db,
+                {...existingRow, ...rowValues},
+                juegoServerId: juegoServerId,
+              ),
             );
           }
+        }
+        if (variasCopias) {
+          await _syncPropietarioFundas(
+            localId,
+            existingRow['server_id'] as int?,
+            copia.fundas,
+          );
+        } else {
+          await deletePivotFundas(localId);
         }
         continue;
       }
@@ -1067,8 +1327,7 @@ class JuegoRepository {
         'juego_local_id': juegoLocalId,
         'propietario_server_id': propServerId,
         'propietario_local_id': propLocalId,
-        'ubicacion_server_id': ubicServerId,
-        'ubicacion_local_id': ubicLocalId,
+        ...rowValues,
         'dirty': 1,
         'pending_action': 'create',
       });
@@ -1076,10 +1335,190 @@ class JuegoRepository {
         table: 'juego_propietario',
         action: SyncAction.create,
         localId: newLocalId,
+        payload: await _propietarioPivotPayload(
+          db,
+          {
+            'juego_server_id': juegoServerId,
+            'propietario_server_id': propServerId,
+            'ubicacion_server_id': ubicServerId,
+            ...rowValues,
+          },
+          juegoServerId: juegoServerId,
+        ),
+      );
+      if (variasCopias) {
+        await _syncPropietarioFundas(newLocalId, null, copia.fundas);
+      }
+    }
+  }
+
+  Map<String, dynamic> _copiaDraftToPivotRow(
+    CopiaPropietarioDraft copia, {
+    int? ubicServerId,
+  }) {
+    return {
+      'ubicacion_local_id': copia.ubicacionLocalId,
+      'ubicacion_server_id': ubicServerId,
+      'es_principal': copia.esPrincipal ? 1 : 0,
+      'estado': copia.estado,
+      'no_enfundar': copia.noEnfundar ? 1 : 0,
+      'idiomas':
+          copia.idiomas.isEmpty ? null : jsonEncode(copia.idiomas),
+      'idioma_otro': copia.idiomaOtro,
+      'independiente_idioma': copia.independienteIdioma ? 1 : 0,
+      'tradumaquetado': copia.tradumaquetado ? 1 : 0,
+      'tradumaquetado_parcial': copia.tradumaquetadoParcial ? 1 : 0,
+      'tradumaquetado_parcial_notas': copia.tradumaquetadoParcialNotas,
+    };
+  }
+
+  bool _pivotRowChanged(
+      Map<String, dynamic> existing, Map<String, dynamic> desired) {
+    const keys = [
+      'ubicacion_local_id',
+      'es_principal',
+      'estado',
+      'no_enfundar',
+      'idiomas',
+      'idioma_otro',
+      'independiente_idioma',
+      'tradumaquetado',
+      'tradumaquetado_parcial',
+      'tradumaquetado_parcial_notas',
+    ];
+    for (final key in keys) {
+      if (existing[key] != desired[key]) return true;
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>> _propietarioPivotPayload(
+    Database db,
+    Map<String, dynamic> row, {
+    int? juegoServerId,
+  }) async {
+    List<dynamic>? idiomasForServer;
+    final idiomasRaw = row['idiomas'] as String?;
+    if (idiomasRaw != null && idiomasRaw.isNotEmpty) {
+      try {
+        idiomasForServer = jsonDecode(idiomasRaw) as List<dynamic>;
+      } catch (_) {}
+    }
+    return {
+      'juego_id': juegoServerId ?? row['juego_server_id'],
+      'propietario_id': row['propietario_server_id'],
+      'ubicacion_id': row['ubicacion_server_id'],
+      'es_principal': (row['es_principal'] as int?) == 1,
+      'estado': row['estado'],
+      'no_enfundar': (row['no_enfundar'] as int?) == 1,
+      'idiomas': idiomasForServer,
+      'idioma_otro': row['idioma_otro'],
+      'independiente_idioma': (row['independiente_idioma'] as int?) == 1,
+      'tradumaquetado': (row['tradumaquetado'] as int?) == 1,
+      'tradumaquetado_parcial': (row['tradumaquetado_parcial'] as int?) == 1,
+      'tradumaquetado_parcial_notas': row['tradumaquetado_parcial_notas'],
+    };
+  }
+
+  Future<void> _syncPropietarioFundas(
+    int jpLocalId,
+    int? jpServerId,
+    List<JuegoFundaDraft> drafts,
+  ) async {
+    final db = await _dbService.database;
+    var existing = await db.query('juego_propietario_fundas',
+        where: 'juego_propietario_local_id = ?', whereArgs: [jpLocalId]);
+
+    final desiredByTipoLocal = {
+      for (final d in drafts) d.tipoFundaLocalId: d,
+    };
+
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      final shouldKeep =
+          tipoLocal != null && desiredByTipoLocal.containsKey(tipoLocal);
+      if (shouldKeep) continue;
+      final localId = r['local_id'] as int;
+      final serverId = r['server_id'] as int?;
+      await db.delete('juego_propietario_fundas',
+          where: 'local_id = ?', whereArgs: [localId]);
+      if (serverId != null) {
+        await _outbox.enqueue(
+          table: 'juego_propietario_fundas',
+          action: SyncAction.delete,
+          localId: localId,
+          serverId: serverId,
+        );
+      } else {
+        await _outbox.removeForLocalRow('juego_propietario_fundas', localId);
+      }
+    }
+
+    existing = await db.query('juego_propietario_fundas',
+        where: 'juego_propietario_local_id = ?', whereArgs: [jpLocalId]);
+    final existingByTipoLocal = <int, Map<String, dynamic>>{};
+    for (final r in existing) {
+      final tipoLocal = await _tipoFundaLocalIdForRow(db, r);
+      if (tipoLocal != null) existingByTipoLocal[tipoLocal] = r;
+    }
+
+    for (final draft in drafts) {
+      final tipoRow = await db.query('tipos_funda',
+          where: 'local_id = ?', whereArgs: [draft.tipoFundaLocalId], limit: 1);
+      if (tipoRow.isEmpty) continue;
+      final tipoServerId = tipoRow.first['server_id'] as int?;
+
+      if (existingByTipoLocal.containsKey(draft.tipoFundaLocalId)) {
+        final existingRow = existingByTipoLocal[draft.tipoFundaLocalId]!;
+        final localId = existingRow['local_id'] as int;
+        final changed = (existingRow['cantidad_cartas'] as int?) !=
+                draft.cantidadCartas ||
+            ((existingRow['enfundadas'] as int?) == 1) != draft.enfundadas;
+        if (changed) {
+          await db.update('juego_propietario_fundas', {
+            'cantidad_cartas': draft.cantidadCartas,
+            'enfundadas': draft.enfundadas ? 1 : 0,
+            'dirty': 1,
+            'pending_action': 'update',
+          }, where: 'local_id = ?', whereArgs: [localId]);
+          final sid = existingRow['server_id'] as int?;
+          if (sid != null) {
+            await _outbox.enqueue(
+              table: 'juego_propietario_fundas',
+              action: SyncAction.update,
+              localId: localId,
+              serverId: sid,
+              payload: {
+                'juego_propietario_id': jpServerId,
+                'tipo_funda_id': tipoServerId,
+                'cantidad_cartas': draft.cantidadCartas,
+                'enfundadas': draft.enfundadas,
+              },
+            );
+          }
+        }
+        continue;
+      }
+
+      final newLocalId = await db.insert('juego_propietario_fundas', {
+        'juego_propietario_server_id': jpServerId,
+        'juego_propietario_local_id': jpLocalId,
+        'tipo_funda_server_id': tipoServerId,
+        'tipo_funda_local_id': draft.tipoFundaLocalId,
+        'cantidad_cartas': draft.cantidadCartas,
+        'enfundadas': draft.enfundadas ? 1 : 0,
+        'dirty': 1,
+        'pending_action': 'create',
+      });
+      await _outbox.enqueue(
+        table: 'juego_propietario_fundas',
+        action: SyncAction.create,
+        localId: newLocalId,
         payload: {
-          'juego_id': juegoServerId,
-          'propietario_id': propServerId,
-          'ubicacion_id': ubicServerId,
+          'juego_propietario_id': jpServerId,
+          'tipo_funda_id': tipoServerId,
+          'cantidad_cartas': draft.cantidadCartas,
+          'enfundadas': draft.enfundadas,
         },
       );
     }
@@ -1101,25 +1540,46 @@ class JuegoRepository {
         orphanRows.add(r);
       }
     }
+
+    // Include legacy categoria_id when there is no pivot row yet (common for
+    // imports BGG or rows created by the local migration before sync).
+    final juegoRows = await db.query('juegos',
+        where: 'local_id = ?', whereArgs: [juegoLocalId], limit: 1);
+    if (juegoRows.isNotEmpty) {
+      final legacyCatLocal = juegoRows.first['categoria_local_id'] as int?;
+      if (legacyCatLocal != null &&
+          !existingByCatLocal.containsKey(legacyCatLocal)) {
+        existingByCatLocal[legacyCatLocal] = {
+          'local_id': null,
+          'server_id': null,
+          'categoria_local_id': legacyCatLocal,
+          'categoria_server_id': juegoRows.first['categoria_server_id'],
+          'juego_server_id':
+              juegoRows.first['server_id'] ?? juegoServerId,
+          'juego_local_id': juegoLocalId,
+          '_legacy_only': 1,
+        };
+      }
+    }
+
     final desired = catLocalIds.toSet();
 
     // Remove categories no longer desired
     for (final entry in existingByCatLocal.entries) {
       if (!desired.contains(entry.key)) {
-        final localId = entry.value['local_id'] as int;
-        final serverId = entry.value['server_id'] as int?;
-        await db.delete('juego_categoria',
-            where: 'local_id = ?', whereArgs: [localId]);
-        if (serverId != null) {
-          await _outbox.enqueue(
-            table: 'juego_categoria',
-            action: SyncAction.delete,
-            localId: localId,
-            serverId: serverId,
-          );
-        } else {
-          await _outbox.removeForLocalRow('juego_categoria', localId);
+        final row = entry.value;
+        final legacyOnly = (row['_legacy_only'] as int?) == 1;
+        final localId = row['local_id'] as int?;
+        if (!legacyOnly && localId != null) {
+          await db.delete('juego_categoria',
+              where: 'local_id = ?', whereArgs: [localId]);
         }
+        await _enqueueCategoriaPivotDelete(
+          db,
+          row,
+          localId: localId,
+          juegoServerId: juegoServerId,
+        );
       }
     }
 
@@ -1156,7 +1616,12 @@ class JuegoRepository {
             serverId: serverId,
           );
         } else {
-          await _outbox.removeForLocalRow('juego_categoria', localId);
+          await _enqueueCategoriaPivotDelete(
+            db,
+            r,
+            localId: localId,
+            juegoServerId: juegoServerId,
+          );
         }
       }
     }
@@ -1185,6 +1650,65 @@ class JuegoRepository {
           'categoria_id': catServerId,
         },
       );
+    }
+  }
+
+  /// Encola el borrado de una fila pivot juego_categoria en el servidor.
+  /// Si no conocemos el server_id del pivot, usa juego_id + categoria_id.
+  Future<void> _enqueueCategoriaPivotDelete(
+    Database db,
+    Map<String, dynamic> row, {
+    int? localId,
+    int? juegoServerId,
+  }) async {
+    final pivotServerId = row['server_id'] as int?;
+    if (pivotServerId != null) {
+      await _outbox.enqueue(
+        table: 'juego_categoria',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: pivotServerId,
+      );
+      return;
+    }
+
+    var juegoSid = row['juego_server_id'] as int? ?? juegoServerId;
+    var catSid = row['categoria_server_id'] as int?;
+
+    if (catSid == null) {
+      final catLocal = row['categoria_local_id'] as int?;
+      if (catLocal != null) {
+        final catRow = await db.query('categorias',
+            where: 'local_id = ?', whereArgs: [catLocal], limit: 1);
+        if (catRow.isNotEmpty) {
+          catSid = catRow.first['server_id'] as int?;
+        }
+      }
+    }
+
+    if (juegoSid == null) {
+      final juegoLocal = row['juego_local_id'] as int?;
+      if (juegoLocal != null) {
+        final jRow = await db.query('juegos',
+            where: 'local_id = ?', whereArgs: [juegoLocal], limit: 1);
+        if (jRow.isNotEmpty) {
+          juegoSid = jRow.first['server_id'] as int?;
+        }
+      }
+    }
+
+    if (juegoSid != null && catSid != null) {
+      await _outbox.enqueue(
+        table: 'juego_categoria',
+        action: SyncAction.delete,
+        localId: localId,
+        payload: {
+          'juego_id': juegoSid,
+          'categoria_id': catSid,
+        },
+      );
+    } else if (localId != null) {
+      await _outbox.removeForLocalRow('juego_categoria', localId);
     }
   }
 
@@ -1350,4 +1874,65 @@ class JuegoFundaDraft {
     required this.cantidadCartas,
     required this.enfundadas,
   });
+}
+
+class CopiaPropietarioDraft {
+  final int propietarioLocalId;
+  final int? ubicacionLocalId;
+  final bool esPrincipal;
+  final String? estado;
+  final bool noEnfundar;
+  final List<String> idiomas;
+  final String? idiomaOtro;
+  final bool independienteIdioma;
+  final bool tradumaquetado;
+  final bool tradumaquetadoParcial;
+  final String? tradumaquetadoParcialNotas;
+  final List<JuegoFundaDraft> fundas;
+
+  CopiaPropietarioDraft({
+    required this.propietarioLocalId,
+    this.ubicacionLocalId,
+    this.esPrincipal = false,
+    this.estado,
+    this.noEnfundar = false,
+    this.idiomas = const [],
+    this.idiomaOtro,
+    this.independienteIdioma = false,
+    this.tradumaquetado = false,
+    this.tradumaquetadoParcial = false,
+    this.tradumaquetadoParcialNotas,
+    this.fundas = const [],
+  });
+
+  CopiaPropietarioDraft copyWith({
+    int? ubicacionLocalId,
+    bool? esPrincipal,
+    String? estado,
+    bool? noEnfundar,
+    List<String>? idiomas,
+    String? idiomaOtro,
+    bool? independienteIdioma,
+    bool? tradumaquetado,
+    bool? tradumaquetadoParcial,
+    String? tradumaquetadoParcialNotas,
+    List<JuegoFundaDraft>? fundas,
+  }) {
+    return CopiaPropietarioDraft(
+      propietarioLocalId: propietarioLocalId,
+      ubicacionLocalId: ubicacionLocalId ?? this.ubicacionLocalId,
+      esPrincipal: esPrincipal ?? this.esPrincipal,
+      estado: estado ?? this.estado,
+      noEnfundar: noEnfundar ?? this.noEnfundar,
+      idiomas: idiomas ?? this.idiomas,
+      idiomaOtro: idiomaOtro ?? this.idiomaOtro,
+      independienteIdioma: independienteIdioma ?? this.independienteIdioma,
+      tradumaquetado: tradumaquetado ?? this.tradumaquetado,
+      tradumaquetadoParcial:
+          tradumaquetadoParcial ?? this.tradumaquetadoParcial,
+      tradumaquetadoParcialNotas:
+          tradumaquetadoParcialNotas ?? this.tradumaquetadoParcialNotas,
+      fundas: fundas ?? this.fundas,
+    );
+  }
 }

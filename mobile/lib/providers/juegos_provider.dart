@@ -153,6 +153,7 @@ class JuegosProvider extends ChangeNotifier {
     required List<JuegoFundaDraft> fundas,
     List<int> categoriaLocalIds = const [],
     Map<int, int?> propietarioUbicaciones = const {},
+    Map<int, CopiaPropietarioDraft>? copiasData,
   }) async {
     final localId = await _juegos.save(
       juego,
@@ -160,6 +161,7 @@ class JuegosProvider extends ChangeNotifier {
       fundas: fundas,
       categoriaLocalIds: categoriaLocalIds,
       propietarioUbicaciones: propietarioUbicaciones,
+      copiasData: copiasData,
     );
     unawaited(SyncService().syncAll());
     await fetchJuegos(page: _currentPage);

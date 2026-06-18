@@ -13,11 +13,16 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _passwordConfirmController = TextEditingController();
+  final _bggController = TextEditingController();
   final _serverController = TextEditingController();
   bool _obscurePassword = true;
+  bool _obscurePasswordConfirm = true;
   bool _showServerField = false;
+  bool _isRegisterMode = false;
 
   @override
   void initState() {
@@ -27,8 +32,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _passwordConfirmController.dispose();
+    _bggController.dispose();
     _serverController.dispose();
     super.dispose();
   }
@@ -40,22 +48,34 @@ class _LoginScreenState extends State<LoginScreen> {
     ApiService().updateBaseUrl(url);
   }
 
-  Future<void> _login() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     await _applyServerUrl();
 
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
-    final success = await auth.login(
-      _emailController.text.trim(),
-      _passwordController.text,
-    );
+
+    final success = _isRegisterMode
+        ? await auth.register(
+            name: _nameController.text.trim(),
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+            passwordConfirmation: _passwordConfirmController.text,
+            bggUsername: _bggController.text.trim().isEmpty
+                ? null
+                : _bggController.text.trim(),
+          )
+        : await auth.login(
+            _emailController.text.trim(),
+            _passwordController.text,
+          );
 
     if (success && mounted) {
       Navigator.of(context).pushReplacementNamed('/home');
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -81,11 +101,30 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: theme.colorScheme.primary,
                       )),
                   const SizedBox(height: 8),
-                  Text('Inicia sesión para continuar',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey[600],
-                      )),
-                  const SizedBox(height: 40),
+                  Text(
+                    _isRegisterMode
+                        ? 'Crea tu cuenta para empezar'
+                        : 'Inicia sesión para continuar',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  if (_isRegisterMode) ...[
+                    TextFormField(
+                      controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Nombre',
+                        prefixIcon: Icon(Icons.person_outline),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Introduce tu nombre'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -113,12 +152,57 @@ class _LoginScreenState extends State<LoginScreen> {
                             setState(() => _obscurePassword = !_obscurePassword),
                       ),
                     ),
-                    validator: (v) =>
-                        v == null || v.isEmpty ? 'Introduce la contraseña' : null,
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return 'Introduce la contraseña';
+                      }
+                      if (_isRegisterMode && v.length < 8) {
+                        return 'Mínimo 8 caracteres';
+                      }
+                      return null;
+                    },
                   ),
+                  if (_isRegisterMode) ...[
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordConfirmController,
+                      obscureText: _obscurePasswordConfirm,
+                      decoration: InputDecoration(
+                        labelText: 'Confirmar contraseña',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscurePasswordConfirm
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () => setState(() =>
+                              _obscurePasswordConfirm = !_obscurePasswordConfirm),
+                        ),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) {
+                          return 'Confirma la contraseña';
+                        }
+                        if (v != _passwordController.text) {
+                          return 'Las contraseñas no coinciden';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _bggController,
+                      decoration: const InputDecoration(
+                        labelText: 'Usuario BGG (opcional)',
+                        prefixIcon: Icon(Icons.extension_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
                   if (auth.error != null) ...[
                     const SizedBox(height: 12),
                     Text(auth.error!,
+                        textAlign: TextAlign.center,
                         style: TextStyle(color: theme.colorScheme.error)),
                   ],
                   const SizedBox(height: 24),
@@ -126,17 +210,31 @@ class _LoginScreenState extends State<LoginScreen> {
                     width: double.infinity,
                     height: 48,
                     child: FilledButton(
-                      onPressed: auth.loading ? null : _login,
+                      onPressed: auth.loading ? null : _submit,
                       child: auth.loading
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white))
-                          : const Text('Iniciar sesión'),
+                          : Text(_isRegisterMode
+                              ? 'Crear cuenta'
+                              : 'Iniciar sesión'),
                     ),
                   ),
                   const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: auth.loading
+                        ? null
+                        : () {
+                            auth.clearError();
+                            setState(() => _isRegisterMode = !_isRegisterMode);
+                          },
+                    child: Text(_isRegisterMode
+                        ? '¿Ya tienes cuenta? Inicia sesión'
+                        : '¿No tienes cuenta? Regístrate'),
+                  ),
+                  const SizedBox(height: 8),
                   InkWell(
                     onTap: () => setState(() => _showServerField = !_showServerField),
                     borderRadius: BorderRadius.circular(8),

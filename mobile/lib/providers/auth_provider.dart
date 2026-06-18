@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 
@@ -44,6 +45,59 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  Future<bool> register({
+    required String name,
+    required String email,
+    required String password,
+    required String passwordConfirmation,
+    String? bggUsername,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _user = await _authService.register(
+        name: name,
+        email: email,
+        password: password,
+        passwordConfirmation: passwordConfirmation,
+        bggUsername: bggUsername,
+      );
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _loading = false;
+      _error = _parseRegisterError(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  String _parseRegisterError(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['errors'] is Map) {
+        final errors = Map<String, dynamic>.from(data['errors'] as Map);
+        for (final value in errors.values) {
+          if (value is List && value.isNotEmpty) {
+            return value.first.toString();
+          }
+        }
+      }
+      if (data is Map && data['message'] is String) {
+        return data['message'] as String;
+      }
+    }
+    return 'No se pudo crear la cuenta. Revisa los datos e inténtalo de nuevo.';
+  }
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
   }
 
   Future<void> logout() async {

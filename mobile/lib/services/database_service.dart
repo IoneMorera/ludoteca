@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 5;
+  static const int _schemaVersion = 6;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -62,6 +62,9 @@ class DatabaseService {
         }
         if (oldVersion < 5) {
           await _migrateToV5(db);
+        }
+        if (oldVersion < 6) {
+          await _migrateToV6(db);
         }
       },
     );
@@ -239,6 +242,15 @@ class DatabaseService {
         propietario_local_id INTEGER,
         ubicacion_server_id INTEGER,
         ubicacion_local_id INTEGER,
+        es_principal INTEGER NOT NULL DEFAULT 0,
+        estado TEXT,
+        no_enfundar INTEGER NOT NULL DEFAULT 0,
+        idiomas TEXT,
+        idioma_otro TEXT,
+        independiente_idioma INTEGER NOT NULL DEFAULT 0,
+        tradumaquetado INTEGER NOT NULL DEFAULT 0,
+        tradumaquetado_parcial INTEGER NOT NULL DEFAULT 0,
+        tradumaquetado_parcial_notas TEXT,
         updated_at TEXT,
         dirty INTEGER NOT NULL DEFAULT 0,
         pending_action TEXT
@@ -246,6 +258,24 @@ class DatabaseService {
     ''');
     await db.execute(
         'CREATE INDEX idx_jp_juego ON juego_propietario(juego_local_id)');
+
+    await db.execute('''
+      CREATE TABLE juego_propietario_fundas (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        juego_propietario_server_id INTEGER,
+        juego_propietario_local_id INTEGER,
+        tipo_funda_server_id INTEGER,
+        tipo_funda_local_id INTEGER,
+        cantidad_cartas INTEGER NOT NULL DEFAULT 0,
+        enfundadas INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX idx_jpf_jp ON juego_propietario_fundas(juego_propietario_local_id)');
 
     await db.execute('''
       CREATE TABLE juego_categoria (
@@ -336,6 +366,55 @@ class DatabaseService {
   Future<void> _migrateToV5(Database db) async {
     await db.execute('ALTER TABLE juegos ADD COLUMN precio REAL');
     await db.execute('ALTER TABLE juegos ADD COLUMN en_caja_base INTEGER NOT NULL DEFAULT 0');
+  }
+
+  Future<void> _migrateToV6(Database db) async {
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN es_principal INTEGER NOT NULL DEFAULT 0');
+    await db.execute('ALTER TABLE juego_propietario ADD COLUMN estado TEXT');
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN no_enfundar INTEGER NOT NULL DEFAULT 0');
+    await db.execute('ALTER TABLE juego_propietario ADD COLUMN idiomas TEXT');
+    await db.execute('ALTER TABLE juego_propietario ADD COLUMN idioma_otro TEXT');
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN independiente_idioma INTEGER NOT NULL DEFAULT 0');
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN tradumaquetado INTEGER NOT NULL DEFAULT 0');
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN tradumaquetado_parcial INTEGER NOT NULL DEFAULT 0');
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN tradumaquetado_parcial_notas TEXT');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS juego_propietario_fundas (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        juego_propietario_server_id INTEGER,
+        juego_propietario_local_id INTEGER,
+        tipo_funda_server_id INTEGER,
+        tipo_funda_local_id INTEGER,
+        cantidad_cartas INTEGER NOT NULL DEFAULT 0,
+        enfundadas INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_jpf_jp ON juego_propietario_fundas(juego_propietario_local_id)');
+
+    // Backfill es_principal where owner location matches game location.
+    await db.execute('''
+      UPDATE juego_propietario
+      SET es_principal = 1
+      WHERE juego_local_id IN (
+        SELECT local_id FROM juegos WHERE varias_copias = 1 AND ubicacion_local_id IS NOT NULL
+      )
+      AND ubicacion_local_id = (
+        SELECT ubicacion_local_id FROM juegos j
+        WHERE j.local_id = juego_propietario.juego_local_id
+      )
+    ''');
   }
 
   // ---------- sync_state helpers ----------

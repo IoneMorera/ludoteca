@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
 import '../data/sync_service.dart';
+import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../widgets/game_image.dart';
@@ -115,7 +116,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
   Future<void> _showUbicacionDialog(Juego juego) async {
     if (juego.localId == null) return;
     final provider = context.read<JuegosProvider>();
-    final ubicaciones = await provider.ubicacionRepository.getAll();
+    var ubicaciones = await provider.ubicacionRepository.getAll();
     final canUseCajaBase = juego.esExpansion;
 
     String selectedKey;
@@ -132,7 +133,22 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Cambiar ubicación'),
+          title: Row(
+            children: [
+              const Expanded(child: Text('Cambiar ubicación')),
+              IconButton(
+                icon: const Icon(Icons.add, size: 22),
+                tooltip: 'Añadir ubicación',
+                onPressed: () async {
+                  final created = await _showCreateUbicacionFlow(ctx);
+                  if (created == true) {
+                    final updated = await provider.ubicacionRepository.getAll();
+                    setDialogState(() => ubicaciones = updated);
+                  }
+                },
+              ),
+            ],
+          ),
           content: SizedBox(
             width: double.maxFinite,
             child: ListView(
@@ -198,6 +214,123 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
       SyncService().syncAll();
       await provider.refreshDetail();
     }
+  }
+
+  Future<bool?> _showCreateUbicacionFlow(BuildContext parentCtx) async {
+    final provider = context.read<JuegosProvider>();
+    final repo = provider.ubicacionRepository;
+    final habitaciones = await repo.listHabitaciones();
+    final muebles = await repo.listMuebles();
+
+    if (habitaciones.isEmpty) {
+      if (parentCtx.mounted) {
+        ScaffoldMessenger.of(parentCtx).showSnackBar(
+          const SnackBar(content: Text('Primero crea una habitación desde Ubicaciones')),
+        );
+      }
+      return false;
+    }
+    if (muebles.isEmpty) {
+      if (parentCtx.mounted) {
+        ScaffoldMessenger.of(parentCtx).showSnackBar(
+          const SnackBar(content: Text('Primero crea un mueble desde Ubicaciones')),
+        );
+      }
+      return false;
+    }
+
+    final ctrl = TextEditingController();
+    int muebleLocalId = muebles.first.localId;
+    bool saving = false;
+
+    String habitacionNombre(int? habLocalId) {
+      if (habLocalId == null) return '?';
+      try {
+        return habitaciones.firstWhere((h) => h.localId == habLocalId).nombre;
+      } catch (_) {
+        return '?';
+      }
+    }
+
+    if (!mounted) return false;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Nuevo estante'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int>(
+                value: muebleLocalId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Mueble *',
+                  border: OutlineInputBorder(),
+                ),
+                items: muebles
+                    .map((m) => DropdownMenuItem(
+                          value: m.localId,
+                          child: Text(
+                            '${m.nombre} (${habitacionNombre(m.habitacionLocalId)})',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setDialogState(() => muebleLocalId = v);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre *',
+                  border: OutlineInputBorder(),
+                  hintText: 'Ej: Balda 1',
+                ),
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (ctrl.text.trim().isEmpty) return;
+                      setDialogState(() => saving = true);
+                      try {
+                        await repo.createUbicacion(
+                          muebleLocalId: muebleLocalId,
+                          nombre: ctrl.text.trim(),
+                        );
+                        SyncService().syncAll();
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Crear'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
