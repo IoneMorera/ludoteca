@@ -41,6 +41,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
 
   bool _loading = true;
   bool _saving = false;
+  bool _saveInProgress = false;
 
   Juego? _existing;
   List<CategoriaRow> _categorias = [];
@@ -255,6 +256,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_saveInProgress || _saving) return;
+
     if (_nombre.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('El nombre es obligatorio')),
@@ -267,8 +270,40 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       );
       return;
     }
-    setState(() => _saving = true);
+
     final provider = context.read<JuegosProvider>();
+
+    if (_existing == null) {
+      final exists = await provider.juegoRepository.existsWithNombre(
+        _nombre.text.trim(),
+      );
+      if (exists && mounted) {
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Juego duplicado'),
+            content: Text(
+              'Ya existe un juego llamado "${_nombre.text.trim()}". '
+              '¿Quieres crearlo de todas formas?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Crear igualmente'),
+              ),
+            ],
+          ),
+        );
+        if (proceed != true) return;
+      }
+    }
+
+    _saveInProgress = true;
+    setState(() => _saving = true);
 
     // Upload new image if taken from camera/gallery
     if (_newImageFile != null) {
@@ -347,11 +382,15 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final message = e is StateError
+            ? e.message
+            : 'Error al guardar: $e';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al guardar: $e')),
+          SnackBar(content: Text(message)),
         );
       }
     } finally {
+      _saveInProgress = false;
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -538,6 +577,11 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   Juego? _juegoBaseData;
 
   Widget _buildExpansionSection() {
+    final baseHasMultipleOwners = _juegoBaseData != null &&
+        _juegoBaseData!.variasCopias &&
+        _juegoBaseData!.propietarios.length > 1;
+    final expansionIsMultiOwner = _variasCopias && _propietariosLocalIds.length > 1;
+
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -584,8 +628,12 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                     final base = await provider.juegoRepository.getByLocalId(id);
                     if (mounted) {
                       setState(() => _juegoBaseData = base);
-                      if (base != null && base.variasCopias && base.propietarios.isNotEmpty) {
-                        _propietariosLocalIds.clear();
+                      // If base has multiple owners and expansion has none selected yet,
+                      // pre-select the first base owner
+                      if (base != null &&
+                          base.variasCopias &&
+                          base.propietarios.isNotEmpty &&
+                          _propietariosLocalIds.isEmpty) {
                         final allProps = await provider.propietarioRepository.getAll();
                         final firstOwner = base.propietarios.first;
                         final match = allProps.where(
@@ -599,13 +647,17 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                   }
                 },
               ),
-              if (_juegoBaseData != null && _juegoBaseData!.variasCopias && _juegoBaseData!.propietarios.length > 1) ...[
+              // Single-owner expansion with multi-owner base: pick which base copy
+              if (baseHasMultipleOwners && !expansionIsMultiOwner) ...[
                 const SizedBox(height: 12),
                 Text('Propietario de la copia base',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: Colors.grey[700])),
+                const SizedBox(height: 4),
+                Text('¿De qué copia del juego base es esta expansión?',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -621,12 +673,84 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                       label: Text(p.nombre),
                       selected: selected,
                       onSelected: (v) => setState(() {
-                        _propietariosLocalIds.clear();
-                        if (v) _propietariosLocalIds.add(propLocalId);
+                        if (!_variasCopias) {
+                          _propietariosLocalIds.clear();
+                        }
+                        if (v) {
+                          _propietariosLocalIds.add(propLocalId);
+                        } else {
+                          _propietariosLocalIds.remove(propLocalId);
+                        }
                       }),
                     );
                   }).toList(),
                 ),
+              ],
+              // Multi-owner expansion: show per-owner info
+              if (expansionIsMultiOwner && _juegoBaseData != null) ...[
+                const SizedBox(height: 12),
+                const Divider(),
+                Text('Copias de la expansión',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700])),
+                const SizedBox(height: 4),
+                Text('Cada propietario tiene su propia copia',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                const SizedBox(height: 8),
+                ..._propietariosLocalIds.map((propId) {
+                  final prop = _propietarios.firstWhere((p) => p.localId == propId);
+                  final ubicNombre = _propietarioUbicaciones[propId] != null
+                      ? _ubicaciones
+                          .where((u) => u.localId == _propietarioUbicaciones[propId])
+                          .map((u) => u.rutaCompleta)
+                          .firstOrNull ?? 'Sin asignar'
+                      : 'Sin asignar';
+
+                  return Card(
+                    elevation: 0,
+                    color: Colors.grey[50],
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.person, size: 16, color: Colors.grey[600]),
+                              const SizedBox(width: 6),
+                              Text(prop.nombre,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600, fontSize: 14)),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
+                              const SizedBox(width: 4),
+                              Text('Ubicación: $ubicNombre',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                            ],
+                          ),
+                          if (baseHasMultipleOwners) ...[
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                Icon(Icons.casino, size: 14, color: Colors.grey[500]),
+                                const SizedBox(width: 4),
+                                Text('Copia base de: ${prop.nombre}',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                }),
               ],
             ],
           ],

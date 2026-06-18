@@ -332,6 +332,179 @@ class UbicacionRepository {
     }
   }
 
+  Future<void> updateHabitacion(int localId, {required String nombre}) async {
+    final db = await _dbService.database;
+    final existing = await db.query('habitaciones',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+
+    await db.update('habitaciones', {
+      'nombre': nombre,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [localId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'habitaciones',
+        action: SyncAction.update,
+        localId: localId,
+        serverId: serverId,
+        payload: {'nombre': nombre},
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
+  }
+
+  Future<void> updateMueble(int localId, {required String nombre, required int habitacionLocalId}) async {
+    final db = await _dbService.database;
+    final existing = await db.query('muebles',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+
+    final hab = await db.query('habitaciones',
+        where: 'local_id = ?', whereArgs: [habitacionLocalId], limit: 1);
+    final habServerId = hab.isEmpty ? null : hab.first['server_id'] as int?;
+
+    await db.update('muebles', {
+      'nombre': nombre,
+      'habitacion_local_id': habitacionLocalId,
+      'habitacion_server_id': habServerId,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [localId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'muebles',
+        action: SyncAction.update,
+        localId: localId,
+        serverId: serverId,
+        payload: {
+          'nombre': nombre,
+          if (habServerId != null) 'habitacion_id': habServerId,
+        },
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
+  }
+
+  Future<void> updateUbicacion(int localId, {required String nombre, required int muebleLocalId}) async {
+    final db = await _dbService.database;
+    final existing = await db.query('ubicaciones',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+
+    final mueble = await db.query('muebles',
+        where: 'local_id = ?', whereArgs: [muebleLocalId], limit: 1);
+    final muebleServerId = mueble.isEmpty ? null : mueble.first['server_id'] as int?;
+
+    await db.update('ubicaciones', {
+      'nombre': nombre,
+      'mueble_local_id': muebleLocalId,
+      'mueble_server_id': muebleServerId,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [localId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'ubicaciones',
+        action: SyncAction.update,
+        localId: localId,
+        serverId: serverId,
+        payload: {
+          'nombre': nombre,
+          if (muebleServerId != null) 'mueble_id': muebleServerId,
+        },
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
+  }
+
+  Future<void> deleteHabitacion(int localId) async {
+    final db = await _dbService.database;
+    final existing = await db.query('habitaciones',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+
+    final muebles = await db.query('muebles',
+        where: 'habitacion_local_id = ?', whereArgs: [localId]);
+    for (final m in muebles) {
+      await deleteMueble(m['local_id'] as int);
+    }
+
+    await db.delete('habitaciones', where: 'local_id = ?', whereArgs: [localId]);
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'habitaciones',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: serverId,
+      );
+    } else {
+      await _outbox.removeForLocalRow('habitaciones', localId);
+    }
+  }
+
+  Future<void> deleteMueble(int localId) async {
+    final db = await _dbService.database;
+    final existing = await db.query('muebles',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+
+    final ubicaciones = await db.query('ubicaciones',
+        where: 'mueble_local_id = ?', whereArgs: [localId]);
+    for (final u in ubicaciones) {
+      await deleteUbicacion(u['local_id'] as int);
+    }
+
+    await db.delete('muebles', where: 'local_id = ?', whereArgs: [localId]);
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'muebles',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: serverId,
+      );
+    } else {
+      await _outbox.removeForLocalRow('muebles', localId);
+    }
+  }
+
+  Future<void> deleteUbicacion(int localId) async {
+    final db = await _dbService.database;
+    final existing = await db.query('ubicaciones',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+
+    await db.update('juegos', {
+      'ubicacion_local_id': null,
+      'ubicacion_server_id': null,
+    }, where: 'ubicacion_local_id = ?', whereArgs: [localId]);
+
+    await db.delete('ubicaciones', where: 'local_id = ?', whereArgs: [localId]);
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'ubicaciones',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: serverId,
+      );
+    } else {
+      await _outbox.removeForLocalRow('ubicaciones', localId);
+    }
+  }
+
   Future<void> deleteByServerIds(String table, List<int> serverIds) async {
     if (serverIds.isEmpty) return;
     final db = await _dbService.database;

@@ -175,6 +175,26 @@ class JuegoRepository {
     };
   }
 
+  Future<bool> existsWithNombre(String nombre, {int? excludeLocalId}) async {
+    final db = await _dbService.database;
+    final args = <dynamic>[nombre.trim()];
+    var excludeSql = '';
+    if (excludeLocalId != null) {
+      excludeSql = 'AND local_id != ?';
+      args.add(excludeLocalId);
+    }
+    final rows = await db.rawQuery(
+      '''
+      SELECT local_id FROM juegos
+      WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+      $excludeSql
+      LIMIT 1
+      ''',
+      args,
+    );
+    return rows.isNotEmpty;
+  }
+
   // ---------- escritura ----------
 
   /// Crea o actualiza un juego completo (con propietarios y fundas).
@@ -188,7 +208,38 @@ class JuegoRepository {
   }) async {
     final db = await _dbService.database;
 
-    final isCreate = juego.localId == null;
+    var isCreate = juego.localId == null;
+    int? reuseLocalId;
+
+    if (isCreate && juego.bggId != null) {
+      final bggDup = await db.query(
+        'juegos',
+        where: 'bgg_id = ?',
+        whereArgs: [juego.bggId],
+        limit: 1,
+      );
+      if (bggDup.isNotEmpty) {
+        throw StateError('Ya existe un juego con este ID de BGG en la ludoteca.');
+      }
+    }
+
+    if (isCreate) {
+      final pendingDup = await db.rawQuery(
+        '''
+        SELECT local_id FROM juegos
+        WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+          AND dirty = 1
+          AND pending_action = 'create'
+        LIMIT 1
+        ''',
+        [juego.nombre],
+      );
+      if (pendingDup.isNotEmpty) {
+        reuseLocalId = pendingDup.first['local_id'] as int;
+        isCreate = false;
+      }
+    }
+
     final values = await _serializeJuego(juego);
 
     int localId;
@@ -203,7 +254,7 @@ class JuegoRepository {
         payload: _payloadForServer(values),
       );
     } else {
-      localId = juego.localId!;
+      localId = reuseLocalId ?? juego.localId!;
       values['dirty'] = 1;
       values['pending_action'] = 'update';
       await db.update('juegos', values,
@@ -212,31 +263,43 @@ class JuegoRepository {
       final existing = await db
           .query('juegos', where: 'local_id = ?', whereArgs: [localId], limit: 1);
       final baseUpdatedAt = existing.first['updated_at'] as String?;
+      final serverId = existing.first['server_id'] as int? ?? juego.serverId;
 
-      if (juego.serverId != null) {
+      if (serverId != null) {
         await _outbox.enqueue(
           table: 'juegos',
           action: SyncAction.update,
           localId: localId,
-          serverId: juego.serverId,
+          serverId: serverId,
           payload: _payloadForServer(values),
           baseUpdatedAt: baseUpdatedAt,
         );
       } else {
         // a\u00fan no se ha sincronizado el create; basta con que el create
         // pendiente lleve el payload m\u00e1s reciente.
+        await _outbox.removeForLocalRow('juegos', localId);
         await _outbox.enqueue(
           table: 'juegos',
-          action: SyncAction.update,
+          action: SyncAction.create,
           localId: localId,
           payload: _payloadForServer(values),
         );
       }
     }
 
-    await _syncPropietarios(localId, juego.serverId, propietarioLocalIds, propietarioUbicaciones);
-    await _syncFundas(localId, juego.serverId, fundas);
-    await _syncCategorias(localId, juego.serverId, categoriaLocalIds);
+    final savedRow = await db.query(
+      'juegos',
+      where: 'local_id = ?',
+      whereArgs: [localId],
+      limit: 1,
+    );
+    final effectiveServerId =
+        savedRow.isEmpty ? juego.serverId : savedRow.first['server_id'] as int?;
+
+    await _syncPropietarios(
+        localId, effectiveServerId, propietarioLocalIds, propietarioUbicaciones);
+    await _syncFundas(localId, effectiveServerId, fundas);
+    await _syncCategorias(localId, effectiveServerId, categoriaLocalIds);
 
     return localId;
   }
@@ -327,6 +390,8 @@ class JuegoRepository {
         where: 'juego_local_id = ?', whereArgs: [localId]);
     await db.delete('juego_fundas',
         where: 'juego_local_id = ?', whereArgs: [localId]);
+    await db.delete('juego_categoria',
+        where: 'juego_local_id = ?', whereArgs: [localId]);
     await db.delete('juegos', where: 'local_id = ?', whereArgs: [localId]);
     if (serverId != null) {
       await _outbox.enqueue(
@@ -335,6 +400,8 @@ class JuegoRepository {
         localId: localId,
         serverId: serverId,
       );
+    } else {
+      await _outbox.removeForLocalRow('juegos', localId);
     }
   }
 
@@ -406,6 +473,20 @@ class JuegoRepository {
       await db.insert('juegos', values,
           conflictAlgorithm: ConflictAlgorithm.replace);
     } else {
+      final isDirty = ((existing.first['dirty'] as int?) ?? 0) == 1;
+      if (isDirty) {
+        // Only update non-conflicting fields; preserve local changes
+        // that haven't been pushed yet.
+        values.remove('estado');
+        values.remove('precio');
+        values.remove('ubicacion_local_id');
+        values.remove('ubicacion_server_id');
+        values.remove('en_caja_base');
+        values.remove('categoria_local_id');
+        values.remove('categoria_server_id');
+        values.remove('dirty');
+        values.remove('pending_action');
+      }
       await db.update('juegos', values,
           where: 'server_id = ?', whereArgs: [serverId]);
     }
@@ -730,6 +811,9 @@ class JuegoRepository {
           list.add(cat);
         }
       }
+    }
+    for (final list in categoriasByJuego.values) {
+      list.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
     }
 
     final juegosByServerId = <int, Juego>{};
@@ -1101,25 +1185,46 @@ class JuegoRepository {
         orphanRows.add(r);
       }
     }
+
+    // Include legacy categoria_id when there is no pivot row yet (common for
+    // imports BGG or rows created by the local migration before sync).
+    final juegoRows = await db.query('juegos',
+        where: 'local_id = ?', whereArgs: [juegoLocalId], limit: 1);
+    if (juegoRows.isNotEmpty) {
+      final legacyCatLocal = juegoRows.first['categoria_local_id'] as int?;
+      if (legacyCatLocal != null &&
+          !existingByCatLocal.containsKey(legacyCatLocal)) {
+        existingByCatLocal[legacyCatLocal] = {
+          'local_id': null,
+          'server_id': null,
+          'categoria_local_id': legacyCatLocal,
+          'categoria_server_id': juegoRows.first['categoria_server_id'],
+          'juego_server_id':
+              juegoRows.first['server_id'] ?? juegoServerId,
+          'juego_local_id': juegoLocalId,
+          '_legacy_only': 1,
+        };
+      }
+    }
+
     final desired = catLocalIds.toSet();
 
     // Remove categories no longer desired
     for (final entry in existingByCatLocal.entries) {
       if (!desired.contains(entry.key)) {
-        final localId = entry.value['local_id'] as int;
-        final serverId = entry.value['server_id'] as int?;
-        await db.delete('juego_categoria',
-            where: 'local_id = ?', whereArgs: [localId]);
-        if (serverId != null) {
-          await _outbox.enqueue(
-            table: 'juego_categoria',
-            action: SyncAction.delete,
-            localId: localId,
-            serverId: serverId,
-          );
-        } else {
-          await _outbox.removeForLocalRow('juego_categoria', localId);
+        final row = entry.value;
+        final legacyOnly = (row['_legacy_only'] as int?) == 1;
+        final localId = row['local_id'] as int?;
+        if (!legacyOnly && localId != null) {
+          await db.delete('juego_categoria',
+              where: 'local_id = ?', whereArgs: [localId]);
         }
+        await _enqueueCategoriaPivotDelete(
+          db,
+          row,
+          localId: localId,
+          juegoServerId: juegoServerId,
+        );
       }
     }
 
@@ -1156,7 +1261,12 @@ class JuegoRepository {
             serverId: serverId,
           );
         } else {
-          await _outbox.removeForLocalRow('juego_categoria', localId);
+          await _enqueueCategoriaPivotDelete(
+            db,
+            r,
+            localId: localId,
+            juegoServerId: juegoServerId,
+          );
         }
       }
     }
@@ -1185,6 +1295,65 @@ class JuegoRepository {
           'categoria_id': catServerId,
         },
       );
+    }
+  }
+
+  /// Encola el borrado de una fila pivot juego_categoria en el servidor.
+  /// Si no conocemos el server_id del pivot, usa juego_id + categoria_id.
+  Future<void> _enqueueCategoriaPivotDelete(
+    Database db,
+    Map<String, dynamic> row, {
+    int? localId,
+    int? juegoServerId,
+  }) async {
+    final pivotServerId = row['server_id'] as int?;
+    if (pivotServerId != null) {
+      await _outbox.enqueue(
+        table: 'juego_categoria',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: pivotServerId,
+      );
+      return;
+    }
+
+    var juegoSid = row['juego_server_id'] as int? ?? juegoServerId;
+    var catSid = row['categoria_server_id'] as int?;
+
+    if (catSid == null) {
+      final catLocal = row['categoria_local_id'] as int?;
+      if (catLocal != null) {
+        final catRow = await db.query('categorias',
+            where: 'local_id = ?', whereArgs: [catLocal], limit: 1);
+        if (catRow.isNotEmpty) {
+          catSid = catRow.first['server_id'] as int?;
+        }
+      }
+    }
+
+    if (juegoSid == null) {
+      final juegoLocal = row['juego_local_id'] as int?;
+      if (juegoLocal != null) {
+        final jRow = await db.query('juegos',
+            where: 'local_id = ?', whereArgs: [juegoLocal], limit: 1);
+        if (jRow.isNotEmpty) {
+          juegoSid = jRow.first['server_id'] as int?;
+        }
+      }
+    }
+
+    if (juegoSid != null && catSid != null) {
+      await _outbox.enqueue(
+        table: 'juego_categoria',
+        action: SyncAction.delete,
+        localId: localId,
+        payload: {
+          'juego_id': juegoSid,
+          'categoria_id': catSid,
+        },
+      );
+    } else if (localId != null) {
+      await _outbox.removeForLocalRow('juego_categoria', localId);
     }
   }
 

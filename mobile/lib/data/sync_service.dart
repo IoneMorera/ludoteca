@@ -167,8 +167,10 @@ class SyncService {
         }
       }
 
-      // Discard UPDATE/DELETE ops whose local row no longer exists.
-      if (op.localId != null && op.action != SyncAction.create) {
+      // Discard UPDATE ops whose local row no longer exists.
+      // DELETE ops must NOT be discarded: the row is already gone locally
+      // and the server still needs to be notified.
+      if (op.localId != null && op.action == SyncAction.update) {
         final rows = await db.query(op.table,
             columns: ['local_id'],
             where: 'local_id = ?',

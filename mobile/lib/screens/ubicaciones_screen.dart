@@ -426,6 +426,319 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
     );
   }
 
+  Future<void> _editHabitacion(HabitacionRow habitacion) async {
+    final ctrl = TextEditingController(text: habitacion.nombre);
+    bool saving = false;
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Editar habitación'),
+          content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(
+              labelText: 'Nombre *',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (ctrl.text.trim().isEmpty) return;
+                      setDialogState(() => saving = true);
+                      try {
+                        await repo.updateHabitacion(habitacion.localId,
+                            nombre: ctrl.text.trim());
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == true) await _syncIfPossible();
+  }
+
+  Future<void> _deleteHabitacion(HabitacionRow habitacion) async {
+    final muebles = _mueblesDeHabitacion(habitacion.localId);
+    final totalEstantes = muebles.fold<int>(
+        0, (sum, m) => sum + _ubicacionesDeMueble(m.localId).length);
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar habitación'),
+        content: Text(
+          '¿Eliminar "${habitacion.nombre}"? '
+          'Se eliminarán también ${muebles.length} mueble(s) y $totalEstantes estante(s).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      final repo = context.read<JuegosProvider>().ubicacionRepository;
+      await repo.deleteHabitacion(habitacion.localId);
+      await _syncIfPossible();
+    }
+  }
+
+  Future<void> _editMueble(MuebleRow mueble) async {
+    final ctrl = TextEditingController(text: mueble.nombre);
+    int habitacionLocalId = mueble.habitacionLocalId ?? _habitaciones.first.localId;
+    bool saving = false;
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Editar mueble'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int>(
+                value: habitacionLocalId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Habitación *',
+                  border: OutlineInputBorder(),
+                ),
+                items: _habitaciones
+                    .map((h) => DropdownMenuItem(
+                          value: h.localId,
+                          child: Text(h.nombre, overflow: TextOverflow.ellipsis),
+                        ))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setDialogState(() => habitacionLocalId = v);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre *',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (ctrl.text.trim().isEmpty) return;
+                      setDialogState(() => saving = true);
+                      try {
+                        await repo.updateMueble(mueble.localId,
+                            nombre: ctrl.text.trim(),
+                            habitacionLocalId: habitacionLocalId);
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == true) await _syncIfPossible();
+  }
+
+  Future<void> _deleteMueble(MuebleRow mueble) async {
+    final ubics = _ubicacionesDeMueble(mueble.localId);
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar mueble'),
+        content: Text(
+          '¿Eliminar "${mueble.nombre}"? '
+          'Se eliminarán también ${ubics.length} estante(s).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      final repo = context.read<JuegosProvider>().ubicacionRepository;
+      await repo.deleteMueble(mueble.localId);
+      await _syncIfPossible();
+    }
+  }
+
+  Future<void> _editUbicacion(UbicacionRow ubicacion) async {
+    final ctrl = TextEditingController(text: ubicacion.nombre);
+    int muebleLocalId = ubicacion.muebleLocalId ?? _muebles.first.localId;
+    bool saving = false;
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Editar estante'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int>(
+                value: muebleLocalId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Mueble *',
+                  border: OutlineInputBorder(),
+                ),
+                items: _muebles
+                    .map((m) => DropdownMenuItem(
+                          value: m.localId,
+                          child: Text(
+                            '${m.nombre} (${_habitacionNombre(m.habitacionLocalId)})',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setDialogState(() => muebleLocalId = v);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre *',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (ctrl.text.trim().isEmpty) return;
+                      setDialogState(() => saving = true);
+                      try {
+                        await repo.updateUbicacion(ubicacion.localId,
+                            nombre: ctrl.text.trim(),
+                            muebleLocalId: muebleLocalId);
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == true) await _syncIfPossible();
+  }
+
+  Future<void> _deleteUbicacion(UbicacionRow ubicacion) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar estante'),
+        content: Text(
+          '¿Eliminar "${ubicacion.nombre}"? '
+          'Los juegos asignados quedarán sin ubicación.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      final repo = context.read<JuegosProvider>().ubicacionRepository;
+      await repo.deleteUbicacion(ubicacion.localId);
+      await _syncIfPossible();
+    }
+  }
+
   Widget _buildHabitacionCard(HabitacionRow habitacion, ThemeData theme) {
     final muebles = _mueblesDeHabitacion(habitacion.localId);
 
@@ -446,6 +759,16 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
           subtitle: Text(
             '${muebles.length} ${muebles.length == 1 ? 'mueble' : 'muebles'}',
             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+          trailing: PopupMenuButton<String>(
+            onSelected: (action) {
+              if (action == 'edit') _editHabitacion(habitacion);
+              if (action == 'delete') _deleteHabitacion(habitacion);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Editar')),
+              PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+            ],
           ),
           children: muebles.isEmpty
               ? [
@@ -481,6 +804,16 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                 style: TextStyle(fontSize: 11, color: Colors.grey[500]),
               )
             : null,
+        trailing: PopupMenuButton<String>(
+          onSelected: (action) {
+            if (action == 'edit') _editMueble(mueble);
+            if (action == 'delete') _deleteMueble(mueble);
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'edit', child: Text('Editar')),
+            PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+          ],
+        ),
         children: ubicacionesList.isEmpty
             ? [
                 Padding(
@@ -501,6 +834,16 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                       title: Text(
                         u.nombre,
                         style: const TextStyle(fontSize: 13),
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (action) {
+                          if (action == 'edit') _editUbicacion(u);
+                          if (action == 'delete') _deleteUbicacion(u);
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Editar')),
+                          PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                        ],
                       ),
                     ))
                 .toList(),

@@ -158,6 +158,7 @@ class BggController extends Controller
                 foreach (array_chunk($rowsToInsert, 100) as $chunk) {
                     Juego::insert($chunk);
                 }
+                $this->attachCategoriaBulk($categoria->id, array_keys($rowsByBggId));
             }
 
             if ($propietario) {
@@ -274,6 +275,7 @@ class BggController extends Controller
                 foreach (array_chunk($rowsToInsert, 100) as $chunk) {
                     Juego::insert($chunk);
                 }
+                $this->attachCategoriaBulk($categoria->id, array_keys($rowsByBggId));
             }
 
             if ($propietario && !empty($attachBggIds)) {
@@ -434,6 +436,30 @@ class BggController extends Controller
 
         foreach (array_chunk($rows, 500) as $chunk) {
             DB::table('juego_propietario')->insertOrIgnore($chunk);
+        }
+    }
+
+    private function attachCategoriaBulk(int $categoriaId, array $bggIds): void
+    {
+        if (empty($bggIds)) {
+            return;
+        }
+
+        $juegoIds = Juego::whereIn('bgg_id', $bggIds)->pluck('id')->all();
+        if (empty($juegoIds)) {
+            return;
+        }
+
+        $now = now();
+        $rows = array_map(fn ($juegoId) => [
+            'juego_id' => $juegoId,
+            'categoria_id' => $categoriaId,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $juegoIds);
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            DB::table('juego_categoria')->insertOrIgnore($chunk);
         }
     }
 

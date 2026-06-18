@@ -119,6 +119,31 @@ class SyncController extends Controller
 
         if ($action === 'delete') {
             if (!$serverId) {
+                if ($table === 'juego_categoria') {
+                    $juegoId = $data['juego_id'] ?? null;
+                    $categoriaId = $data['categoria_id'] ?? null;
+                    if ($juegoId && $categoriaId) {
+                        $model = JuegoCategoriaPivot::query()
+                            ->where('juego_id', (int) $juegoId)
+                            ->where('categoria_id', (int) $categoriaId)
+                            ->first();
+                        if ($model) {
+                            $resolvedId = (int) $model->getKey();
+                            $model->delete();
+                            return [
+                                'client_op_id' => $clientOpId,
+                                'status' => 'ok',
+                                'server_id' => $resolvedId,
+                            ];
+                        }
+
+                        return [
+                            'client_op_id' => $clientOpId,
+                            'status' => 'not_found',
+                        ];
+                    }
+                }
+
                 return [
                     'client_op_id' => $clientOpId,
                     'status' => 'error',

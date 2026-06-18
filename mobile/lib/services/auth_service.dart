@@ -10,7 +10,29 @@ class AuthService {
       'password': password,
     });
 
-    final data = response.data;
+    return _persistSession(response.data);
+  }
+
+  Future<Map<String, dynamic>> register({
+    required String name,
+    required String email,
+    required String password,
+    required String passwordConfirmation,
+    String? bggUsername,
+  }) async {
+    final response = await _api.post('/register', data: {
+      'name': name,
+      'email': email,
+      'password': password,
+      'password_confirmation': passwordConfirmation,
+      if (bggUsername != null && bggUsername.isNotEmpty)
+        'bgg_username': bggUsername,
+    });
+
+    return _persistSession(response.data);
+  }
+
+  Future<Map<String, dynamic>> _persistSession(Map<String, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', data['token']);
     await prefs.setString('user_name', data['user']['name']);
@@ -19,7 +41,7 @@ class AuthService {
       await prefs.setString('bgg_username', data['user']['bgg_username']);
     }
 
-    return data['user'];
+    return data['user'] as Map<String, dynamic>;
   }
 
   Future<void> logout() async {

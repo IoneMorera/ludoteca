@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
-import '../data/sync_service.dart' show SyncStatus;
+import '../data/sync_service.dart';
 import '../data/categoria_repository.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
@@ -111,6 +111,49 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
   bool get _hasActiveFilters =>
       _estadoFilter != null || _esExpansionFilter != null || _categoriaLocalId != null;
 
+  Future<void> _confirmDelete(Juego juego) async {
+    if (juego.localId == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar juego'),
+        content: Text(
+          '¿Eliminar "${juego.nombre}"? Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    try {
+      await context.read<JuegosProvider>().deleteJuego(juego.localId!);
+      SyncService().syncAll();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('"${juego.nombre}" eliminado')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al eliminar: $e')),
+        );
+      }
+    }
+  }
+
   void _showFilterSheet() {
     String? tempEstado = _estadoFilter;
     bool? tempEsExpansion = _esExpansionFilter;
@@ -173,23 +216,56 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                             onSelected: (_) => setSheetState(() => tempEstado = null),
                           ),
                           ChoiceChip(
-                            label: const Text('Disponible'),
+                            label: Text('Disponible',
+                                style: TextStyle(
+                                    color: tempEstado == 'disponible'
+                                        ? Colors.green[800]
+                                        : null,
+                                    fontWeight: tempEstado == 'disponible'
+                                        ? FontWeight.w600
+                                        : null)),
                             selected: tempEstado == 'disponible',
                             selectedColor: Colors.green[100],
+                            avatar: tempEstado == 'disponible'
+                                ? Icon(Icons.check_circle,
+                                    size: 18, color: Colors.green[700])
+                                : null,
                             onSelected: (_) =>
                                 setSheetState(() => tempEstado = 'disponible'),
                           ),
                           ChoiceChip(
-                            label: const Text('En venta'),
+                            label: Text('En venta',
+                                style: TextStyle(
+                                    color: tempEstado == 'en_venta'
+                                        ? Colors.orange[900]
+                                        : null,
+                                    fontWeight: tempEstado == 'en_venta'
+                                        ? FontWeight.w600
+                                        : null)),
                             selected: tempEstado == 'en_venta',
                             selectedColor: Colors.orange[100],
+                            avatar: tempEstado == 'en_venta'
+                                ? Icon(Icons.sell,
+                                    size: 18, color: Colors.orange[800])
+                                : null,
                             onSelected: (_) =>
                                 setSheetState(() => tempEstado = 'en_venta'),
                           ),
                           ChoiceChip(
-                            label: const Text('Vendido'),
+                            label: Text('Vendido',
+                                style: TextStyle(
+                                    color: tempEstado == 'vendido'
+                                        ? Colors.red[800]
+                                        : null,
+                                    fontWeight: tempEstado == 'vendido'
+                                        ? FontWeight.w600
+                                        : null)),
                             selected: tempEstado == 'vendido',
                             selectedColor: Colors.red[100],
+                            avatar: tempEstado == 'vendido'
+                                ? Icon(Icons.do_not_disturb_on,
+                                    size: 18, color: Colors.red[700])
+                                : null,
                             onSelected: (_) =>
                                 setSheetState(() => tempEstado = 'vendido'),
                           ),
@@ -212,15 +288,38 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                                 setSheetState(() => tempEsExpansion = null),
                           ),
                           ChoiceChip(
-                            label: const Text('Base'),
+                            label: Text('Base',
+                                style: TextStyle(
+                                    color: tempEsExpansion == false
+                                        ? Colors.indigo[800]
+                                        : null,
+                                    fontWeight: tempEsExpansion == false
+                                        ? FontWeight.w600
+                                        : null)),
                             selected: tempEsExpansion == false,
+                            selectedColor: Colors.indigo[100],
+                            avatar: tempEsExpansion == false
+                                ? Icon(Icons.casino,
+                                    size: 18, color: Colors.indigo[700])
+                                : null,
                             onSelected: (_) =>
                                 setSheetState(() => tempEsExpansion = false),
                           ),
                           ChoiceChip(
-                            label: const Text('Expansión'),
+                            label: Text('Expansión',
+                                style: TextStyle(
+                                    color: tempEsExpansion == true
+                                        ? Colors.purple[800]
+                                        : null,
+                                    fontWeight: tempEsExpansion == true
+                                        ? FontWeight.w600
+                                        : null)),
                             selected: tempEsExpansion == true,
                             selectedColor: Colors.purple[100],
+                            avatar: tempEsExpansion == true
+                                ? Icon(Icons.extension,
+                                    size: 18, color: Colors.purple[700])
+                                : null,
                             onSelected: (_) =>
                                 setSheetState(() => tempEsExpansion = true),
                           ),
@@ -417,28 +516,39 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     final chips = <Widget>[];
     if (_estadoFilter != null) {
       String label;
-      Color? color;
+      Color color;
+      Color textColor;
+      IconData icon;
       switch (_estadoFilter) {
         case 'disponible':
           label = 'Disponible';
-          color = Colors.green[100];
+          color = Colors.green[100]!;
+          textColor = Colors.green[800]!;
+          icon = Icons.check_circle;
           break;
         case 'en_venta':
           label = 'En venta';
-          color = Colors.orange[100];
+          color = Colors.orange[100]!;
+          textColor = Colors.orange[900]!;
+          icon = Icons.sell;
           break;
         case 'vendido':
           label = 'Vendido';
-          color = Colors.red[100];
+          color = Colors.red[100]!;
+          textColor = Colors.red[800]!;
+          icon = Icons.do_not_disturb_on;
           break;
         default:
           label = _estadoFilter!;
-          color = null;
+          color = Colors.grey[200]!;
+          textColor = Colors.grey[800]!;
+          icon = Icons.info;
       }
       chips.add(Padding(
         padding: const EdgeInsets.only(right: 6),
         child: InputChip(
-          label: Text(label),
+          label: Text(label, style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
+          avatar: Icon(icon, size: 16, color: textColor),
           backgroundColor: color,
           onDeleted: () {
             setState(() => _estadoFilter = null);
@@ -449,11 +559,17 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       ));
     }
     if (_esExpansionFilter != null) {
+      final isExp = _esExpansionFilter!;
       chips.add(Padding(
         padding: const EdgeInsets.only(right: 6),
         child: InputChip(
-          label: Text(_esExpansionFilter! ? 'Expansión' : 'Base'),
-          backgroundColor: _esExpansionFilter! ? Colors.purple[100] : null,
+          label: Text(isExp ? 'Expansión' : 'Base',
+              style: TextStyle(
+                  color: isExp ? Colors.purple[800] : Colors.indigo[800],
+                  fontWeight: FontWeight.w600)),
+          avatar: Icon(isExp ? Icons.extension : Icons.casino,
+              size: 16, color: isExp ? Colors.purple[700] : Colors.indigo[700]),
+          backgroundColor: isExp ? Colors.purple[100] : Colors.indigo[100],
           onDeleted: () {
             setState(() => _esExpansionFilter = null);
             _applyFilters();
@@ -466,7 +582,10 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       chips.add(Padding(
         padding: const EdgeInsets.only(right: 6),
         child: InputChip(
-          label: Text(_categoriaNombre ?? 'Categoría'),
+          label: Text(_categoriaNombre ?? 'Categoría',
+              style: TextStyle(color: Colors.teal[800], fontWeight: FontWeight.w600)),
+          avatar: Icon(Icons.category, size: 16, color: Colors.teal[700]),
+          backgroundColor: Colors.teal[100],
           onDeleted: () {
             setState(() {
               _categoriaLocalId = null;
@@ -523,18 +642,24 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                           Icon(Icons.category,
                               size: 14, color: Colors.grey[500]),
                           const SizedBox(width: 4),
-                          Text(juego.categorias.map((c) => c.nombre).join(', '),
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey[600]),
-                              overflow: TextOverflow.ellipsis),
+                          Flexible(
+                            child: Text(
+                                juego.categorias.map((c) => c.nombre).join(', '),
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600]),
+                                overflow: TextOverflow.ellipsis),
+                          ),
                           const SizedBox(width: 12),
                         ] else if (juego.categoria != null) ...[
                           Icon(Icons.category,
                               size: 14, color: Colors.grey[500]),
                           const SizedBox(width: 4),
-                          Text(juego.categoria!.nombre,
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey[600])),
+                          Flexible(
+                            child: Text(juego.categoria!.nombre,
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600]),
+                                overflow: TextOverflow.ellipsis),
+                          ),
                           const SizedBox(width: 12),
                         ],
                         Icon(Icons.people,
@@ -576,7 +701,17 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
+              PopupMenuButton<String>(
+                onSelected: (action) {
+                  if (action == 'delete') _confirmDelete(juego);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text('Eliminar'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
