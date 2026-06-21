@@ -238,7 +238,7 @@ class SyncController extends Controller
             'juego_fundas' => ['juego_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas'],
             'juego_propietario' => [
                 'juego_id', 'propietario_id', 'ubicacion_id', 'es_principal',
-                'estado', 'no_enfundar', 'idiomas', 'idioma_otro',
+                'estado', 'fecha_compra', 'no_enfundar', 'idiomas', 'idioma_otro',
                 'independiente_idioma', 'tradumaquetado', 'tradumaquetado_parcial',
                 'tradumaquetado_parcial_notas',
             ],
@@ -441,6 +441,7 @@ class SyncController extends Controller
                 'ubicacion_id' => $row->ubicacion_id ?? null,
                 'es_principal' => (bool) ($row->es_principal ?? false),
                 'estado' => $row->estado ?? null,
+                'fecha_compra' => $row->fecha_compra ?? null,
                 'no_enfundar' => (bool) ($row->no_enfundar ?? false),
                 'idiomas' => $row->idiomas ? json_decode($row->idiomas, true) : null,
                 'idioma_otro' => $row->idioma_otro ?? null,

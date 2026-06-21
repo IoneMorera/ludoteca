@@ -141,6 +141,7 @@ class JuegoRepository {
         ubicacionLocalId: r['ubicacion_local_id'] as int?,
         esPrincipal: (r['es_principal'] as int?) == 1,
         estado: r['estado'] as String?,
+        fechaCompra: r['fecha_compra'] as String?,
         noEnfundar: (r['no_enfundar'] as int?) == 1,
         idiomas: idiomas,
         idiomaOtro: r['idioma_otro'] as String?,
@@ -651,6 +652,7 @@ class JuegoRepository {
       'ubicacion_local_id': ubicLocalId,
       'es_principal': (data['es_principal'] == true) ? 1 : 0,
       'estado': data['estado'],
+      'fecha_compra': data['fecha_compra'],
       'no_enfundar': (data['no_enfundar'] == true) ? 1 : 0,
       'idiomas': idiomas is List ? jsonEncode(idiomas) : null,
       'idioma_otro': data['idioma_otro'],
@@ -1361,6 +1363,7 @@ class JuegoRepository {
       'ubicacion_server_id': ubicServerId,
       'es_principal': copia.esPrincipal ? 1 : 0,
       'estado': copia.estado,
+      'fecha_compra': copia.fechaCompra,
       'no_enfundar': copia.noEnfundar ? 1 : 0,
       'idiomas':
           copia.idiomas.isEmpty ? null : jsonEncode(copia.idiomas),
@@ -1378,6 +1381,7 @@ class JuegoRepository {
       'ubicacion_local_id',
       'es_principal',
       'estado',
+      'fecha_compra',
       'no_enfundar',
       'idiomas',
       'idioma_otro',
@@ -1410,6 +1414,7 @@ class JuegoRepository {
       'ubicacion_id': row['ubicacion_server_id'],
       'es_principal': (row['es_principal'] as int?) == 1,
       'estado': row['estado'],
+      'fecha_compra': row['fecha_compra'],
       'no_enfundar': (row['no_enfundar'] as int?) == 1,
       'idiomas': idiomasForServer,
       'idioma_otro': row['idioma_otro'],
@@ -1881,6 +1886,7 @@ class CopiaPropietarioDraft {
   final int? ubicacionLocalId;
   final bool esPrincipal;
   final String? estado;
+  final String? fechaCompra;
   final bool noEnfundar;
   final List<String> idiomas;
   final String? idiomaOtro;
@@ -1895,6 +1901,7 @@ class CopiaPropietarioDraft {
     this.ubicacionLocalId,
     this.esPrincipal = false,
     this.estado,
+    this.fechaCompra,
     this.noEnfundar = false,
     this.idiomas = const [],
     this.idiomaOtro,
@@ -1909,6 +1916,7 @@ class CopiaPropietarioDraft {
     int? ubicacionLocalId,
     bool? esPrincipal,
     String? estado,
+    String? fechaCompra,
     bool? noEnfundar,
     List<String>? idiomas,
     String? idiomaOtro,
@@ -1923,6 +1931,7 @@ class CopiaPropietarioDraft {
       ubicacionLocalId: ubicacionLocalId ?? this.ubicacionLocalId,
       esPrincipal: esPrincipal ?? this.esPrincipal,
       estado: estado ?? this.estado,
+      fechaCompra: fechaCompra ?? this.fechaCompra,
       noEnfundar: noEnfundar ?? this.noEnfundar,
       idiomas: idiomas ?? this.idiomas,
       idiomaOtro: idiomaOtro ?? this.idiomaOtro,

@@ -161,6 +161,14 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             _copias[entry.key] = _CopiaDraft.fromRepository(entry.value);
             _propietarioUbicaciones[entry.key] = entry.value.ubicacionLocalId;
           }
+          if (_fechaCompra != null) {
+            final principal = _copias.values
+                .where((c) => c.esPrincipal)
+                .firstOrNull;
+            if (principal != null && principal.fechaCompra == null) {
+              principal.fechaCompra = _fechaCompra;
+            }
+          }
           _copiasExpanded.addAll(_copias.keys);
         } else if (_existing!.localId != null) {
           final pivotUbicaciones = await provider.juegoRepository
@@ -180,6 +188,24 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             enfundadas: f.enfundadas,
           );
         }).toList();
+        if (_esExpansion && _juegoBaseLocalId != null) {
+          _juegoBaseData =
+              await provider.juegoRepository.getByLocalId(_juegoBaseLocalId!);
+          if (!_variasCopias && _propietariosLocalIds.length == 1) {
+            _expansionBaseOwnerLocalId = _propietariosLocalIds.first;
+          }
+          if (_variasCopias) {
+            for (final propId in _propietariosLocalIds) {
+              final copia = _copias[propId];
+              if (copia != null) {
+                copia.linkedBaseOwnerLocalId ??= propId;
+                if (copia.esPrincipal && _ubicacionEnCajaBase) {
+                  copia.enCajaBase = true;
+                }
+              }
+            }
+          }
+        }
       }
     } else {
       _estado = 'disponible';
@@ -218,6 +244,45 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         : null;
   }
 
+  int? _propLocalIdForServerPropietario(int serverPropId) {
+    final match = _propietarios.where(
+      (lp) => lp.serverId == serverPropId || lp.localId == -serverPropId,
+    );
+    return match.isEmpty ? null : match.first.localId;
+  }
+
+  bool get _baseHasMultipleOwners =>
+      _juegoBaseData != null &&
+      _juegoBaseData!.variasCopias &&
+      _juegoBaseData!.propietarios.length > 1;
+
+  bool get _expansionIsMultiOwner =>
+      _variasCopias && _propietariosLocalIds.length > 1;
+
+  Widget _buildBaseOwnerChip({
+    required String label,
+    required bool selected,
+    required ValueChanged<bool> onSelected,
+  }) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      selectedColor: Colors.indigo.shade100,
+      backgroundColor: Colors.grey.shade100,
+      side: BorderSide(
+        color: selected ? Colors.indigo.shade700 : Colors.grey.shade400,
+        width: selected ? 1.5 : 1,
+      ),
+      labelStyle: TextStyle(
+        color: selected ? Colors.indigo.shade900 : Colors.grey.shade800,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      showCheckmark: true,
+      checkmarkColor: Colors.indigo.shade900,
+      onSelected: onSelected,
+    );
+  }
+
   void _applyBggPrefill(Map<String, dynamic> game) {
     _nombre.text = game['name'] ?? _nombre.text;
     _descripcion.text = game['description'] ?? _descripcion.text;
@@ -237,14 +302,16 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     return _CopiaDraft(
       propietarioLocalId: propId,
       ubicacionLocalId: _propietarioUbicaciones[propId] ?? _ubicacionLocalId,
+      enCajaBase: _ubicacionEnCajaBase,
+      linkedBaseOwnerLocalId: propId,
       esPrincipal: false,
       estado: _estado,
+      fechaCompra: _fechaCompra,
       noEnfundar: _noEnfundar,
       idiomas: List.from(_idiomas),
       idiomaOtro: _idiomaOtroCtrl.text.trim().isEmpty
           ? null
           : _idiomaOtroCtrl.text.trim(),
-      independienteIdioma: _independienteIdioma,
       tradumaquetado: _tradumaquetado,
       tradumaquetadoParcial: _tradumaquetadoParcial,
       tradumaquetadoParcialNotas: _tradumaquetadoNotasCtrl.text.trim().isEmpty
@@ -295,11 +362,12 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         (_copias.values.isNotEmpty ? _copias.values.first : null);
     if (principal == null) return;
     _ubicacionLocalId = principal.ubicacionLocalId;
+    _ubicacionEnCajaBase = principal.enCajaBase;
     _estado = principal.estado ?? _estado;
+    _fechaCompra = principal.fechaCompra;
     _noEnfundar = principal.noEnfundar;
     _idiomas = List.from(principal.idiomas);
     _idiomaOtroCtrl.text = principal.idiomaOtroCtrl.text;
-    _independienteIdioma = principal.independienteIdioma;
     _tradumaquetado = principal.tradumaquetado;
     _tradumaquetadoParcial = principal.tradumaquetadoParcial;
     _tradumaquetadoNotasCtrl.text = principal.tradNotasCtrl.text;
@@ -456,10 +524,11 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     }
   }
 
-  Future<void> _pickFechaCompra() async {
+  Future<void> _pickFechaCompra({_CopiaDraft? copia}) async {
     final now = DateTime.now();
-    final current = _fechaCompra != null
-        ? DateTime.tryParse(_fechaCompra!) ?? now
+    final currentStr = copia?.fechaCompra ?? _fechaCompra;
+    final current = currentStr != null
+        ? DateTime.tryParse(currentStr) ?? now
         : now;
     final picked = await showDatePicker(
       context: context,
@@ -469,9 +538,14 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       locale: const Locale('es', 'ES'),
     );
     if (picked != null) {
+      final formatted =
+          '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
       setState(() {
-        _fechaCompra =
-            '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+        if (copia != null) {
+          copia.fechaCompra = formatted;
+        } else {
+          _fechaCompra = formatted;
+        }
       });
     }
   }
@@ -509,6 +583,32 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         const SnackBar(content: Text('Selecciona al menos una categoría')),
       );
       return;
+    }
+    if (_esExpansion &&
+        _baseHasMultipleOwners &&
+        !_expansionIsMultiOwner &&
+        _expansionBaseOwnerLocalId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Selecciona la copia del juego base')),
+      );
+      return;
+    }
+    if (_esExpansion &&
+        _baseHasMultipleOwners &&
+        _expansionIsMultiOwner) {
+      _ensureCopiasInitialized();
+      final missing = _propietariosLocalIds.where(
+        (id) => _copias[id]?.linkedBaseOwnerLocalId == null,
+      );
+      if (missing.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Indica la copia del juego base en cada copia de la expansión')),
+        );
+        return;
+      }
     }
 
     final provider = context.read<JuegosProvider>();
@@ -567,6 +667,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     String estadoToUse = _estado ?? 'disponible';
     double? precioToUse;
     bool noEnfundarToUse = _noEnfundar;
+    String? fechaCompraToUse = _fechaCompra;
     List<String> idiomasToUse = _idiomas;
     String? idiomaOtroToUse =
         _idiomas.contains('otros') ? _idiomaOtroCtrl.text.trim() : null;
@@ -582,15 +683,16 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       _ensureCopiasInitialized();
       final principal = _principalCopia;
       if (principal != null) {
+        _ubicacionEnCajaBase = principal.enCajaBase;
         ubicacionLocalIdToUse =
-            _ubicacionEnCajaBase ? null : principal.ubicacionLocalId;
+            principal.enCajaBase ? null : principal.ubicacionLocalId;
         estadoToUse = principal.estado ?? estadoToUse;
         noEnfundarToUse = principal.noEnfundar;
+        fechaCompraToUse = principal.fechaCompra;
         idiomasToUse = List.from(principal.idiomas);
         idiomaOtroToUse = principal.idiomas.contains('otros')
             ? principal.idiomaOtroCtrl.text.trim()
             : null;
-        independienteToUse = principal.independienteIdioma;
         traduToUse = principal.tradumaquetado;
         traduParcialToUse = principal.tradumaquetadoParcial;
         traduNotasToUse = principal.tradumaquetadoParcial
@@ -600,10 +702,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       }
       copiasData = {
         for (final entry in _copias.entries)
-          entry.key: entry.value.toRepositoryDraft(),
+          entry.key: entry.value.toRepositoryDraft(
+            independienteIdioma: _independienteIdioma,
+          ),
       };
       for (final entry in _copias.entries) {
-        _propietarioUbicaciones[entry.key] = entry.value.ubicacionLocalId;
+        _propietarioUbicaciones[entry.key] =
+            entry.value.enCajaBase ? null : entry.value.ubicacionLocalId;
       }
     }
 
@@ -631,7 +736,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       juegoBaseLocalId: _esExpansion ? _juegoBaseLocalId : null,
       estado: estadoToUse,
       precio: precioToUse,
-      fechaCompra: _fechaCompra,
+      fechaCompra: fechaCompraToUse,
       bggId: _bggId,
       imagen: _imagenPath,
       noEnfundar: noEnfundarToUse,
@@ -804,25 +909,27 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               ),
             ],
           ],
-          const SizedBox(height: 16),
-          InkWell(
-            onTap: _pickFechaCompra,
-            child: InputDecorator(
-              decoration: const InputDecoration(
-                labelText: 'Fecha de compra',
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.calendar_today),
+          if (!_variasCopias) ...[
+            const SizedBox(height: 16),
+            InkWell(
+              onTap: _pickFechaCompra,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Fecha de compra',
+                  border: OutlineInputBorder(),
+                  suffixIcon: Icon(Icons.calendar_today),
+                ),
+                child: Text(_fechaCompra ?? 'Sin fecha'),
               ),
-              child: Text(_fechaCompra ?? 'Sin fecha'),
             ),
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile(
-            title: const Text('No enfundar este juego'),
-            subtitle: const Text('Oculta avisos de fundas para este juego'),
-            value: _noEnfundar,
-            onChanged: _variasCopias ? null : (v) => setState(() => _noEnfundar = v),
-          ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              title: const Text('No enfundar este juego'),
+              subtitle: const Text('Oculta avisos de fundas para este juego'),
+              value: _noEnfundar,
+              onChanged: (v) => setState(() => _noEnfundar = v),
+            ),
+          ],
           SwitchListTile(
             title: const Text('Independiente del idioma'),
             value: _independienteIdioma,
@@ -892,11 +999,6 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   Juego? _juegoBaseData;
 
   Widget _buildExpansionSection() {
-    final baseHasMultipleOwners = _juegoBaseData != null &&
-        _juegoBaseData!.variasCopias &&
-        _juegoBaseData!.propietarios.length > 1;
-    final expansionIsMultiOwner = _variasCopias && _propietariosLocalIds.length > 1;
-
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -917,6 +1019,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                 if (!v) {
                   _juegoBaseLocalId = null;
                   _juegoBaseData = null;
+                  _expansionBaseOwnerLocalId = null;
                 }
               }),
             ),
@@ -936,34 +1039,23 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                     if (id == null) {
                       _ubicacionEnCajaBase = false;
                       _juegoBaseData = null;
+                      _expansionBaseOwnerLocalId = null;
                     }
                   });
                   if (id != null) {
                     final provider = context.read<JuegosProvider>();
                     final base = await provider.juegoRepository.getByLocalId(id);
                     if (mounted) {
-                      setState(() => _juegoBaseData = base);
-                      // If base has multiple owners and expansion has none selected yet,
-                      // pre-select the first base owner
-                      if (base != null &&
-                          base.variasCopias &&
-                          base.propietarios.isNotEmpty &&
-                          _propietariosLocalIds.isEmpty) {
-                        final allProps = await provider.propietarioRepository.getAll();
-                        final firstOwner = base.propietarios.first;
-                        final match = allProps.where(
-                          (lp) => lp.serverId == firstOwner.id || lp.localId == -firstOwner.id,
-                        );
-                        if (match.isNotEmpty && mounted) {
-                          setState(() => _propietariosLocalIds.add(match.first.localId));
-                        }
-                      }
+                      setState(() {
+                        _juegoBaseData = base;
+                        _expansionBaseOwnerLocalId = null;
+                      });
                     }
                   }
                 },
               ),
-              // Single-owner expansion with multi-owner base: pick which base copy
-              if (baseHasMultipleOwners && !expansionIsMultiOwner) ...[
+              // Expansión con una sola copia y base multi-propietario
+              if (_baseHasMultipleOwners && !_expansionIsMultiOwner) ...[
                 const SizedBox(height: 12),
                 Text('Propietario de la copia base',
                     style: TextStyle(
@@ -972,100 +1064,46 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         color: Colors.grey[700])),
                 const SizedBox(height: 4),
                 Text('¿De qué copia del juego base es esta expansión?',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
                   runSpacing: 4,
                   children: _juegoBaseData!.propietarios.map((p) {
-                    final match = _propietarios.where(
-                      (lp) => lp.serverId == p.id || lp.localId == -p.id,
-                    );
-                    if (match.isEmpty) return const SizedBox.shrink();
-                    final propLocalId = match.first.localId;
+                    final propLocalId = _propLocalIdForServerPropietario(p.id);
+                    if (propLocalId == null) return const SizedBox.shrink();
                     final selected = _expansionBaseOwnerLocalId == propLocalId;
-                    return ChoiceChip(
-                      label: Text(p.nombre),
+                    return _buildBaseOwnerChip(
+                      label: p.nombre,
                       selected: selected,
-                      onSelected: (v) => setState(() {
-                        if (v) {
+                      onSelected: (v) {
+                        if (!v) return;
+                        setState(() {
                           _expansionBaseOwnerLocalId = propLocalId;
-                          if (!_propietariosLocalIds.contains(propLocalId)) {
-                            _propietariosLocalIds.add(propLocalId);
-                          }
-                        } else if (_expansionBaseOwnerLocalId == propLocalId) {
-                          _expansionBaseOwnerLocalId = null;
-                        }
-                      }),
+                          _propietariosLocalIds
+                            ..clear()
+                            ..add(propLocalId);
+                          _variasCopias = false;
+                          _copias.clear();
+                          _copiasExpanded.clear();
+                        });
+                      },
                     );
                   }).toList(),
                 ),
               ],
-              // Multi-owner expansion: show per-owner info
-              if (expansionIsMultiOwner && _juegoBaseData != null) ...[
+              if (_baseHasMultipleOwners && _expansionIsMultiOwner) ...[
                 const SizedBox(height: 12),
-                const Divider(),
-                Text('Copias de la expansión',
+                Text('Copias del juego base',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: Colors.grey[700])),
                 const SizedBox(height: 4),
-                Text('Cada propietario tiene su propia copia',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                const SizedBox(height: 8),
-                ..._propietariosLocalIds.map((propId) {
-                  final prop = _propietarios.firstWhere((p) => p.localId == propId);
-                  final ubicNombre = _propietarioUbicaciones[propId] != null
-                      ? _ubicaciones
-                          .where((u) => u.localId == _propietarioUbicaciones[propId])
-                          .map((u) => u.rutaCompleta)
-                          .firstOrNull ?? 'Sin asignar'
-                      : 'Sin asignar';
-
-                  return Card(
-                    elevation: 0,
-                    color: Colors.grey[50],
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.person, size: 16, color: Colors.grey[600]),
-                              const SizedBox(width: 6),
-                              Text(prop.nombre,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w600, fontSize: 14)),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
-                              const SizedBox(width: 4),
-                              Text('Ubicación: $ubicNombre',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                            ],
-                          ),
-                          if (baseHasMultipleOwners) ...[
-                            const SizedBox(height: 2),
-                            Row(
-                              children: [
-                                Icon(Icons.casino, size: 14, color: Colors.grey[500]),
-                                const SizedBox(width: 4),
-                                Text('Copia base de: ${prop.nombre}',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  );
-                }),
+                Text(
+                  'Indica en cada copia de la expansión a qué copia del juego base corresponde.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
               ],
             ],
           ],
@@ -1401,6 +1439,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         if (_variasCopias) {
                           _copias.putIfAbsent(
                               p.localId, () => _copiaFromGlobal(p.localId));
+                          _copias[p.localId]!.linkedBaseOwnerLocalId ??=
+                              p.localId;
                           _copiasExpanded.add(p.localId);
                         }
                       } else {
@@ -1556,11 +1596,63 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
+                      if (_esExpansion &&
+                          _baseHasMultipleOwners &&
+                          _expansionIsMultiOwner) ...[
+                        Text('Copia del juego base',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[700])),
+                        const SizedBox(height: 4),
+                        Text(
+                          '¿De qué copia del juego base es la expansión de ${prop.nombre}?',
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children:
+                              _juegoBaseData!.propietarios.map((baseProp) {
+                            final basePropLocalId =
+                                _propLocalIdForServerPropietario(baseProp.id);
+                            if (basePropLocalId == null) {
+                              return const SizedBox.shrink();
+                            }
+                            final selected =
+                                copia.linkedBaseOwnerLocalId == basePropLocalId;
+                            return _buildBaseOwnerChip(
+                              label: baseProp.nombre,
+                              selected: selected,
+                              onSelected: (v) {
+                                if (!v) return;
+                                setState(() => copia.linkedBaseOwnerLocalId =
+                                    basePropLocalId);
+                              },
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       _buildCopiaUbicacion(copia),
                       const SizedBox(height: 12),
                       _buildCopiaIdiomas(copia),
                       const SizedBox(height: 12),
                       _buildCopiaFundas(copia),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: () => _pickFechaCompra(copia: copia),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Fecha de compra',
+                            border: OutlineInputBorder(),
+                            suffixIcon: Icon(Icons.calendar_today),
+                          ),
+                          child: Text(copia.fechaCompra ?? 'Sin fecha'),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
@@ -1585,6 +1677,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   }
 
   Widget _buildCopiaUbicacion(_CopiaDraft copia) {
+    final showEnCajaBase = _esExpansion && _juegoBaseLocalId != null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1597,41 +1691,56 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                       fontWeight: FontWeight.w600,
                       color: Colors.grey[700])),
             ),
-            IconButton(
-              icon: const Icon(Icons.add, size: 20),
-              tooltip: 'Nueva ubicación',
-              onPressed: () => _addUbicacionFromForm(
-                onSelected: (id) => setState(() {
-                  copia.ubicacionLocalId = id;
-                  _propietarioUbicaciones[copia.propietarioLocalId] = id;
-                }),
+            if (!copia.enCajaBase)
+              IconButton(
+                icon: const Icon(Icons.add, size: 20),
+                tooltip: 'Nueva ubicación',
+                onPressed: () => _addUbicacionFromForm(
+                  onSelected: (id) => setState(() {
+                    copia.ubicacionLocalId = id;
+                    _propietarioUbicaciones[copia.propietarioLocalId] = id;
+                  }),
+                ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<int?>(
-          initialValue: copia.ubicacionLocalId,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: 'Estante',
-            border: OutlineInputBorder(),
+        if (showEnCajaBase)
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('En la caja del juego base'),
+            value: copia.enCajaBase,
+            onChanged: (v) => setState(() {
+              copia.enCajaBase = v ?? false;
+              if (copia.enCajaBase) {
+                copia.ubicacionLocalId = null;
+                _propietarioUbicaciones[copia.propietarioLocalId] = null;
+              }
+            }),
           ),
-          items: [
-            const DropdownMenuItem<int?>(
-              value: null,
-              child: Text('Sin asignar', style: TextStyle(color: Colors.grey)),
+        if (!copia.enCajaBase)
+          DropdownButtonFormField<int?>(
+            initialValue: copia.ubicacionLocalId,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Estante',
+              border: OutlineInputBorder(),
             ),
-            ..._ubicaciones.map((u) => DropdownMenuItem<int?>(
-                  value: u.localId,
-                  child: Text(u.rutaCompleta, overflow: TextOverflow.ellipsis),
-                )),
-          ],
-          onChanged: (v) => setState(() {
-            copia.ubicacionLocalId = v;
-            _propietarioUbicaciones[copia.propietarioLocalId] = v;
-          }),
-        ),
+            items: [
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('Sin asignar', style: TextStyle(color: Colors.grey)),
+              ),
+              ..._ubicaciones.map((u) => DropdownMenuItem<int?>(
+                    value: u.localId,
+                    child: Text(u.rutaCompleta, overflow: TextOverflow.ellipsis),
+                  )),
+            ],
+            onChanged: (v) => setState(() {
+              copia.ubicacionLocalId = v;
+              _propietarioUbicaciones[copia.propietarioLocalId] = v;
+            }),
+          ),
       ],
     );
   }
@@ -1727,12 +1836,6 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             ],
           ],
         ],
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Independiente del idioma'),
-          value: copia.independienteIdioma,
-          onChanged: (v) => setState(() => copia.independienteIdioma = v),
-        ),
       ],
     );
   }
@@ -2003,11 +2106,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
 class _CopiaDraft {
   final int propietarioLocalId;
   int? ubicacionLocalId;
+  bool enCajaBase;
+  int? linkedBaseOwnerLocalId;
   bool esPrincipal;
   String? estado;
+  String? fechaCompra;
   bool noEnfundar;
   List<String> idiomas;
-  bool independienteIdioma;
   bool tradumaquetado;
   bool tradumaquetadoParcial;
   List<_FundaDraft> fundas;
@@ -2018,12 +2123,14 @@ class _CopiaDraft {
   _CopiaDraft({
     required this.propietarioLocalId,
     this.ubicacionLocalId,
+    this.enCajaBase = false,
+    this.linkedBaseOwnerLocalId,
     this.esPrincipal = false,
     this.estado,
+    this.fechaCompra,
     this.noEnfundar = false,
     List<String>? idiomas,
     String? idiomaOtro,
-    this.independienteIdioma = false,
     this.tradumaquetado = false,
     this.tradumaquetadoParcial = false,
     String? tradumaquetadoParcialNotas,
@@ -2041,12 +2148,13 @@ class _CopiaDraft {
     return _CopiaDraft(
       propietarioLocalId: draft.propietarioLocalId,
       ubicacionLocalId: draft.ubicacionLocalId,
+      linkedBaseOwnerLocalId: draft.propietarioLocalId,
       esPrincipal: draft.esPrincipal,
       estado: draft.estado,
+      fechaCompra: draft.fechaCompra,
       noEnfundar: draft.noEnfundar,
       idiomas: List.from(draft.idiomas),
       idiomaOtro: draft.idiomaOtro,
-      independienteIdioma: draft.independienteIdioma,
       tradumaquetado: draft.tradumaquetado,
       tradumaquetadoParcial: draft.tradumaquetadoParcial,
       tradumaquetadoParcialNotas: draft.tradumaquetadoParcialNotas,
@@ -2060,12 +2168,13 @@ class _CopiaDraft {
     );
   }
 
-  CopiaPropietarioDraft toRepositoryDraft() {
+  CopiaPropietarioDraft toRepositoryDraft({required bool independienteIdioma}) {
     return CopiaPropietarioDraft(
       propietarioLocalId: propietarioLocalId,
       ubicacionLocalId: ubicacionLocalId,
       esPrincipal: esPrincipal,
       estado: estado,
+      fechaCompra: fechaCompra,
       noEnfundar: noEnfundar,
       idiomas: List.from(idiomas),
       idiomaOtro: idiomaOtroCtrl.text.trim().isEmpty
