@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 6;
+  static const int _schemaVersion = 7;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -65,6 +65,9 @@ class DatabaseService {
         }
         if (oldVersion < 6) {
           await _migrateToV6(db);
+        }
+        if (oldVersion < 7) {
+          await _migrateToV7(db);
         }
       },
     );
@@ -244,6 +247,7 @@ class DatabaseService {
         ubicacion_local_id INTEGER,
         es_principal INTEGER NOT NULL DEFAULT 0,
         estado TEXT,
+        fecha_compra TEXT,
         no_enfundar INTEGER NOT NULL DEFAULT 0,
         idiomas TEXT,
         idioma_otro TEXT,
@@ -414,6 +418,25 @@ class DatabaseService {
         SELECT ubicacion_local_id FROM juegos j
         WHERE j.local_id = juego_propietario.juego_local_id
       )
+    ''');
+  }
+
+  Future<void> _migrateToV7(Database db) async {
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN fecha_compra TEXT');
+
+    // Backfill principal copy from game-level purchase date.
+    await db.execute('''
+      UPDATE juego_propietario
+      SET fecha_compra = (
+        SELECT fecha_compra FROM juegos j
+        WHERE j.local_id = juego_propietario.juego_local_id
+      )
+      WHERE es_principal = 1
+        AND fecha_compra IS NULL
+        AND juego_local_id IN (
+          SELECT local_id FROM juegos WHERE varias_copias = 1 AND fecha_compra IS NOT NULL
+        )
     ''');
   }
 

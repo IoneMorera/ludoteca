@@ -315,6 +315,7 @@ class SyncService {
           if (u != null) merged['ubicacion_id'] = u;
           merged['es_principal'] = ((r['es_principal'] as int?) ?? 0) == 1;
           merged['estado'] = r['estado'];
+          merged['fecha_compra'] = r['fecha_compra'];
           merged['no_enfundar'] = ((r['no_enfundar'] as int?) ?? 0) == 1;
           final idiomasRaw = r['idiomas'] as String?;
           if (idiomasRaw != null && idiomasRaw.isNotEmpty) {

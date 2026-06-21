@@ -365,13 +365,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                       _buildInfoGrid(juego, theme),
                       if (juego.propietarios.isNotEmpty) ...[
                         const SizedBox(height: 20),
-                        _buildSection('Propietarios', theme,
-                            child: Wrap(
-                              spacing: 8,
-                              children: juego.propietarios
-                                  .map((p) => Chip(label: Text(p.nombre)))
-                                  .toList(),
-                            )),
+                        _buildPropietariosSection(juego, theme),
                       ],
                       if (juego.expansiones.isNotEmpty) ...[
                         const SizedBox(height: 20),
@@ -438,40 +432,20 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     ),
                 ],
               ),
-              if (juego.esExpansion || _isCompartido(juego)) ...[
+              if (juego.esExpansion) ...[
                 const SizedBox(height: 4),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    if (juego.esExpansion)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.blue[50],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text('Expansi\u00f3n',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.blue[700],
-                                fontWeight: FontWeight.w600)),
-                      ),
-                    if (_isCompartido(juego))
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.lightBlue[50],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text('Compartido',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.lightBlue[700],
-                                fontWeight: FontWeight.w600)),
-                      ),
-                  ],
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('Expansi\u00f3n',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue[700],
+                          fontWeight: FontWeight.w600)),
                 ),
               ],
               if (juego.descripcion != null &&
@@ -481,16 +455,16 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     style: TextStyle(
                         color: Colors.grey[600], fontSize: 13, height: 1.4)),
               ],
-              if (juego.esExpansion && juego.juegoBase != null) ...[
+              if (juego.esExpansion &&
+                  (juego.juegoBase != null || juego.juegoBaseLocalId != null)) ...[
                 const SizedBox(height: 8),
                 InkWell(
                   onTap: () {
-                    if (Navigator.of(context).canPop()) {
-                      Navigator.of(context).pop();
-                    } else {
-                      Navigator.of(context).pushReplacementNamed('/juego',
-                          arguments: juego.juegoBase!.localId);
-                    }
+                    final baseLocalId =
+                        juego.juegoBase?.localId ?? juego.juegoBaseLocalId;
+                    if (baseLocalId == null) return;
+                    Navigator.of(context)
+                        .pushNamed('/juego', arguments: baseLocalId);
                   },
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -498,7 +472,8 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                       Icon(Icons.arrow_back, size: 14,
                           color: theme.colorScheme.primary),
                       const SizedBox(width: 4),
-                      Text('Juego base: ${juego.juegoBase!.nombre}',
+                      Text(
+                          'Juego base: ${juego.juegoBase?.nombre ?? 'Ver juego base'}',
                           style: TextStyle(
                               color: theme.colorScheme.primary,
                               fontWeight: FontWeight.w600,
@@ -694,6 +669,39 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
       default:
         return estado;
     }
+  }
+
+  Widget _buildPropietariosSection(Juego juego, ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Propietarios',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        if (_isCompartido(juego)) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.lightBlue[50],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text('Compartido',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.lightBlue[700],
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: juego.propietarios
+              .map((p) => Chip(label: Text(p.nombre)))
+              .toList(),
+        ),
+      ],
+    );
   }
 
   Widget _buildSection(String title, ThemeData theme, {required Widget child}) {
