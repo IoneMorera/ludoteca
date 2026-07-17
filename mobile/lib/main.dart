@@ -16,6 +16,7 @@ import 'screens/game_night_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/juego_detail_screen.dart';
 import 'screens/juego_form_screen.dart';
+import 'screens/juegos_aviso_screen.dart';
 import 'screens/juegos_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
@@ -116,6 +117,14 @@ class LudotecaApp extends StatelessWidget {
             case '/fundas-faltantes':
               return MaterialPageRoute(
                   builder: (_) => const FundasFaltantesScreen());
+            case '/juegos-por-estrenar':
+              return MaterialPageRoute(
+                  builder: (_) => const JuegosAvisoScreen(
+                      tipo: JuegoAvisoTipo.porEstrenar));
+            case '/faltan-traducciones':
+              return MaterialPageRoute(
+                  builder: (_) => const JuegosAvisoScreen(
+                      tipo: JuegoAvisoTipo.faltanTraduccion));
             case '/ubicaciones':
               return MaterialPageRoute(
                   builder: (_) => const UbicacionesScreen());

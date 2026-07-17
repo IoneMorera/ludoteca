@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 7;
+  static const int _schemaVersion = 8;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -68,6 +68,9 @@ class DatabaseService {
         }
         if (oldVersion < 7) {
           await _migrateToV7(db);
+        }
+        if (oldVersion < 8) {
+          await _migrateToV8(db);
         }
       },
     );
@@ -207,6 +210,8 @@ class DatabaseService {
         varias_copias INTEGER NOT NULL DEFAULT 0,
         precio REAL,
         en_caja_base INTEGER NOT NULL DEFAULT 0,
+        sin_abrir INTEGER NOT NULL DEFAULT 0,
+        print_and_play INTEGER NOT NULL DEFAULT 0,
         phash TEXT,
         image_local_path TEXT,
         updated_at TEXT,
@@ -438,6 +443,16 @@ class DatabaseService {
           SELECT local_id FROM juegos WHERE varias_copias = 1 AND fecha_compra IS NOT NULL
         )
     ''');
+  }
+
+  Future<void> _migrateToV8(Database db) async {
+    await db.execute(
+        'ALTER TABLE juegos ADD COLUMN sin_abrir INTEGER NOT NULL DEFAULT 0');
+    await db.execute(
+        'ALTER TABLE juegos ADD COLUMN print_and_play INTEGER NOT NULL DEFAULT 0');
+
+    // Fuerza un re-pull completo para traer los nuevos campos del servidor.
+    await db.delete('sync_state', where: "key = 'last_pull_at'");
   }
 
   // ---------- sync_state helpers ----------

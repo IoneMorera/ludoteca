@@ -81,6 +81,28 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               _buildFundasFaltantesCard(fundasFaltantes, theme),
             ],
+            if (_asInt(stats['juegosPorEstrenar']) > 0) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Juegos Por Estrenar',
+                subtitulo:
+                    '${_asInt(stats['juegosPorEstrenar'])} juegos sin abrir',
+                icon: Icons.card_giftcard,
+                color: Colors.teal,
+                route: '/juegos-por-estrenar',
+              ),
+            ],
+            if (_asInt(stats['juegosFaltanTraduccion']) > 0) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Faltan Traducciones',
+                subtitulo:
+                    '${_asInt(stats['juegosFaltanTraduccion'])} juegos por tradumaquetar',
+                icon: Icons.translate,
+                color: Colors.indigo,
+                route: '/faltan-traducciones',
+              ),
+            ],
             const SizedBox(height: 28),
             Text('Acciones rápidas',
                 style: theme.textTheme.titleMedium
@@ -147,6 +169,36 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.of(context).pushNamed('/fundas-faltantes'),
+      ),
+    );
+  }
+
+  Widget _buildAvisoCard({
+    required String titulo,
+    required String subtitulo,
+    required IconData icon,
+    required Color color,
+    required String route,
+  }) {
+    return Card(
+      elevation: 0,
+      color: color.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: color.withValues(alpha: 0.35)),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: color.withValues(alpha: 0.15),
+          child: Icon(icon, color: color),
+        ),
+        title: Text(
+          titulo,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(subtitulo),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).pushNamed(route),
       ),
     );
   }

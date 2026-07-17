@@ -69,6 +69,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   bool _tradumaquetadoParcial = false;
   final _tradumaquetadoNotasCtrl = TextEditingController();
   bool _variasCopias = false;
+  bool _sinAbrir = false;
+  bool _printAndPlay = false;
   List<_FundaDraft> _fundas = [];
   final Map<int, _CopiaDraft> _copias = {};
   final Set<int> _copiasExpanded = {};
@@ -142,6 +144,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         _tradumaquetadoParcial = _existing!.tradumaquetadoParcial;
         _tradumaquetadoNotasCtrl.text = _existing!.tradumaquetadoParcialNotas ?? '';
         _variasCopias = _existing!.variasCopias;
+        _sinAbrir = _existing!.sinAbrir;
+        _printAndPlay = _existing!.printAndPlay;
         for (final p in _existing!.propietarios) {
           final localProp = _propietarios.firstWhere(
             (lp) => lp.serverId == p.id || lp.localId == -p.id,
@@ -749,6 +753,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       tradumaquetadoParcialNotas: traduNotasToUse,
       variasCopias: _variasCopias,
       enCajaBase: _ubicacionEnCajaBase,
+      sinAbrir: _sinAbrir,
+      printAndPlay: _printAndPlay,
     );
 
     final fundas = fundasToUse
@@ -934,6 +940,18 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             title: const Text('Independiente del idioma'),
             value: _independienteIdioma,
             onChanged: (v) => setState(() => _independienteIdioma = v),
+          ),
+          SwitchListTile(
+            title: const Text('Sin abrir'),
+            subtitle: const Text('El juego a\u00fan est\u00e1 por estrenar'),
+            value: _sinAbrir,
+            onChanged: (v) => setState(() => _sinAbrir = v),
+          ),
+          SwitchListTile(
+            title: const Text('Print and Play'),
+            subtitle: const Text('Juego de impresi\u00f3n casera'),
+            value: _printAndPlay,
+            onChanged: (v) => setState(() => _printAndPlay = v),
           ),
           const SizedBox(height: 24),
           FilledButton.icon(

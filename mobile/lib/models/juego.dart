@@ -39,6 +39,8 @@ class Juego {
   final bool variasCopias;
   final double? precio;
   final bool enCajaBase;
+  final bool sinAbrir;
+  final bool printAndPlay;
   final String? phash;
   final String? imageLocalPath;
   final String? updatedAt;
@@ -82,6 +84,8 @@ class Juego {
     this.variasCopias = false,
     this.precio,
     this.enCajaBase = false,
+    this.sinAbrir = false,
+    this.printAndPlay = false,
     this.phash,
     this.imageLocalPath,
     this.updatedAt,
@@ -127,6 +131,8 @@ class Juego {
       variasCopias: variasCopias,
       precio: precio,
       enCajaBase: enCajaBase,
+      sinAbrir: sinAbrir,
+      printAndPlay: printAndPlay,
       phash: phash,
       imageLocalPath: imageLocalPath,
       updatedAt: updatedAt,
@@ -173,6 +179,8 @@ class Juego {
       variasCopias: variasCopias,
       precio: precio,
       enCajaBase: enCajaBase,
+      sinAbrir: sinAbrir,
+      printAndPlay: printAndPlay,
       phash: phash,
       imageLocalPath: imageLocalPath,
       updatedAt: updatedAt,
@@ -215,6 +223,8 @@ class Juego {
       variasCopias: json['varias_copias'] == true || json['varias_copias'] == 1,
       precio: (json['precio'] is num) ? (json['precio'] as num).toDouble() : null,
       enCajaBase: json['en_caja_base'] == true || json['en_caja_base'] == 1,
+      sinAbrir: json['sin_abrir'] == true || json['sin_abrir'] == 1,
+      printAndPlay: json['print_and_play'] == true || json['print_and_play'] == 1,
       updatedAt: json['updated_at'],
       categoria: json['categoria'] != null
           ? Categoria.fromJson(json['categoria'])
@@ -267,6 +277,8 @@ class Juego {
         'varias_copias': variasCopias,
         'precio': precio,
         'en_caja_base': enCajaBase,
+        'sin_abrir': sinAbrir,
+        'print_and_play': printAndPlay,
         'propietario_ids': propietarios.map((p) => p.id).toList(),
         'fundas': fundas.map((f) => f.toJson()).toList(),
       };
