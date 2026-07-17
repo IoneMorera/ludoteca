@@ -24,6 +24,32 @@ use Illuminate\Support\Facades\Log;
 class SyncController extends Controller
 {
     /**
+     * Returns full data for all synced tables so the mobile client
+     * can compare field-by-field against its local DB.
+     */
+    public function verify(): JsonResponse
+    {
+        $tables = [
+            'categorias' => $this->fetchCategorias(null),
+            'propietarios' => $this->fetchPropietarios(null),
+            'habitaciones' => $this->fetchHabitaciones(null),
+            'muebles' => $this->fetchMuebles(null),
+            'ubicaciones' => $this->fetchUbicaciones(null),
+            'tipos_funda' => $this->fetchTiposFunda(null),
+            'juegos' => $this->fetchJuegos(null),
+            'juego_fundas' => $this->fetchJuegoFundas(null),
+            'juego_propietario' => $this->fetchJuegoPropietario(null),
+            'juego_propietario_fundas' => $this->fetchJuegoPropietarioFundas(null),
+            'juego_categoria' => $this->fetchJuegoCategoria(null),
+        ];
+
+        return response()->json([
+            'tables' => (object) $tables,
+            'server_now' => now()->toIso8601String(),
+        ]);
+    }
+
+    /**
      * Returns all rows of the synced tables modified since `since`,
      * plus tombstones for deletes. If `since` is null, returns a full snapshot.
      */
@@ -228,6 +254,7 @@ class SyncController extends Controller
                 'idioma_otro', 'independiente_idioma', 'tradumaquetado',
                 'tradumaquetado_parcial', 'tradumaquetado_parcial_notas',
                 'varias_copias', 'precio', 'en_caja_base',
+                'sin_abrir', 'print_and_play',
             ],
             'categorias' => ['nombre', 'descripcion'],
             'propietarios' => ['nombre', 'bgg_username', 'es_principal'],
@@ -408,6 +435,8 @@ class SyncController extends Controller
                 'varias_copias' => (bool) $j->varias_copias,
                 'precio' => $j->precio,
                 'en_caja_base' => (bool) $j->en_caja_base,
+                'sin_abrir' => (bool) $j->sin_abrir,
+                'print_and_play' => (bool) $j->print_and_play,
                 'created_at' => $j->created_at?->toIso8601String(),
                 'updated_at' => $j->updated_at?->toIso8601String(),
             ])->all();

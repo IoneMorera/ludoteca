@@ -402,6 +402,34 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     return juego.propietarios.length > 1 && !juego.variasCopias;
   }
 
+  Widget _detailBadge(String label, Color? bgColor, Color? textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 12, color: textColor, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  List<Widget> _buildHeaderBadges(Juego juego) {
+    final badges = <Widget>[];
+    if (juego.esExpansion) {
+      badges.add(_detailBadge('Expansi\u00f3n', Colors.blue[50], Colors.blue[700]));
+    }
+    if (juego.sinAbrir) {
+      badges.add(_detailBadge('Por estrenar', Colors.teal[50], Colors.teal[700]));
+    }
+    if (juego.printAndPlay) {
+      badges.add(
+          _detailBadge('Print and Play', Colors.brown[50], Colors.brown[700]));
+    }
+    return badges;
+  }
+
   Widget _buildHeader(Juego juego, ThemeData theme) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -432,22 +460,18 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     ),
                 ],
               ),
-              if (juego.esExpansion) ...[
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
+              Builder(builder: (_) {
+                final badges = _buildHeaderBadges(juego);
+                if (badges.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: badges,
                   ),
-                  child: Text('Expansi\u00f3n',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[700],
-                          fontWeight: FontWeight.w600)),
-                ),
-              ],
+                );
+              }),
               if (juego.descripcion != null &&
                   juego.descripcion!.isNotEmpty) ...[
                 const SizedBox(height: 8),

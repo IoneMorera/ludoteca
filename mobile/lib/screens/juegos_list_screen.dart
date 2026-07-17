@@ -624,17 +624,9 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(juego.nombre,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 15)),
-                        ),
-                        ..._buildBadges(juego),
-                      ],
-                    ),
+                    Text(juego.nombre,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 15)),
                     const SizedBox(height: 4),
                     Row(
                       children: [
@@ -670,6 +662,18 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                                 fontSize: 12, color: Colors.grey[600])),
                       ],
                     ),
+                    Builder(builder: (_) {
+                      final badges = _buildBadges(juego);
+                      if (badges.isEmpty) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: badges,
+                        ),
+                      );
+                    }),
                     if (juego.fundas.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Wrap(
@@ -719,73 +723,44 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     );
   }
 
+  Widget _badge(String label, Color? bgColor, Color? textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 11, color: textColor, fontWeight: FontWeight.w600)),
+    );
+  }
+
   List<Widget> _buildBadges(Juego juego) {
     final badges = <Widget>[];
     if (juego.propietarios.length > 1 && !juego.variasCopias) {
-      badges.add(Container(
-        margin: const EdgeInsets.only(left: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.lightBlue[50],
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text('Compartido',
-            style: TextStyle(
-                fontSize: 11,
-                color: Colors.lightBlue[700],
-                fontWeight: FontWeight.w600)),
-      ));
+      badges.add(_badge('Compartido', Colors.lightBlue[50], Colors.lightBlue[700]));
     }
     if (juego.esExpansion) {
-      badges.add(Container(
-        margin: const EdgeInsets.only(left: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.purple[50],
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text('Exp.',
-            style: TextStyle(
-                fontSize: 11,
-                color: Colors.purple[700],
-                fontWeight: FontWeight.w600)),
-      ));
+      badges.add(_badge('Exp.', Colors.purple[50], Colors.purple[700]));
+    }
+    if (juego.sinAbrir) {
+      badges.add(_badge('Por estrenar', Colors.teal[50], Colors.teal[700]));
+    }
+    if (juego.printAndPlay) {
+      badges.add(_badge('P&P', Colors.brown[50], Colors.brown[700]));
     }
     final estado = juego.estado;
-    Color? badgeColor;
-    Color? textColor;
-    String? label;
     switch (estado) {
       case 'disponible':
-        badgeColor = Colors.green[50];
-        textColor = Colors.green[700];
-        label = 'Disponible';
+        badges.add(_badge('Disponible', Colors.green[50], Colors.green[700]));
         break;
       case 'en_venta':
-        badgeColor = Colors.orange[50];
-        textColor = Colors.orange[700];
-        label = 'En venta';
+        badges.add(_badge('En venta', Colors.orange[50], Colors.orange[700]));
         break;
       case 'vendido':
-        badgeColor = Colors.red[50];
-        textColor = Colors.red[700];
-        label = 'Vendido';
+        badges.add(_badge('Vendido', Colors.red[50], Colors.red[700]));
         break;
-    }
-    if (label != null) {
-      badges.add(Container(
-        margin: const EdgeInsets.only(left: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: badgeColor,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 11,
-                color: textColor,
-                fontWeight: FontWeight.w600)),
-      ));
     }
     return badges;
   }

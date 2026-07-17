@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart' show SyncStatus;
+import '../data/sync_verify_service.dart';
 import '../providers/auth_provider.dart';
 import '../providers/sync_provider.dart';
 import '../config/api_config.dart';
@@ -32,6 +33,231 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       if (mounted) setState(() => _appVersion = '?');
     }
+  }
+
+  Future<void> _verifySyncIntegrity() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Verificando integridad...')),
+          ],
+        ),
+      ),
+    );
+
+    final result = await SyncVerifyService().verify();
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              result.isFullySync ? Icons.check_circle : Icons.warning_amber,
+              color: result.isFullySync ? Colors.green : Colors.orange,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                result.isFullySync
+                    ? 'Todo sincronizado'
+                    : 'Discrepancias detectadas',
+                style: const TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: _buildVerifyContent(result),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVerifyContent(SyncVerifyResult result) {
+    if (result.error != null) {
+      return Text(
+        'Error al verificar: ${result.error}',
+        style: const TextStyle(color: Colors.red),
+      );
+    }
+
+    final items = <Widget>[];
+
+    if (result.outboxPending > 0) {
+      items.add(Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.outbox, size: 18, color: Colors.blue),
+            const SizedBox(width: 8),
+            Text(
+              '${result.outboxPending} operaciones pendientes en outbox',
+              style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.blue),
+            ),
+          ],
+        ),
+      ));
+    }
+
+    for (final table in result.tables) {
+      final isOk = table.isOk;
+      items.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isOk ? Icons.check : Icons.error_outline,
+                    size: 16,
+                    color: isOk ? Colors.green : Colors.orange,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _formatTableName(table.tableName),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: isOk ? null : Colors.orange[800],
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${table.localCount}/${table.remoteCount}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isOk ? Colors.grey : Colors.orange[800],
+                    ),
+                  ),
+                ],
+              ),
+              if (!isOk) ...[
+                if (table.missingInLocal.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 22, top: 2),
+                    child: Text(
+                      'Faltan en local (IDs): ${_formatIds(table.missingInLocal)}',
+                      style: TextStyle(fontSize: 11, color: Colors.red[700]),
+                    ),
+                  ),
+                if (table.missingInRemote.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 22, top: 2),
+                    child: Text(
+                      'Faltan en servidor (IDs): ${_formatIds(table.missingInRemote)}',
+                      style: TextStyle(fontSize: 11, color: Colors.red[700]),
+                    ),
+                  ),
+                if (table.dataDiffs.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 22, top: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${table.dataDiffs.length} registro(s) con datos distintos:',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange[800]),
+                        ),
+                        ...table.dataDiffs.take(10).map((rd) => Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 3),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                rd.recordName != null
+                                    ? 'ID ${rd.serverId} (${rd.recordName})'
+                                    : 'ID ${rd.serverId}',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey[800]),
+                              ),
+                              ...rd.diffs.take(5).map((d) => Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Text(
+                                  '${d.field}: local="${d.localValue}" vs servidor="${d.remoteValue}"',
+                                  style: TextStyle(fontSize: 10, color: Colors.red[600]),
+                                ),
+                              )),
+                              if (rd.diffs.length > 5)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: Text(
+                                    '... +${rd.diffs.length - 5} campos más',
+                                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        )),
+                        if (table.dataDiffs.length > 10)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Text(
+                              '... +${table.dataDiffs.length - 10} registros más',
+                              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                if (table.pendingCreates > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 22, top: 2),
+                    child: Text(
+                      '${table.pendingCreates} creates pendientes de subir',
+                      style: TextStyle(fontSize: 11, color: Colors.blue[700]),
+                    ),
+                  ),
+                if (table.pendingDeletes > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 22, top: 2),
+                    child: Text(
+                      '${table.pendingDeletes} deletes pendientes de subir',
+                      style: TextStyle(fontSize: 11, color: Colors.blue[700]),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: items,
+      ),
+    );
+  }
+
+  String _formatTableName(String name) {
+    return name.replaceAll('_', ' ').replaceFirstMapped(
+          RegExp(r'^[a-z]'),
+          (m) => m.group(0)!.toUpperCase(),
+        );
+  }
+
+  String _formatIds(List<int> ids) {
+    if (ids.length <= 5) return ids.join(', ');
+    return '${ids.take(5).join(', ')} ... (+${ids.length - 5} más)';
   }
 
   Future<void> _editServerUrl() async {
@@ -227,6 +453,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () => sync.syncNow(fullPull: true),
               );
             },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.fact_check_outlined),
+            title: const Text('Verificar integridad'),
+            subtitle: const Text('Compara datos locales con el servidor'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _verifySyncIntegrity,
           ),
           const Divider(),
           ListTile(

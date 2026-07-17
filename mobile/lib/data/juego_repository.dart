@@ -214,13 +214,50 @@ class JuegoRepository {
         "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'vendido' AND es_expansion = 0");
     final exp = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM juegos WHERE es_expansion = 1');
+    final porEstrenar = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido'");
+    final faltanTraduccion = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM juegos WHERE $_faltanTraduccionWhere");
     return <String, dynamic>{
       'totalJuegos': Sqflite.firstIntValue(total) ?? 0,
       'juegosDisponibles': Sqflite.firstIntValue(disponibles) ?? 0,
       'juegosEnVenta': Sqflite.firstIntValue(enVenta) ?? 0,
       'juegosVendidos': Sqflite.firstIntValue(vendidos) ?? 0,
       'totalExpansiones': Sqflite.firstIntValue(exp) ?? 0,
+      'juegosPorEstrenar': Sqflite.firstIntValue(porEstrenar) ?? 0,
+      'juegosFaltanTraduccion': Sqflite.firstIntValue(faltanTraduccion) ?? 0,
     };
+  }
+
+  /// Condici\u00f3n SQL para los juegos "por tradumaquetar": su idioma no incluye
+  /// el castellano, no son independientes del idioma y no est\u00e1n completamente
+  /// tradumaquetados (incluye por tanto los de tradumaquetaci\u00f3n parcial).
+  static const String _faltanTraduccionWhere = '''
+    COALESCE(idiomas, '') != ''
+    AND idiomas != '[]'
+    AND idiomas NOT LIKE '%"castellano"%'
+    AND COALESCE(independiente_idioma, 0) = 0
+    AND COALESCE(tradumaquetado, 0) = 0
+    AND COALESCE(estado, '') != 'vendido'
+  ''';
+
+  /// Juegos marcados como "sin abrir" (por estrenar).
+  Future<List<Juego>> juegosPorEstrenar() async {
+    final db = await _dbService.database;
+    final rows = await db.rawQuery(
+      "SELECT * FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido' ORDER BY nombre",
+    );
+    return _hydrateAll(rows);
+  }
+
+  /// Juegos que necesitan tradumaquetaci\u00f3n (idioma sin castellano y no
+  /// tradumaquetados, incluyendo los parciales).
+  Future<List<Juego>> juegosFaltanTraduccion() async {
+    final db = await _dbService.database;
+    final rows = await db.rawQuery(
+      'SELECT * FROM juegos WHERE $_faltanTraduccionWhere ORDER BY nombre',
+    );
+    return _hydrateAll(rows);
   }
 
   Future<bool> existsWithNombre(String nombre, {int? excludeLocalId}) async {
@@ -534,6 +571,9 @@ class JuegoRepository {
       'varias_copias': (data['varias_copias'] == true) ? 1 : 0,
       'precio': precio,
       'en_caja_base': enCajaBase ? 1 : 0,
+      'sin_abrir': (data['sin_abrir'] == true || data['sin_abrir'] == 1) ? 1 : 0,
+      'print_and_play':
+          (data['print_and_play'] == true || data['print_and_play'] == 1) ? 1 : 0,
       'updated_at': data['updated_at'],
       'dirty': 0,
       'pending_action': null,
@@ -1031,6 +1071,8 @@ class JuegoRepository {
         variasCopias: ((r['varias_copias'] as int?) ?? 0) == 1,
         precio: r['precio'] != null ? (r['precio'] as num).toDouble() : null,
         enCajaBase: ((r['en_caja_base'] as int?) ?? 0) == 1,
+        sinAbrir: ((r['sin_abrir'] as int?) ?? 0) == 1,
+        printAndPlay: ((r['print_and_play'] as int?) ?? 0) == 1,
         phash: r['phash'] as String?,
         imageLocalPath: r['image_local_path'] as String?,
         updatedAt: r['updated_at'] as String?,
@@ -1167,6 +1209,8 @@ class JuegoRepository {
       'varias_copias': juego.variasCopias ? 1 : 0,
       'precio': juego.precio,
       'en_caja_base': juego.enCajaBase ? 1 : 0,
+      'sin_abrir': juego.sinAbrir ? 1 : 0,
+      'print_and_play': juego.printAndPlay ? 1 : 0,
     };
   }
 
@@ -1206,6 +1250,8 @@ class JuegoRepository {
       'varias_copias': values['varias_copias'] == 1,
       'precio': values['precio'],
       'en_caja_base': values['en_caja_base'] == 1,
+      'sin_abrir': values['sin_abrir'] == 1,
+      'print_and_play': values['print_and_play'] == 1,
     };
   }
 
@@ -1535,82 +1581,34 @@ class JuegoRepository {
     final existing = await db.query('juego_categoria',
         where: 'juego_local_id = ?', whereArgs: [juegoLocalId]);
 
-    final existingByCatLocal = <int, Map<String, dynamic>>{};
-    final orphanRows = <Map<String, dynamic>>[];
-    for (final r in existing) {
-      final catLocal = r['categoria_local_id'] as int?;
-      if (catLocal != null) {
-        existingByCatLocal[catLocal] = r;
-      } else {
-        orphanRows.add(r);
-      }
-    }
-
-    // Include legacy categoria_id when there is no pivot row yet (common for
-    // imports BGG or rows created by the local migration before sync).
-    final juegoRows = await db.query('juegos',
-        where: 'local_id = ?', whereArgs: [juegoLocalId], limit: 1);
-    if (juegoRows.isNotEmpty) {
-      final legacyCatLocal = juegoRows.first['categoria_local_id'] as int?;
-      if (legacyCatLocal != null &&
-          !existingByCatLocal.containsKey(legacyCatLocal)) {
-        existingByCatLocal[legacyCatLocal] = {
-          'local_id': null,
-          'server_id': null,
-          'categoria_local_id': legacyCatLocal,
-          'categoria_server_id': juegoRows.first['categoria_server_id'],
-          'juego_server_id':
-              juegoRows.first['server_id'] ?? juegoServerId,
-          'juego_local_id': juegoLocalId,
-          '_legacy_only': 1,
-        };
-      }
-    }
-
     final desired = catLocalIds.toSet();
 
-    // Remove categories no longer desired
-    for (final entry in existingByCatLocal.entries) {
-      if (!desired.contains(entry.key)) {
-        final row = entry.value;
-        final legacyOnly = (row['_legacy_only'] as int?) == 1;
-        final localId = row['local_id'] as int?;
-        if (!legacyOnly && localId != null) {
-          await db.delete('juego_categoria',
-              where: 'local_id = ?', whereArgs: [localId]);
-        }
-        await _enqueueCategoriaPivotDelete(
-          db,
-          row,
-          localId: localId,
-          juegoServerId: juegoServerId,
-        );
-      }
-    }
-
-    // Clean up orphan rows (no local category resolved)
-    for (final r in orphanRows) {
+    // Resolvemos cada fila del pivot a su categoria_local_id (intentando
+    // recuperar las hu\u00e9rfanas a trav\u00e9s del server_id) y eliminamos duplicados
+    // o filas que ya no se pueden resolver.
+    final existingByCatLocal = <int, Map<String, dynamic>>{};
+    for (final r in existing) {
       final localId = r['local_id'] as int;
-      final serverId = r['server_id'] as int?;
-      final catServerId = r['categoria_server_id'] as int?;
-      // Check if this orphan corresponds to a desired category by server_id
-      bool matchesDesired = false;
-      if (catServerId != null) {
-        final catRow = await db.query('categorias',
-            where: 'server_id = ?', whereArgs: [catServerId], limit: 1);
-        if (catRow.isNotEmpty) {
-          final resolvedLocalId = catRow.first['local_id'] as int;
-          if (desired.contains(resolvedLocalId)) {
-            // Fix the orphan row
+      int? catLocal = r['categoria_local_id'] as int?;
+
+      if (catLocal == null) {
+        final catServerId = r['categoria_server_id'] as int?;
+        if (catServerId != null) {
+          final catRow = await db.query('categorias',
+              where: 'server_id = ?', whereArgs: [catServerId], limit: 1);
+          if (catRow.isNotEmpty) {
+            catLocal = catRow.first['local_id'] as int;
             await db.update('juego_categoria',
-                {'categoria_local_id': resolvedLocalId},
+                {'categoria_local_id': catLocal},
                 where: 'local_id = ?', whereArgs: [localId]);
-            existingByCatLocal[resolvedLocalId] = r;
-            matchesDesired = true;
           }
         }
       }
-      if (!matchesDesired) {
+
+      final serverId = r['server_id'] as int?;
+
+      // Fila hu\u00e9rfana irrecuperable o duplicada: se elimina.
+      if (catLocal == null || existingByCatLocal.containsKey(catLocal)) {
         await db.delete('juego_categoria',
             where: 'local_id = ?', whereArgs: [localId]);
         if (serverId != null) {
@@ -1621,16 +1619,66 @@ class JuegoRepository {
             serverId: serverId,
           );
         } else {
-          await _enqueueCategoriaPivotDelete(
-            db,
-            r,
-            localId: localId,
-            juegoServerId: juegoServerId,
-          );
+          await _outbox.removeForLocalRow('juego_categoria', localId);
         }
+        continue;
+      }
+
+      existingByCatLocal[catLocal] = {...r, 'categoria_local_id': catLocal};
+    }
+
+    // Elimina las categor\u00edas que ya no est\u00e1n seleccionadas.
+    for (final entry in existingByCatLocal.entries) {
+      if (desired.contains(entry.key)) continue;
+      final row = entry.value;
+      final localId = row['local_id'] as int;
+      final serverId = row['server_id'] as int?;
+      await db.delete('juego_categoria',
+          where: 'local_id = ?', whereArgs: [localId]);
+      if (serverId != null) {
+        await _outbox.enqueue(
+          table: 'juego_categoria',
+          action: SyncAction.delete,
+          localId: localId,
+          serverId: serverId,
+        );
+      } else {
+        await _enqueueCategoriaPivotDelete(
+          db,
+          row,
+          localId: localId,
+          juegoServerId: juegoServerId,
+        );
       }
     }
 
+    // La categor\u00eda legacy (juegos.categoria_id, p.ej. "Importado BGG") puede
+    // existir en el servidor como fila del pivot aunque no tengamos fila local.
+    // Si se ha deseleccionado, encolamos su borrado en el servidor.
+    final juegoRows = await db.query('juegos',
+        where: 'local_id = ?', whereArgs: [juegoLocalId], limit: 1);
+    if (juegoRows.isNotEmpty) {
+      final legacyCatLocal = juegoRows.first['categoria_local_id'] as int?;
+      if (legacyCatLocal != null &&
+          !existingByCatLocal.containsKey(legacyCatLocal) &&
+          !desired.contains(legacyCatLocal)) {
+        await _enqueueCategoriaPivotDelete(
+          db,
+          {
+            'server_id': null,
+            'categoria_local_id': legacyCatLocal,
+            'categoria_server_id': juegoRows.first['categoria_server_id'],
+            'juego_server_id': juegoRows.first['server_id'] ?? juegoServerId,
+            'juego_local_id': juegoLocalId,
+          },
+          localId: null,
+          juegoServerId: juegoServerId,
+        );
+      }
+    }
+
+    // Crea una fila de pivot para cada categor\u00eda seleccionada que a\u00fan no la
+    // tenga (incluida la categor\u00eda legacy que se mantenga seleccionada).
     for (final catLocalId in catLocalIds) {
       if (existingByCatLocal.containsKey(catLocalId)) continue;
       final catRow = await db.query('categorias',

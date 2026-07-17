@@ -37,6 +37,8 @@ class Juego extends Model
         'varias_copias',
         'precio',
         'en_caja_base',
+        'sin_abrir',
+        'print_and_play',
     ];
 
     protected $casts = [
@@ -56,6 +58,8 @@ class Juego extends Model
         'varias_copias' => 'boolean',
         'precio' => 'decimal:2',
         'en_caja_base' => 'boolean',
+        'sin_abrir' => 'boolean',
+        'print_and_play' => 'boolean',
     ];
 
     public function categoria()

@@ -34,6 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- Rutas con tenancy (BBDD del usuario) ---
     Route::middleware([InitializeTenancyByUser::class, SubstituteBindings::class])->group(function () {
         Route::get('sync/snapshot', [SyncController::class, 'snapshot']);
+        Route::get('sync/verify', [SyncController::class, 'verify']);
         Route::post('sync/push', [SyncController::class, 'push']);
         Route::post('vision/recognize', [VisionController::class, 'recognize']);
 
