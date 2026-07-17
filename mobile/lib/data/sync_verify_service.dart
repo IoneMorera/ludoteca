@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../services/api_service.dart';
@@ -89,7 +91,7 @@ class SyncVerifyService {
       'juego_id', 'propietario_id', 'ubicacion_id', 'es_principal',
       'estado', 'fecha_compra', 'no_enfundar', 'idiomas', 'idioma_otro',
       'independiente_idioma', 'tradumaquetado', 'tradumaquetado_parcial',
-      'tradumaquetado_parcial_notas',
+      'tradumaquetado_parcial_notas', 'sin_abrir', 'print_and_play',
     ],
     'juego_propietario_fundas': [
       'juego_propietario_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas',
@@ -135,7 +137,7 @@ class SyncVerifyService {
     'juego_fundas': ['enfundadas'],
     'juego_propietario': [
       'es_principal', 'no_enfundar', 'independiente_idioma',
-      'tradumaquetado', 'tradumaquetado_parcial',
+      'tradumaquetado', 'tradumaquetado_parcial', 'sin_abrir', 'print_and_play',
     ],
     'juego_propietario_fundas': ['enfundadas'],
   };
@@ -269,7 +271,29 @@ class SyncVerifyService {
 
   String? _normalize(dynamic value) {
     if (value == null) return null;
-    if (value is String) return value.isEmpty ? null : value;
+    // Listas (ej. `idiomas` que el servidor envía como array nativo): se
+    // canonicalizan a JSON para poder compararlas con el texto JSON local.
+    if (value is List || value is Map) {
+      if (value is List && value.isEmpty) return null;
+      if (value is Map && value.isEmpty) return null;
+      return jsonEncode(value);
+    }
+    if (value is String) {
+      if (value.isEmpty) return null;
+      // Texto que representa un array/objeto JSON almacenado en SQLite
+      // (ej. `idiomas` = '["castellano"]'): decodificar y recodificar para
+      // obtener la misma forma canónica que el array nativo del servidor.
+      final trimmed = value.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is List && decoded.isEmpty) return null;
+          if (decoded is Map && decoded.isEmpty) return null;
+          return jsonEncode(decoded);
+        } catch (_) {}
+      }
+      return value;
+    }
     if (value is double) {
       if (value == value.truncateToDouble()) return value.toInt().toString();
       return value.toString();

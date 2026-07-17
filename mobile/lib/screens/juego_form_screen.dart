@@ -681,6 +681,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     String? traduNotasToUse =
         _tradumaquetadoParcial ? _tradumaquetadoNotasCtrl.text.trim() : null;
     List<_FundaDraft> fundasToUse = _fundas;
+    bool sinAbrirToUse = _sinAbrir;
+    bool printAndPlayToUse = _printAndPlay;
 
     Map<int, CopiaPropietarioDraft>? copiasData;
     if (_variasCopias) {
@@ -703,6 +705,10 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             ? principal.tradNotasCtrl.text.trim()
             : null;
         fundasToUse = principal.fundas;
+        // El nivel juego refleja la copia principal, igual que el resto de
+        // datos mostrados en la pantalla de detalle/listado.
+        sinAbrirToUse = principal.sinAbrir;
+        printAndPlayToUse = principal.printAndPlay;
       }
       copiasData = {
         for (final entry in _copias.entries)
@@ -753,8 +759,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       tradumaquetadoParcialNotas: traduNotasToUse,
       variasCopias: _variasCopias,
       enCajaBase: _ubicacionEnCajaBase,
-      sinAbrir: _sinAbrir,
-      printAndPlay: _printAndPlay,
+      sinAbrir: sinAbrirToUse,
+      printAndPlay: printAndPlayToUse,
     );
 
     final fundas = fundasToUse
@@ -941,18 +947,20 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             value: _independienteIdioma,
             onChanged: (v) => setState(() => _independienteIdioma = v),
           ),
-          SwitchListTile(
-            title: const Text('Sin abrir'),
-            subtitle: const Text('El juego a\u00fan est\u00e1 por estrenar'),
-            value: _sinAbrir,
-            onChanged: (v) => setState(() => _sinAbrir = v),
-          ),
-          SwitchListTile(
-            title: const Text('Print and Play'),
-            subtitle: const Text('Juego de impresi\u00f3n casera'),
-            value: _printAndPlay,
-            onChanged: (v) => setState(() => _printAndPlay = v),
-          ),
+          if (!_variasCopias) ...[
+            SwitchListTile(
+              title: const Text('Sin abrir'),
+              subtitle: const Text('El juego a\u00fan est\u00e1 por estrenar'),
+              value: _sinAbrir,
+              onChanged: (v) => setState(() => _sinAbrir = v),
+            ),
+            SwitchListTile(
+              title: const Text('Print and Play'),
+              subtitle: const Text('Juego de impresi\u00f3n casera'),
+              value: _printAndPlay,
+              onChanged: (v) => setState(() => _printAndPlay = v),
+            ),
+          ],
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _saving ? null : _save,
@@ -1679,6 +1687,21 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         onChanged: (v) =>
                             setState(() => copia.noEnfundar = v),
                       ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Sin abrir'),
+                        subtitle: const Text('Esta copia a\u00fan est\u00e1 por estrenar'),
+                        value: copia.sinAbrir,
+                        onChanged: (v) => setState(() => copia.sinAbrir = v),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Print and Play'),
+                        subtitle: const Text('Copia de impresi\u00f3n casera'),
+                        value: copia.printAndPlay,
+                        onChanged: (v) =>
+                            setState(() => copia.printAndPlay = v),
+                      ),
                       if (_existing != null) ...[
                         const SizedBox(height: 8),
                         _buildEstadoSection(copia: copia),
@@ -2133,6 +2156,8 @@ class _CopiaDraft {
   List<String> idiomas;
   bool tradumaquetado;
   bool tradumaquetadoParcial;
+  bool sinAbrir;
+  bool printAndPlay;
   List<_FundaDraft> fundas;
   late final TextEditingController idiomaOtroCtrl;
   late final TextEditingController tradNotasCtrl;
@@ -2152,6 +2177,8 @@ class _CopiaDraft {
     this.tradumaquetado = false,
     this.tradumaquetadoParcial = false,
     String? tradumaquetadoParcialNotas,
+    this.sinAbrir = false,
+    this.printAndPlay = false,
     String? precio,
     List<_FundaDraft>? fundas,
   })  : idiomas = idiomas ?? [],
@@ -2176,6 +2203,8 @@ class _CopiaDraft {
       tradumaquetado: draft.tradumaquetado,
       tradumaquetadoParcial: draft.tradumaquetadoParcial,
       tradumaquetadoParcialNotas: draft.tradumaquetadoParcialNotas,
+      sinAbrir: draft.sinAbrir,
+      printAndPlay: draft.printAndPlay,
       fundas: draft.fundas
           .map((f) => _FundaDraft(
                 tipoFundaLocalId: f.tipoFundaLocalId,
@@ -2204,6 +2233,8 @@ class _CopiaDraft {
       tradumaquetadoParcialNotas: tradNotasCtrl.text.trim().isEmpty
           ? null
           : tradNotasCtrl.text.trim(),
+      sinAbrir: sinAbrir,
+      printAndPlay: printAndPlay,
       fundas: fundas
           .map((f) => JuegoFundaDraft(
                 tipoFundaLocalId: f.tipoFundaLocalId,

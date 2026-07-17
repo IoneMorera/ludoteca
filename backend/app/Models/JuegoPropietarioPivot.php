@@ -31,6 +31,8 @@ class JuegoPropietarioPivot extends Model
         'tradumaquetado',
         'tradumaquetado_parcial',
         'tradumaquetado_parcial_notas',
+        'sin_abrir',
+        'print_and_play',
     ];
 
     protected $casts = [
@@ -44,6 +46,8 @@ class JuegoPropietarioPivot extends Model
         'independiente_idioma' => 'boolean',
         'tradumaquetado' => 'boolean',
         'tradumaquetado_parcial' => 'boolean',
+        'sin_abrir' => 'boolean',
+        'print_and_play' => 'boolean',
     ];
 
     public function fundas()
