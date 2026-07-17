@@ -267,7 +267,7 @@ class SyncController extends Controller
                 'juego_id', 'propietario_id', 'ubicacion_id', 'es_principal',
                 'estado', 'fecha_compra', 'no_enfundar', 'idiomas', 'idioma_otro',
                 'independiente_idioma', 'tradumaquetado', 'tradumaquetado_parcial',
-                'tradumaquetado_parcial_notas',
+                'tradumaquetado_parcial_notas', 'sin_abrir', 'print_and_play',
             ],
             'juego_propietario_fundas' => [
                 'juego_propietario_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas',
@@ -478,6 +478,8 @@ class SyncController extends Controller
                 'tradumaquetado' => (bool) ($row->tradumaquetado ?? false),
                 'tradumaquetado_parcial' => (bool) ($row->tradumaquetado_parcial ?? false),
                 'tradumaquetado_parcial_notas' => $row->tradumaquetado_parcial_notas ?? null,
+                'sin_abrir' => (bool) ($row->sin_abrir ?? false),
+                'print_and_play' => (bool) ($row->print_and_play ?? false),
                 'created_at' => $row->created_at,
                 'updated_at' => $row->updated_at,
             ])->all();

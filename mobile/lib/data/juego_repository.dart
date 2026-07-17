@@ -149,6 +149,8 @@ class JuegoRepository {
         tradumaquetado: (r['tradumaquetado'] as int?) == 1,
         tradumaquetadoParcial: (r['tradumaquetado_parcial'] as int?) == 1,
         tradumaquetadoParcialNotas: r['tradumaquetado_parcial_notas'] as String?,
+        sinAbrir: (r['sin_abrir'] as int?) == 1,
+        printAndPlay: (r['print_and_play'] as int?) == 1,
         fundas: fundas,
       );
     }
@@ -700,6 +702,8 @@ class JuegoRepository {
       'tradumaquetado': (data['tradumaquetado'] == true) ? 1 : 0,
       'tradumaquetado_parcial': (data['tradumaquetado_parcial'] == true) ? 1 : 0,
       'tradumaquetado_parcial_notas': data['tradumaquetado_parcial_notas'],
+      'sin_abrir': (data['sin_abrir'] == true) ? 1 : 0,
+      'print_and_play': (data['print_and_play'] == true) ? 1 : 0,
       'updated_at': data['updated_at'],
       'dirty': 0,
       'pending_action': null,
@@ -1418,6 +1422,8 @@ class JuegoRepository {
       'tradumaquetado': copia.tradumaquetado ? 1 : 0,
       'tradumaquetado_parcial': copia.tradumaquetadoParcial ? 1 : 0,
       'tradumaquetado_parcial_notas': copia.tradumaquetadoParcialNotas,
+      'sin_abrir': copia.sinAbrir ? 1 : 0,
+      'print_and_play': copia.printAndPlay ? 1 : 0,
     };
   }
 
@@ -1435,6 +1441,8 @@ class JuegoRepository {
       'tradumaquetado',
       'tradumaquetado_parcial',
       'tradumaquetado_parcial_notas',
+      'sin_abrir',
+      'print_and_play',
     ];
     for (final key in keys) {
       if (existing[key] != desired[key]) return true;
@@ -1468,6 +1476,8 @@ class JuegoRepository {
       'tradumaquetado': (row['tradumaquetado'] as int?) == 1,
       'tradumaquetado_parcial': (row['tradumaquetado_parcial'] as int?) == 1,
       'tradumaquetado_parcial_notas': row['tradumaquetado_parcial_notas'],
+      'sin_abrir': (row['sin_abrir'] as int?) == 1,
+      'print_and_play': (row['print_and_play'] as int?) == 1,
     };
   }
 
@@ -1942,6 +1952,8 @@ class CopiaPropietarioDraft {
   final bool tradumaquetado;
   final bool tradumaquetadoParcial;
   final String? tradumaquetadoParcialNotas;
+  final bool sinAbrir;
+  final bool printAndPlay;
   final List<JuegoFundaDraft> fundas;
 
   CopiaPropietarioDraft({
@@ -1957,6 +1969,8 @@ class CopiaPropietarioDraft {
     this.tradumaquetado = false,
     this.tradumaquetadoParcial = false,
     this.tradumaquetadoParcialNotas,
+    this.sinAbrir = false,
+    this.printAndPlay = false,
     this.fundas = const [],
   });
 
@@ -1972,6 +1986,8 @@ class CopiaPropietarioDraft {
     bool? tradumaquetado,
     bool? tradumaquetadoParcial,
     String? tradumaquetadoParcialNotas,
+    bool? sinAbrir,
+    bool? printAndPlay,
     List<JuegoFundaDraft>? fundas,
   }) {
     return CopiaPropietarioDraft(
@@ -1989,6 +2005,8 @@ class CopiaPropietarioDraft {
           tradumaquetadoParcial ?? this.tradumaquetadoParcial,
       tradumaquetadoParcialNotas:
           tradumaquetadoParcialNotas ?? this.tradumaquetadoParcialNotas,
+      sinAbrir: sinAbrir ?? this.sinAbrir,
+      printAndPlay: printAndPlay ?? this.printAndPlay,
       fundas: fundas ?? this.fundas,
     );
   }

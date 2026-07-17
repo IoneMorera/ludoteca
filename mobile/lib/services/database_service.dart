@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 8;
+  static const int _schemaVersion = 9;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -71,6 +71,9 @@ class DatabaseService {
         }
         if (oldVersion < 8) {
           await _migrateToV8(db);
+        }
+        if (oldVersion < 9) {
+          await _migrateToV9(db);
         }
       },
     );
@@ -260,6 +263,8 @@ class DatabaseService {
         tradumaquetado INTEGER NOT NULL DEFAULT 0,
         tradumaquetado_parcial INTEGER NOT NULL DEFAULT 0,
         tradumaquetado_parcial_notas TEXT,
+        sin_abrir INTEGER NOT NULL DEFAULT 0,
+        print_and_play INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT,
         dirty INTEGER NOT NULL DEFAULT 0,
         pending_action TEXT
@@ -450,6 +455,33 @@ class DatabaseService {
         'ALTER TABLE juegos ADD COLUMN sin_abrir INTEGER NOT NULL DEFAULT 0');
     await db.execute(
         'ALTER TABLE juegos ADD COLUMN print_and_play INTEGER NOT NULL DEFAULT 0');
+
+    // Fuerza un re-pull completo para traer los nuevos campos del servidor.
+    await db.delete('sync_state', where: "key = 'last_pull_at'");
+  }
+
+  Future<void> _migrateToV9(Database db) async {
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN sin_abrir INTEGER NOT NULL DEFAULT 0');
+    await db.execute(
+        'ALTER TABLE juego_propietario ADD COLUMN print_and_play INTEGER NOT NULL DEFAULT 0');
+
+    // Backfill: la copia principal hereda los indicadores del juego.
+    await db.execute('''
+      UPDATE juego_propietario
+      SET sin_abrir = (
+            SELECT sin_abrir FROM juegos j
+            WHERE j.local_id = juego_propietario.juego_local_id
+          ),
+          print_and_play = (
+            SELECT print_and_play FROM juegos j
+            WHERE j.local_id = juego_propietario.juego_local_id
+          )
+      WHERE es_principal = 1
+        AND juego_local_id IN (
+          SELECT local_id FROM juegos WHERE varias_copias = 1
+        )
+    ''');
 
     // Fuerza un re-pull completo para traer los nuevos campos del servidor.
     await db.delete('sync_state', where: "key = 'last_pull_at'");

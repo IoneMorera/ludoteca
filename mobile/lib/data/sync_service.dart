@@ -332,6 +332,9 @@ class SyncService {
               ((r['tradumaquetado_parcial'] as int?) ?? 0) == 1;
           merged['tradumaquetado_parcial_notas'] =
               r['tradumaquetado_parcial_notas'];
+          merged['sin_abrir'] = ((r['sin_abrir'] as int?) ?? 0) == 1;
+          merged['print_and_play'] =
+              ((r['print_and_play'] as int?) ?? 0) == 1;
         }
         break;
       case 'juego_propietario_fundas':
