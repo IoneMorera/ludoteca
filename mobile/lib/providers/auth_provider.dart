@@ -17,6 +17,11 @@ class AuthProvider extends ChangeNotifier {
   String get userEmail => _user?['email'] ?? '';
   String? get bggUsername => _user?['bgg_username'];
   bool get noEnfundo => _user?['no_enfundo'] == true;
+  bool get ocultarPorEstrenar => _user?['ocultar_por_estrenar'] == true;
+  bool get ocultarFaltanTraduccion =>
+      _user?['ocultar_faltan_traduccion'] == true;
+  bool get ocultarExpansionOtroIdioma =>
+      _user?['ocultar_expansion_otro_idioma'] == true;
 
   Future<bool> checkAuth() async {
     if (!await _authService.isLoggedIn()) return false;
@@ -110,12 +115,18 @@ class AuthProvider extends ChangeNotifier {
     String? name,
     String? bggUsername,
     bool? noEnfundo,
+    bool? ocultarPorEstrenar,
+    bool? ocultarFaltanTraduccion,
+    bool? ocultarExpansionOtroIdioma,
   }) async {
     try {
       final updated = await _authService.updateUser(
         name: name,
         bggUsername: bggUsername,
         noEnfundo: noEnfundo,
+        ocultarPorEstrenar: ocultarPorEstrenar,
+        ocultarFaltanTraduccion: ocultarFaltanTraduccion,
+        ocultarExpansionOtroIdioma: ocultarExpansionOtroIdioma,
       );
       if (updated != null) {
         _user = updated;

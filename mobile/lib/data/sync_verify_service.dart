@@ -81,7 +81,7 @@ class SyncVerifyService {
       'nombre', 'descripcion', 'edad_minima', 'edad_maxima',
       'num_jugadores_min', 'num_jugadores_max', 'ubicacion_id',
       'estado', 'fecha_compra', 'imagen', 'bgg_id', 'juego_base_id',
-      'no_enfundar', 'es_expansion', 'idiomas', 'idioma_otro',
+      'no_enfundar', 'es_expansion', 'autojugable', 'idiomas', 'idioma_otro',
       'independiente_idioma', 'tradumaquetado', 'tradumaquetado_parcial',
       'tradumaquetado_parcial_notas', 'varias_copias', 'precio', 'en_caja_base',
       'sin_abrir', 'print_and_play',
@@ -130,7 +130,7 @@ class SyncVerifyService {
   static const Map<String, List<String>> _boolFields = {
     'propietarios': ['es_principal'],
     'juegos': [
-      'no_enfundar', 'es_expansion', 'independiente_idioma',
+      'no_enfundar', 'es_expansion', 'autojugable', 'independiente_idioma',
       'tradumaquetado', 'tradumaquetado_parcial', 'varias_copias', 'en_caja_base',
       'sin_abrir', 'print_and_play',
     ],

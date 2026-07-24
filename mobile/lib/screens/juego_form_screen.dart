@@ -62,6 +62,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   int? _bggId;
   bool _noEnfundar = false;
   bool _esExpansion = false;
+  bool _autojugable = false;
   List<String> _idiomas = [];
   final _idiomaOtroCtrl = TextEditingController();
   bool _independienteIdioma = false;
@@ -104,7 +105,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     _categorias = await provider.categoriaRepository.getAll();
     _propietarios = await provider.propietarioRepository.getAll();
     _ubicaciones = await provider.ubicacionRepository.getAll();
-    _tiposFunda = await provider.tipoFundaRepository.getAll();
+    _tiposFunda = _sortTiposFunda(await provider.tipoFundaRepository.getAll());
 
     if (widget.juegoLocalId != null) {
       _existing = await provider.juegoRepository.getByLocalId(widget.juegoLocalId!);
@@ -137,6 +138,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         _bggId = _existing!.bggId;
         _noEnfundar = _existing!.noEnfundar;
         _esExpansion = _existing!.esExpansionFlag;
+        _autojugable = _existing!.autojugable;
         _idiomas = List.from(_existing!.idiomas);
         _idiomaOtroCtrl.text = _existing!.idiomaOtro ?? '';
         _independienteIdioma = _existing!.independienteIdioma;
@@ -751,6 +753,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       imagen: _imagenPath,
       noEnfundar: noEnfundarToUse,
       esExpansionFlag: _esExpansion,
+      autojugable: _esExpansion && _autojugable,
       idiomas: idiomasToUse,
       idiomaOtro: idiomaOtroToUse,
       independienteIdioma: independienteToUse,
@@ -1050,6 +1053,14 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
               }),
             ),
             if (_esExpansion) ...[
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Autojugable'),
+                subtitle: const Text(
+                    'Se puede jugar sin el juego base. Contará también como juego básico.'),
+                value: _autojugable,
+                onChanged: (v) => setState(() => _autojugable = v),
+              ),
               const SizedBox(height: 8),
               Text('Juego base',
                   style: TextStyle(
@@ -2023,9 +2034,15 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
 
     if (result == true) {
       final repo = context.read<JuegosProvider>().tipoFundaRepository;
-      final updated = await repo.getAll();
+      final updated = _sortTiposFunda(await repo.getAll());
       setState(() => _tiposFunda = updated);
     }
+  }
+
+  List<TipoFundaRow> _sortTiposFunda(List<TipoFundaRow> tipos) {
+    tipos.sort((a, b) =>
+        a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+    return tipos;
   }
 
   Widget _buildFundasSection() {

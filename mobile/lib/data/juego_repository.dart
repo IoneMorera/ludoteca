@@ -37,7 +37,7 @@ class JuegoRepository {
     if (esExpansion == true) {
       where.add('j.es_expansion = 1');
     } else if (esExpansion == false) {
-      where.add('j.es_expansion = 0');
+      where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
     }
     if (categoriaLocalId != null) {
       where.add('EXISTS (SELECT 1 FROM juego_categoria jc WHERE jc.juego_local_id = j.local_id AND jc.categoria_local_id = ?)');
@@ -65,7 +65,7 @@ class JuegoRepository {
       args.add('%$buscar%');
     }
     if (soloBase) {
-      where.add('j.es_expansion = 0');
+      where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
     }
     if (estado != null && estado.isNotEmpty) {
       where.add('j.estado = ?');
@@ -74,7 +74,7 @@ class JuegoRepository {
     if (esExpansion == true) {
       where.add('j.es_expansion = 1');
     } else if (esExpansion == false) {
-      where.add('j.es_expansion = 0');
+      where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
     }
     if (categoriaLocalId != null) {
       where.add('EXISTS (SELECT 1 FROM juego_categoria jc WHERE jc.juego_local_id = j.local_id AND jc.categoria_local_id = ?)');
@@ -207,19 +207,20 @@ class JuegoRepository {
   Future<Map<String, dynamic>> stats() async {
     final db = await _dbService.database;
     final total = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM juegos WHERE es_expansion = 0');
+        'SELECT COUNT(*) AS c FROM juegos WHERE (es_expansion = 0 OR autojugable = 1)');
     final disponibles = await db.rawQuery(
-        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'disponible' AND es_expansion = 0");
+        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'disponible' AND (es_expansion = 0 OR autojugable = 1)");
     final enVenta = await db.rawQuery(
-        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'en_venta' AND es_expansion = 0");
+        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'en_venta' AND (es_expansion = 0 OR autojugable = 1)");
     final vendidos = await db.rawQuery(
-        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'vendido' AND es_expansion = 0");
+        "SELECT COUNT(*) AS c FROM juegos WHERE estado = 'vendido' AND (es_expansion = 0 OR autojugable = 1)");
     final exp = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM juegos WHERE es_expansion = 1');
     final porEstrenar = await db.rawQuery(
         "SELECT COUNT(*) AS c FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido'");
     final faltanTraduccion = await db.rawQuery(
         "SELECT COUNT(*) AS c FROM juegos WHERE $_faltanTraduccionWhere");
+    final expansionOtroIdioma = await _mismatchExpansionOtroIdioma(db);
     return <String, dynamic>{
       'totalJuegos': Sqflite.firstIntValue(total) ?? 0,
       'juegosDisponibles': Sqflite.firstIntValue(disponibles) ?? 0,
@@ -228,17 +229,18 @@ class JuegoRepository {
       'totalExpansiones': Sqflite.firstIntValue(exp) ?? 0,
       'juegosPorEstrenar': Sqflite.firstIntValue(porEstrenar) ?? 0,
       'juegosFaltanTraduccion': Sqflite.firstIntValue(faltanTraduccion) ?? 0,
+      'juegosExpansionOtroIdioma': expansionOtroIdioma.length,
     };
   }
 
   /// Condici\u00f3n SQL para los juegos "por tradumaquetar": su idioma no incluye
-  /// el castellano, no son independientes del idioma y no est\u00e1n completamente
-  /// tradumaquetados (incluye por tanto los de tradumaquetaci\u00f3n parcial).
+  /// el castellano y no est\u00e1n completamente tradumaquetados (incluye por tanto
+  /// los de tradumaquetaci\u00f3n parcial). Se incluyen tambi\u00e9n los marcados como
+  /// independientes del idioma.
   static const String _faltanTraduccionWhere = '''
     COALESCE(idiomas, '') != ''
     AND idiomas != '[]'
     AND idiomas NOT LIKE '%"castellano"%'
-    AND COALESCE(independiente_idioma, 0) = 0
     AND COALESCE(tradumaquetado, 0) = 0
     AND COALESCE(estado, '') != 'vendido'
   ''';
@@ -260,6 +262,91 @@ class JuegoRepository {
       'SELECT * FROM juegos WHERE $_faltanTraduccionWhere ORDER BY nombre',
     );
     return _hydrateAll(rows);
+  }
+
+  Set<String> _parseIdiomasSet(dynamic raw) {
+    if (raw is! String || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded.map((e) => e.toString()).toSet();
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// Devuelve un mapa `local_id de la base -> [local_id de expansiones]` para
+  /// los juegos base cuyas expansiones no comparten ning\u00fan idioma con la base
+  /// (es decir, est\u00e1n "en otro idioma"). Se ignoran los juegos vendidos. Se
+  /// incluyen tambi\u00e9n los marcados como independientes del idioma (su manual
+  /// tambi\u00e9n influye).
+  Future<Map<int, List<int>>> _mismatchExpansionOtroIdioma(Database db) async {
+    final rows = await db.query('juegos', columns: [
+      'local_id',
+      'juego_base_local_id',
+      'es_expansion',
+      'idiomas',
+      'estado',
+    ]);
+    final byLocalId = {for (final r in rows) r['local_id'] as int: r};
+    final mismatchByBase = <int, List<int>>{};
+
+    for (final r in rows) {
+      final esExpansion = ((r['es_expansion'] as int?) ?? 0) == 1;
+      final baseLocalId = r['juego_base_local_id'] as int?;
+      if (!esExpansion || baseLocalId == null) continue;
+      if ((r['estado'] as String?) == 'vendido') continue;
+
+      final base = byLocalId[baseLocalId];
+      if (base == null) continue;
+      if ((base['estado'] as String?) == 'vendido') continue;
+
+      final expIdiomas = _parseIdiomasSet(r['idiomas']);
+      final baseIdiomas = _parseIdiomasSet(base['idiomas']);
+      if (expIdiomas.isEmpty || baseIdiomas.isEmpty) continue;
+
+      if (expIdiomas.intersection(baseIdiomas).isEmpty) {
+        (mismatchByBase[baseLocalId] ??= []).add(r['local_id'] as int);
+      }
+    }
+    return mismatchByBase;
+  }
+
+  /// Juegos base que tienen una o m\u00e1s expansiones en otro idioma, junto con
+  /// esas expansiones (hidratadas).
+  Future<List<ExpansionIdiomaAviso>> juegosConExpansionOtroIdioma() async {
+    final db = await _dbService.database;
+    final mismatchByBase = await _mismatchExpansionOtroIdioma(db);
+    if (mismatchByBase.isEmpty) return [];
+
+    final allIds = <int>{...mismatchByBase.keys};
+    for (final list in mismatchByBase.values) {
+      allIds.addAll(list);
+    }
+    final placeholders = List.filled(allIds.length, '?').join(',');
+    final hydrated = await _hydrateAll(await db.rawQuery(
+      'SELECT * FROM juegos WHERE local_id IN ($placeholders)',
+      allIds.toList(),
+    ));
+    final hydratedByLocal = {
+      for (final j in hydrated)
+        if (j.localId != null) j.localId!: j,
+    };
+
+    final result = <ExpansionIdiomaAviso>[];
+    mismatchByBase.forEach((baseLocalId, expIds) {
+      final base = hydratedByLocal[baseLocalId];
+      if (base == null) return;
+      final exps = expIds
+          .map((id) => hydratedByLocal[id])
+          .whereType<Juego>()
+          .toList();
+      if (exps.isEmpty) return;
+      result.add(ExpansionIdiomaAviso(base: base, expansiones: exps));
+    });
+    result.sort((a, b) =>
+        a.base.nombre.toLowerCase().compareTo(b.base.nombre.toLowerCase()));
+    return result;
   }
 
   Future<bool> existsWithNombre(String nombre, {int? excludeLocalId}) async {
@@ -564,6 +651,7 @@ class JuegoRepository {
       'juego_base_local_id': juegoBaseLocalId,
       'no_enfundar': (data['no_enfundar'] == true) ? 1 : 0,
       'es_expansion': (data['es_expansion'] == true) ? 1 : 0,
+      'autojugable': (data['autojugable'] == true) ? 1 : 0,
       'idiomas': idiomasJson,
       'idioma_otro': data['idioma_otro'],
       'independiente_idioma': (data['independiente_idioma'] == true) ? 1 : 0,
@@ -1066,6 +1154,7 @@ class JuegoRepository {
         bggId: r['bgg_id'] as int?,
         noEnfundar: ((r['no_enfundar'] as int?) ?? 0) == 1,
         esExpansionFlag: ((r['es_expansion'] as int?) ?? 0) == 1,
+        autojugable: ((r['autojugable'] as int?) ?? 0) == 1,
         idiomas: idiomas,
         idiomaOtro: r['idioma_otro'] as String?,
         independienteIdioma: ((r['independiente_idioma'] as int?) ?? 0) == 1,
@@ -1204,6 +1293,7 @@ class JuegoRepository {
       'juego_base_server_id': juegoBaseServerId,
       'no_enfundar': juego.noEnfundar ? 1 : 0,
       'es_expansion': juego.esExpansionFlag ? 1 : 0,
+      'autojugable': juego.autojugable ? 1 : 0,
       'idiomas': juego.idiomas.isNotEmpty ? jsonEncode(juego.idiomas) : null,
       'idioma_otro': juego.idiomaOtro,
       'independiente_idioma': juego.independienteIdioma ? 1 : 0,
@@ -1245,6 +1335,7 @@ class JuegoRepository {
       'juego_base_id': values['juego_base_server_id'],
       'no_enfundar': values['no_enfundar'] == 1,
       'es_expansion': values['es_expansion'] == 1,
+      'autojugable': values['autojugable'] == 1,
       'idiomas': idiomasForServer,
       'idioma_otro': values['idioma_otro'],
       'independiente_idioma': values['independiente_idioma'] == 1,
@@ -1937,6 +2028,14 @@ class JuegoFundaDraft {
     required this.cantidadCartas,
     required this.enfundadas,
   });
+}
+
+/// Agrupa un juego base con las expansiones suyas que est\u00e1n en otro idioma.
+class ExpansionIdiomaAviso {
+  final Juego base;
+  final List<Juego> expansiones;
+
+  ExpansionIdiomaAviso({required this.base, required this.expansiones});
 }
 
 class CopiaPropietarioDraft {

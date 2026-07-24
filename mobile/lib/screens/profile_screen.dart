@@ -14,6 +14,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late TextEditingController _nombreCtrl;
   late TextEditingController _bggCtrl;
   bool _noEnfundo = false;
+  bool _ocultarPorEstrenar = false;
+  bool _ocultarFaltanTraduccion = false;
+  bool _ocultarExpansionOtroIdioma = false;
   bool _saving = false;
   String? _error;
 
@@ -24,6 +27,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nombreCtrl = TextEditingController(text: auth.userName);
     _bggCtrl = TextEditingController(text: auth.bggUsername ?? '');
     _noEnfundo = auth.noEnfundo;
+    _ocultarPorEstrenar = auth.ocultarPorEstrenar;
+    _ocultarFaltanTraduccion = auth.ocultarFaltanTraduccion;
+    _ocultarExpansionOtroIdioma = auth.ocultarExpansionOtroIdioma;
   }
 
   @override
@@ -43,6 +49,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       name: _nombreCtrl.text.trim(),
       bggUsername: _bggCtrl.text.trim(),
       noEnfundo: _noEnfundo,
+      ocultarPorEstrenar: _ocultarPorEstrenar,
+      ocultarFaltanTraduccion: _ocultarFaltanTraduccion,
+      ocultarExpansionOtroIdioma: _ocultarExpansionOtroIdioma,
     );
     if (!mounted) return;
     setState(() {
@@ -113,18 +122,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: 20),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Avisos en Inicio',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(height: 8),
           Card(
             elevation: 0,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: SwitchListTile(
-              title: const Text('No enfundo'),
-              subtitle: const Text(
-                'Oculta los avisos de fundas pendientes en la app',
-              ),
-              value: _noEnfundo,
-              onChanged: (v) => setState(() => _noEnfundo = v),
-              secondary: const Icon(Icons.style_outlined),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Ocultar aviso de fundas'),
+                  subtitle: const Text(
+                    'Oculta los avisos de fundas pendientes en la app',
+                  ),
+                  value: _noEnfundo,
+                  onChanged: (v) => setState(() => _noEnfundo = v),
+                  secondary: const Icon(Icons.style_outlined),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: const Text('Ocultar "Por Estrenar"'),
+                  subtitle: const Text(
+                    'Oculta el aviso de juegos sin abrir',
+                  ),
+                  value: _ocultarPorEstrenar,
+                  onChanged: (v) => setState(() => _ocultarPorEstrenar = v),
+                  secondary: const Icon(Icons.card_giftcard),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: const Text('Ocultar "Faltan Traducciones"'),
+                  subtitle: const Text(
+                    'Oculta el aviso de juegos por tradumaquetar',
+                  ),
+                  value: _ocultarFaltanTraduccion,
+                  onChanged: (v) =>
+                      setState(() => _ocultarFaltanTraduccion = v),
+                  secondary: const Icon(Icons.translate),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: const Text('Ocultar "Expansiones en Otro Idioma"'),
+                  subtitle: const Text(
+                    'Oculta el aviso de expansiones en otro idioma',
+                  ),
+                  value: _ocultarExpansionOtroIdioma,
+                  onChanged: (v) =>
+                      setState(() => _ocultarExpansionOtroIdioma = v),
+                  secondary: const Icon(Icons.language),
+                ),
+              ],
             ),
           ),
           if (_error != null) ...[

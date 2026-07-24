@@ -68,11 +68,23 @@ class AuthService {
     String? name,
     String? bggUsername,
     bool? noEnfundo,
+    bool? ocultarPorEstrenar,
+    bool? ocultarFaltanTraduccion,
+    bool? ocultarExpansionOtroIdioma,
   }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (bggUsername != null) body['bgg_username'] = bggUsername;
     if (noEnfundo != null) body['no_enfundo'] = noEnfundo;
+    if (ocultarPorEstrenar != null) {
+      body['ocultar_por_estrenar'] = ocultarPorEstrenar;
+    }
+    if (ocultarFaltanTraduccion != null) {
+      body['ocultar_faltan_traduccion'] = ocultarFaltanTraduccion;
+    }
+    if (ocultarExpansionOtroIdioma != null) {
+      body['ocultar_expansion_otro_idioma'] = ocultarExpansionOtroIdioma;
+    }
     if (body.isEmpty) return null;
     final response = await _api.put('/user', data: body);
     final user = response.data['user'] as Map<String, dynamic>?;

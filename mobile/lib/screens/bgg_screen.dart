@@ -66,6 +66,30 @@ class _BggScreenState extends State<BggScreen> {
     setState(() => _loadingCollection = false);
   }
 
+  /// Descarga en el servidor las im\u00e1genes de los juegos importados desde BGG.
+  /// El backend expone `/bgg/import-images` (m\u00e1x. 30 por lote), que baja cada
+  /// imagen y actualiza el campo `imagen` del juego.
+  Future<Map<String, int>> _downloadPendingImages(List<dynamic> pending) async {
+    const batchSize = 30;
+    var ok = 0;
+    var fail = 0;
+    for (var i = 0; i < pending.length; i += batchSize) {
+      final end =
+          (i + batchSize) < pending.length ? i + batchSize : pending.length;
+      final batch = pending.sublist(i, end);
+      try {
+        final res =
+            await _api.post('/bgg/import-images', data: {'images': batch});
+        final d = res.data;
+        ok += (d['succeeded'] as num?)?.toInt() ?? 0;
+        fail += (d['failed'] as num?)?.toInt() ?? 0;
+      } catch (_) {
+        fail += batch.length;
+      }
+    }
+    return {'ok': ok, 'fail': fail};
+  }
+
   Future<void> _importGames() async {
     if (_selectedOwner == null || _bggGames.isEmpty) return;
     setState(() {
@@ -78,20 +102,28 @@ class _BggScreenState extends State<BggScreen> {
         'bgg_username': _selectedOwner!.bggUsername,
       });
       final data = response.data;
-      setState(() {
-        _importMessage =
-            'Importados: ${data['imported'] ?? 0}, ya exist\u00edan: ${data['skipped'] ?? 0}';
-      });
-      // dispara una sincronizaci\u00f3n para descargar los juegos importados.
+      var msg =
+          'Importados: ${data['imported'] ?? 0}, ya exist\u00edan: ${data['skipped'] ?? 0}';
+      final pending = (data['images_pending'] as List?) ?? [];
+      if (pending.isNotEmpty) {
+        if (mounted) {
+          setState(() => _importMessage = '$msg\nDescargando im\u00e1genes...');
+        }
+        final imgRes = await _downloadPendingImages(pending);
+        msg = '$msg\nIm\u00e1genes: ${imgRes['ok']} descargadas'
+            '${(imgRes['fail'] ?? 0) > 0 ? ', ${imgRes['fail']} fallidas' : ''}';
+      }
+      if (mounted) setState(() => _importMessage = msg);
+      // Sincroniza DESPU\u00c9S de descargar im\u00e1genes para traer el campo `imagen`.
       if (mounted) {
         context.read<SyncProvider>().syncNow(fullPull: false);
       } else {
         SyncService().syncAll();
       }
     } catch (e) {
-      setState(() => _importMessage = 'Error al importar');
+      if (mounted) setState(() => _importMessage = 'Error al importar');
     }
-    setState(() => _importing = false);
+    if (mounted) setState(() => _importing = false);
   }
 
   Future<void> _importExpansions() async {
@@ -125,16 +157,27 @@ class _BggScreenState extends State<BggScreen> {
           (data['omitted'] as List).isNotEmpty) {
         msg = '$msg\nSin juego base: ${(data['omitted'] as List).join(', ')}';
       }
-      setState(() => _importMessage = msg);
+      final pending = (data['images_pending'] as List?) ?? [];
+      if (pending.isNotEmpty) {
+        if (mounted) {
+          setState(() => _importMessage = '$msg\nDescargando im\u00e1genes...');
+        }
+        final imgRes = await _downloadPendingImages(pending);
+        msg = '$msg\nIm\u00e1genes: ${imgRes['ok']} descargadas'
+            '${(imgRes['fail'] ?? 0) > 0 ? ', ${imgRes['fail']} fallidas' : ''}';
+      }
+      if (mounted) setState(() => _importMessage = msg);
       if (mounted) {
         context.read<SyncProvider>().syncNow(fullPull: false);
       } else {
         SyncService().syncAll();
       }
     } catch (e) {
-      setState(() => _importMessage = 'Error al importar expansiones: $e');
+      if (mounted) {
+        setState(() => _importMessage = 'Error al importar expansiones: $e');
+      }
     }
-    setState(() => _importing = false);
+    if (mounted) setState(() => _importing = false);
   }
 
   @override

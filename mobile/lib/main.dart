@@ -125,6 +125,10 @@ class LudotecaApp extends StatelessWidget {
               return MaterialPageRoute(
                   builder: (_) => const JuegosAvisoScreen(
                       tipo: JuegoAvisoTipo.faltanTraduccion));
+            case '/expansiones-otro-idioma':
+              return MaterialPageRoute(
+                  builder: (_) => const JuegosAvisoScreen(
+                      tipo: JuegoAvisoTipo.expansionOtroIdioma));
             case '/ubicaciones':
               return MaterialPageRoute(
                   builder: (_) => const UbicacionesScreen());
