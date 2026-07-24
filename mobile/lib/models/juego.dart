@@ -30,6 +30,7 @@ class Juego {
   final int? bggId;
   final bool noEnfundar;
   final bool esExpansionFlag;
+  final bool autojugable;
   final List<String> idiomas;
   final String? idiomaOtro;
   final bool independienteIdioma;
@@ -75,6 +76,7 @@ class Juego {
     this.bggId,
     this.noEnfundar = false,
     this.esExpansionFlag = false,
+    this.autojugable = false,
     this.idiomas = const [],
     this.idiomaOtro,
     this.independienteIdioma = false,
@@ -122,6 +124,7 @@ class Juego {
       bggId: bggId,
       noEnfundar: noEnfundar,
       esExpansionFlag: esExpansionFlag,
+      autojugable: autojugable,
       idiomas: idiomas,
       idiomaOtro: idiomaOtro,
       independienteIdioma: independienteIdioma,
@@ -170,6 +173,7 @@ class Juego {
       bggId: bggId,
       noEnfundar: noEnfundar,
       esExpansionFlag: esExpansionFlag,
+      autojugable: autojugable,
       idiomas: idiomas,
       idiomaOtro: idiomaOtro,
       independienteIdioma: independienteIdioma,
@@ -214,6 +218,7 @@ class Juego {
       bggId: json['bgg_id'],
       noEnfundar: json['no_enfundar'] == true || json['no_enfundar'] == 1,
       esExpansionFlag: json['es_expansion'] == true || json['es_expansion'] == 1,
+      autojugable: json['autojugable'] == true || json['autojugable'] == 1,
       idiomas: (json['idiomas'] as List?)?.cast<String>() ?? [],
       idiomaOtro: json['idioma_otro'],
       independienteIdioma: json['independiente_idioma'] == true || json['independiente_idioma'] == 1,
@@ -268,6 +273,7 @@ class Juego {
         'ubicacion_id': ubicacion?.id,
         'no_enfundar': noEnfundar,
         'es_expansion': esExpansionFlag,
+        'autojugable': autojugable,
         'idiomas': idiomas,
         'idioma_otro': idiomaOtro,
         'independiente_idioma': independienteIdioma,
@@ -284,6 +290,10 @@ class Juego {
       };
 
   bool get esExpansion => esExpansionFlag;
+
+  /// Un juego cuenta como "base" si no es expansi\u00f3n o si es una expansi\u00f3n
+  /// autojugable (se considera tambi\u00e9n juego b\u00e1sico).
+  bool get esBase => !esExpansionFlag || autojugable;
   String get jugadoresTexto =>
       '${numJugadoresMin ?? '?'}\u2013${numJugadoresMax ?? '?'}';
   String get edadTexto => '${edadMinima ?? '?'}+';

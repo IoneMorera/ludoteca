@@ -81,7 +81,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               _buildFundasFaltantesCard(fundasFaltantes, theme),
             ],
-            if (_asInt(stats['juegosPorEstrenar']) > 0) ...[
+            if (!auth.ocultarPorEstrenar &&
+                _asInt(stats['juegosPorEstrenar']) > 0) ...[
               const SizedBox(height: 16),
               _buildAvisoCard(
                 titulo: 'Juegos Por Estrenar',
@@ -92,7 +93,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 route: '/juegos-por-estrenar',
               ),
             ],
-            if (_asInt(stats['juegosFaltanTraduccion']) > 0) ...[
+            if (!auth.ocultarFaltanTraduccion &&
+                _asInt(stats['juegosFaltanTraduccion']) > 0) ...[
               const SizedBox(height: 16),
               _buildAvisoCard(
                 titulo: 'Faltan Traducciones',
@@ -101,6 +103,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: Icons.translate,
                 color: Colors.indigo,
                 route: '/faltan-traducciones',
+              ),
+            ],
+            if (!auth.ocultarExpansionOtroIdioma &&
+                _asInt(stats['juegosExpansionOtroIdioma']) > 0) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Expansiones en Otro Idioma',
+                subtitulo:
+                    '${_asInt(stats['juegosExpansionOtroIdioma'])} juegos con expansiones en otro idioma',
+                icon: Icons.language,
+                color: Colors.deepOrange,
+                route: '/expansiones-otro-idioma',
               ),
             ],
             const SizedBox(height: 28),

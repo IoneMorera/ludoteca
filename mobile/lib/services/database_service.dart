@@ -18,7 +18,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 9;
+  static const int _schemaVersion = 10;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -74,6 +74,9 @@ class DatabaseService {
         }
         if (oldVersion < 9) {
           await _migrateToV9(db);
+        }
+        if (oldVersion < 10) {
+          await _migrateToV10(db);
         }
       },
     );
@@ -204,6 +207,7 @@ class DatabaseService {
         juego_base_local_id INTEGER,
         no_enfundar INTEGER NOT NULL DEFAULT 0,
         es_expansion INTEGER NOT NULL DEFAULT 0,
+        autojugable INTEGER NOT NULL DEFAULT 0,
         idiomas TEXT,
         idioma_otro TEXT,
         independiente_idioma INTEGER NOT NULL DEFAULT 0,
@@ -484,6 +488,14 @@ class DatabaseService {
     ''');
 
     // Fuerza un re-pull completo para traer los nuevos campos del servidor.
+    await db.delete('sync_state', where: "key = 'last_pull_at'");
+  }
+
+  Future<void> _migrateToV10(Database db) async {
+    await db.execute(
+        'ALTER TABLE juegos ADD COLUMN autojugable INTEGER NOT NULL DEFAULT 0');
+
+    // Fuerza un re-pull completo para traer el nuevo campo del servidor.
     await db.delete('sync_state', where: "key = 'last_pull_at'");
   }
 

@@ -19,6 +19,9 @@ class User extends Authenticatable
         'tenant_id',
         'bgg_username',
         'no_enfundo',
+        'ocultar_por_estrenar',
+        'ocultar_faltan_traduccion',
+        'ocultar_expansion_otro_idioma',
     ];
 
     protected $hidden = [
@@ -30,6 +33,9 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'no_enfundo' => 'boolean',
+        'ocultar_por_estrenar' => 'boolean',
+        'ocultar_faltan_traduccion' => 'boolean',
+        'ocultar_expansion_otro_idioma' => 'boolean',
     ];
 
     public function tenant()

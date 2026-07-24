@@ -33,7 +33,7 @@ class _GameNightScreenState extends State<GameNightScreen> {
     await provider.fetchJuegos();
 
     final juegos = provider.juegos.where((j) {
-      if (j.esExpansion) return false;
+      if (j.esExpansion && !j.autojugable) return false;
       final minOk =
           j.numJugadoresMin == null || j.numJugadoresMin! <= _numJugadores;
       final maxOk =
