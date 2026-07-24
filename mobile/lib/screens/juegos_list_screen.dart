@@ -744,6 +744,9 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     if (juego.esExpansion) {
       badges.add(_badge('Exp.', Colors.purple[50], Colors.purple[700]));
     }
+    if (juego.autojugable) {
+      badges.add(_badge('Autojugable', Colors.indigo[50], Colors.indigo[700]));
+    }
     if (juego.sinAbrir) {
       badges.add(_badge('Por estrenar', Colors.teal[50], Colors.teal[700]));
     }
