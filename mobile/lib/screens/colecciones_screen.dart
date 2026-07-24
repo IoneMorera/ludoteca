@@ -374,15 +374,39 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
           ].join(' · '),
           style: TextStyle(fontSize: 12, color: Colors.grey[600]),
         ),
-        trailing: juego.esExpansion
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text('Exp.',
-                    style: TextStyle(fontSize: 10, color: Colors.blue[700])),
+        trailing: (juego.esExpansion || juego.autojugable)
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (juego.esExpansion)
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text('Exp.',
+                          style:
+                              TextStyle(fontSize: 10, color: Colors.blue[700])),
+                    ),
+                  if (juego.autojugable) ...[
+                    const SizedBox(height: 2),
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[50],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text('Autojugable',
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.indigo[700])),
+                    ),
+                  ],
+                ],
               )
             : null,
         onTap: () => Navigator.of(context).pushNamed('/juego', arguments: juego.id),

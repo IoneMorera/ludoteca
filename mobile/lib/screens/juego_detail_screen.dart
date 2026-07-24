@@ -3,7 +3,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
 import '../data/sync_service.dart';
-import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../widgets/game_image.dart';
@@ -419,6 +418,10 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     final badges = <Widget>[];
     if (juego.esExpansion) {
       badges.add(_detailBadge('Expansi\u00f3n', Colors.blue[50], Colors.blue[700]));
+    }
+    if (juego.autojugable) {
+      badges.add(
+          _detailBadge('Autojugable', Colors.indigo[50], Colors.indigo[700]));
     }
     if (juego.sinAbrir) {
       badges.add(_detailBadge('Por estrenar', Colors.teal[50], Colors.teal[700]));
