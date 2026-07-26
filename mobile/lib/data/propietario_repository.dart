@@ -31,7 +31,6 @@ class PropietarioRow {
 
 class PropietarioRepository {
   final DatabaseService _dbService;
-  // ignore: unused_field
   final OutboxDao _outbox;
 
   PropietarioRepository(this._dbService, this._outbox);
@@ -40,6 +39,83 @@ class PropietarioRepository {
     final db = await _dbService.database;
     final rows = await db.query('propietarios', orderBy: 'nombre');
     return rows.map(PropietarioRow.fromMap).toList();
+  }
+
+  Future<int> create({required String nombre, String? bggUsername}) async {
+    final db = await _dbService.database;
+    final localId = await db.insert('propietarios', {
+      'nombre': nombre,
+      'bgg_username': bggUsername,
+      'es_principal': 0,
+      'dirty': 1,
+      'pending_action': 'create',
+    });
+    await _outbox.enqueue(
+      table: 'propietarios',
+      action: SyncAction.create,
+      localId: localId,
+      payload: {
+        'nombre': nombre,
+        'bgg_username': bggUsername,
+        'es_principal': false,
+      },
+    );
+    return localId;
+  }
+
+  Future<void> update(
+    int localId, {
+    required String nombre,
+    String? bggUsername,
+  }) async {
+    final db = await _dbService.database;
+    final existing = await db.query('propietarios',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+    final esPrincipal = ((existing.first['es_principal'] as int?) ?? 0) == 1;
+
+    await db.update('propietarios', {
+      'nombre': nombre,
+      'bgg_username': bggUsername,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [localId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'propietarios',
+        action: SyncAction.update,
+        localId: localId,
+        serverId: serverId,
+        payload: {
+          'nombre': nombre,
+          'bgg_username': bggUsername,
+          'es_principal': esPrincipal,
+        },
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
+  }
+
+  Future<void> delete(int localId) async {
+    final db = await _dbService.database;
+    final existing = await db.query('propietarios',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    await db.delete('propietarios', where: 'local_id = ?', whereArgs: [localId]);
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'propietarios',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: serverId,
+      );
+    } else {
+      await _outbox.removeForLocalRow('propietarios', localId);
+    }
   }
 
   Future<PropietarioRow?> getByServerId(int serverId) async {

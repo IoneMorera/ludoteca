@@ -59,6 +59,84 @@ class TipoFundaRepository {
     return localId;
   }
 
+  Future<void> update(
+    int localId, {
+    required String nombre,
+    required int anchoMm,
+    required int altoMm,
+  }) async {
+    final db = await _dbService.database;
+    final existing = await db.query('tipos_funda',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+
+    await db.update('tipos_funda', {
+      'nombre': nombre,
+      'ancho_mm': anchoMm,
+      'alto_mm': altoMm,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [localId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'tipos_funda',
+        action: SyncAction.update,
+        localId: localId,
+        serverId: serverId,
+        payload: {'nombre': nombre, 'ancho_mm': anchoMm, 'alto_mm': altoMm},
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
+  }
+
+  Future<void> delete(int localId) async {
+    final db = await _dbService.database;
+    final existing = await db.query('tipos_funda',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    if (existing.isEmpty) return;
+    final serverId = existing.first['server_id'] as int?;
+    await db.delete('tipos_funda', where: 'local_id = ?', whereArgs: [localId]);
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'tipos_funda',
+        action: SyncAction.delete,
+        localId: localId,
+        serverId: serverId,
+      );
+    } else {
+      await _outbox.removeForLocalRow('tipos_funda', localId);
+    }
+  }
+
+  /// Devuelve el nº de fundas de juego que usan cada tipo (local_id -> count),
+  /// sumando tanto fundas a nivel de juego como por copia de propietario.
+  Future<Map<int, int>> getUsoCount() async {
+    final db = await _dbService.database;
+    final result = <int, int>{};
+    final rows = await db.rawQuery('''
+      SELECT tipo_funda_local_id AS tid, COUNT(*) AS c FROM juego_fundas
+      WHERE tipo_funda_local_id IS NOT NULL
+      GROUP BY tipo_funda_local_id
+    ''');
+    for (final r in rows) {
+      final tid = r['tid'] as int?;
+      if (tid != null) result[tid] = (r['c'] as int?) ?? 0;
+    }
+    final rows2 = await db.rawQuery('''
+      SELECT tipo_funda_local_id AS tid, COUNT(*) AS c FROM juego_propietario_fundas
+      WHERE tipo_funda_local_id IS NOT NULL
+      GROUP BY tipo_funda_local_id
+    ''');
+    for (final r in rows2) {
+      final tid = r['tid'] as int?;
+      if (tid != null) result[tid] = (result[tid] ?? 0) + ((r['c'] as int?) ?? 0);
+    }
+    return result;
+  }
+
   Future<List<TipoFundaRow>> getAll() async {
     final db = await _dbService.database;
     final rows = await db.query('tipos_funda', orderBy: 'alto_mm, ancho_mm, nombre');

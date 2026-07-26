@@ -117,6 +117,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 route: '/expansiones-otro-idioma',
               ),
             ],
+            if (!auth.ocultarPorColocar &&
+                _asInt(stats['juegosPorColocar']) > 0) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Juegos por Colocar',
+                subtitulo:
+                    '${_asInt(stats['juegosPorColocar'])} juegos sin ubicación',
+                icon: Icons.inventory_2_outlined,
+                color: Colors.brown,
+                route: '/juegos-por-colocar',
+              ),
+            ],
             const SizedBox(height: 28),
             Text('Acciones rápidas',
                 style: theme.textTheme.titleMedium

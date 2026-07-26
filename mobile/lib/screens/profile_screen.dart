@@ -17,6 +17,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _ocultarPorEstrenar = false;
   bool _ocultarFaltanTraduccion = false;
   bool _ocultarExpansionOtroIdioma = false;
+  bool _ocultarPorColocar = false;
   bool _saving = false;
   String? _error;
 
@@ -30,6 +31,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _ocultarPorEstrenar = auth.ocultarPorEstrenar;
     _ocultarFaltanTraduccion = auth.ocultarFaltanTraduccion;
     _ocultarExpansionOtroIdioma = auth.ocultarExpansionOtroIdioma;
+    _ocultarPorColocar = auth.ocultarPorColocar;
   }
 
   @override
@@ -52,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ocultarPorEstrenar: _ocultarPorEstrenar,
       ocultarFaltanTraduccion: _ocultarFaltanTraduccion,
       ocultarExpansionOtroIdioma: _ocultarExpansionOtroIdioma,
+      ocultarPorColocar: _ocultarPorColocar,
     );
     if (!mounted) return;
     setState(() {
@@ -178,6 +181,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onChanged: (v) =>
                       setState(() => _ocultarExpansionOtroIdioma = v),
                   secondary: const Icon(Icons.language),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: const Text('Ocultar "Juegos por colocar"'),
+                  subtitle: const Text(
+                    'Oculta el aviso de juegos sin ubicación asignada',
+                  ),
+                  value: _ocultarPorColocar,
+                  onChanged: (v) => setState(() => _ocultarPorColocar = v),
+                  secondary: const Icon(Icons.inventory_2_outlined),
                 ),
               ],
             ),

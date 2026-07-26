@@ -1,55 +1,60 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../data/propietario_repository.dart';
 import '../data/sync_service.dart';
+import '../data/tipo_funda_repository.dart';
 import '../providers/juegos_provider.dart';
 
-class PropietariosScreen extends StatefulWidget {
-  const PropietariosScreen({super.key});
+class TiposFundaScreen extends StatefulWidget {
+  const TiposFundaScreen({super.key});
 
   @override
-  State<PropietariosScreen> createState() => _PropietariosScreenState();
+  State<TiposFundaScreen> createState() => _TiposFundaScreenState();
 }
 
-class _PropietariosScreenState extends State<PropietariosScreen> {
-  List<PropietarioRow> _propietarios = [];
+class _TiposFundaScreenState extends State<TiposFundaScreen> {
+  List<TipoFundaRow> _tipos = [];
+  Map<int, int> _usoCount = {};
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _fetchPropietarios();
+    _fetch();
   }
 
-  Future<void> _fetchPropietarios() async {
+  Future<void> _fetch() async {
     setState(() => _loading = true);
     try {
-      final repo = context.read<JuegosProvider>().propietarioRepository;
-      final propietarios = await repo.getAll();
+      final repo = context.read<JuegosProvider>().tipoFundaRepository;
+      final tipos = await repo.getAll();
+      final uso = await repo.getUsoCount();
       if (!mounted) return;
       setState(() {
-        _propietarios = propietarios;
+        _tipos = tipos;
+        _usoCount = uso;
         _loading = false;
       });
     } catch (e) {
-      debugPrint('PROPIETARIOS ERROR: $e');
+      debugPrint('TIPOS FUNDA ERROR: $e');
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _showFormDialog({PropietarioRow? propietario}) async {
-    final nombreCtrl = TextEditingController(text: propietario?.nombre ?? '');
-    final bggCtrl =
-        TextEditingController(text: propietario?.bggUsername ?? '');
-    final isEditing = propietario != null;
+  Future<void> _showFormDialog({TipoFundaRow? tipo}) async {
+    final nombreCtrl = TextEditingController(text: tipo?.nombre ?? '');
+    final anchoCtrl =
+        TextEditingController(text: tipo != null ? tipo.anchoMm.toString() : '');
+    final altoCtrl =
+        TextEditingController(text: tipo != null ? tipo.altoMm.toString() : '');
+    final isEditing = tipo != null;
     bool saving = false;
 
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(isEditing ? 'Editar propietario' : 'Nuevo propietario'),
+          title: Text(isEditing ? 'Editar funda' : 'Nueva funda'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -60,16 +65,33 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
                   border: OutlineInputBorder(),
                 ),
                 autofocus: true,
-                textCapitalization: TextCapitalization.words,
+                textCapitalization: TextCapitalization.sentences,
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: bggCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Usuario BGG',
-                  border: OutlineInputBorder(),
-                  hintText: 'Opcional',
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: anchoCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Ancho (mm) *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: altoCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Alto (mm) *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -82,25 +104,34 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
               onPressed: saving
                   ? null
                   : () async {
-                      if (nombreCtrl.text.trim().isEmpty) return;
+                      final nombre = nombreCtrl.text.trim();
+                      final ancho = int.tryParse(anchoCtrl.text.trim()) ?? 0;
+                      final alto = int.tryParse(altoCtrl.text.trim()) ?? 0;
+                      if (nombre.isEmpty || ancho <= 0 || alto <= 0) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                              content: Text(
+                                  'Rellena el nombre y unas medidas válidas.')),
+                        );
+                        return;
+                      }
                       setDialogState(() => saving = true);
                       try {
                         final repo = context
                             .read<JuegosProvider>()
-                            .propietarioRepository;
-                        final bgg = bggCtrl.text.trim().isEmpty
-                            ? null
-                            : bggCtrl.text.trim();
+                            .tipoFundaRepository;
                         if (isEditing) {
                           await repo.update(
-                            propietario.localId,
-                            nombre: nombreCtrl.text.trim(),
-                            bggUsername: bgg,
+                            tipo.localId,
+                            nombre: nombre,
+                            anchoMm: ancho,
+                            altoMm: alto,
                           );
                         } else {
                           await repo.create(
-                            nombre: nombreCtrl.text.trim(),
-                            bggUsername: bgg,
+                            nombre: nombre,
+                            anchoMm: ancho,
+                            altoMm: alto,
                           );
                         }
                         SyncService().syncAll();
@@ -126,23 +157,18 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
       ),
     );
 
-    if (result == true) _fetchPropietarios();
+    if (result == true) _fetch();
   }
 
-  Future<void> _confirmDelete(PropietarioRow propietario) async {
-    if (propietario.esPrincipal) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('No se puede eliminar el propietario principal')),
-      );
-      return;
-    }
-
+  Future<void> _confirmDelete(TipoFundaRow tipo) async {
+    final count = _usoCount[tipo.localId] ?? 0;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Eliminar propietario'),
-        content: Text('¿Eliminar "${propietario.nombre}"?'),
+        title: const Text('Eliminar funda'),
+        content: Text(count > 0
+            ? '"${tipo.nombre}" se usa en $count juego(s). Si la eliminas, esas fundas quedarán sin tipo asignado.'
+            : '¿Eliminar "${tipo.nombre}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -159,13 +185,13 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
 
     if (confirm == true) {
       try {
-        final repo = context.read<JuegosProvider>().propietarioRepository;
-        await repo.delete(propietario.localId);
+        final repo = context.read<JuegosProvider>().tipoFundaRepository;
+        await repo.delete(tipo.localId);
         SyncService().syncAll();
-        _fetchPropietarios();
+        _fetch();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Propietario eliminado')),
+            const SnackBar(content: Text('Funda eliminada')),
           );
         }
       } catch (e) {
@@ -183,34 +209,34 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Propietarios')),
+      appBar: AppBar(title: const Text('Fundas')),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showFormDialog(),
         child: const Icon(Icons.add),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _propietarios.isEmpty
+          : _tipos.isEmpty
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.people_outline,
+                      Icon(Icons.style_outlined,
                           size: 56, color: Colors.grey[400]),
                       const SizedBox(height: 12),
-                      Text('No hay propietarios',
+                      Text('No hay fundas',
                           style: TextStyle(color: Colors.grey[600])),
                     ],
                   ),
                 )
               : RefreshIndicator(
-                  onRefresh: _fetchPropietarios,
+                  onRefresh: _fetch,
                   child: ListView.builder(
                     padding: const EdgeInsets.only(bottom: 80),
-                    itemCount: _propietarios.length,
+                    itemCount: _tipos.length,
                     itemBuilder: (context, index) {
-                      final prop = _propietarios[index];
-                      final esPrincipal = prop.esPrincipal;
+                      final tipo = _tipos[index];
+                      final count = _usoCount[tipo.localId] ?? 0;
                       return Card(
                         margin: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 3),
@@ -219,61 +245,29 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
                             borderRadius: BorderRadius.circular(10)),
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: esPrincipal
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.primaryContainer,
-                            child: Icon(
-                              esPrincipal ? Icons.star : Icons.person,
-                              color: esPrincipal
-                                  ? Colors.white
-                                  : theme.colorScheme.onPrimaryContainer,
-                              size: 20,
-                            ),
+                            backgroundColor: theme.colorScheme.primaryContainer,
+                            child: Icon(Icons.style,
+                                color: theme.colorScheme.onPrimaryContainer,
+                                size: 20),
                           ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(prop.nombre,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 14)),
-                              ),
-                              if (esPrincipal)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.primary
-                                        .withAlpha(30),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text('Principal',
-                                      style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: theme.colorScheme.primary)),
-                                ),
-                            ],
-                          ),
-                          subtitle: prop.bggUsername != null &&
-                                  prop.bggUsername!.isNotEmpty
-                              ? Text('BGG: ${prop.bggUsername}',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey[600]))
-                              : null,
+                          title: Text('${tipo.nombre} ($count)',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 14)),
+                          subtitle: Text('${tipo.anchoMm} x ${tipo.altoMm} mm',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[600])),
                           trailing: PopupMenuButton<String>(
                             onSelected: (action) {
                               if (action == 'edit') {
-                                _showFormDialog(propietario: prop);
+                                _showFormDialog(tipo: tipo);
                               }
-                              if (action == 'delete') _confirmDelete(prop);
+                              if (action == 'delete') _confirmDelete(tipo);
                             },
                             itemBuilder: (_) => [
                               const PopupMenuItem(
                                   value: 'edit', child: Text('Editar')),
-                              if (!esPrincipal)
-                                const PopupMenuItem(
-                                    value: 'delete', child: Text('Eliminar')),
+                              const PopupMenuItem(
+                                  value: 'delete', child: Text('Eliminar')),
                             ],
                           ),
                         ),

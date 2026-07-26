@@ -23,6 +23,7 @@ import 'screens/profile_screen.dart';
 import 'screens/propietarios_screen.dart';
 import 'screens/recognize_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/tipos_funda_screen.dart';
 import 'screens/ubicaciones_screen.dart';
 import 'services/api_service.dart';
 
@@ -129,6 +130,13 @@ class LudotecaApp extends StatelessWidget {
               return MaterialPageRoute(
                   builder: (_) => const JuegosAvisoScreen(
                       tipo: JuegoAvisoTipo.expansionOtroIdioma));
+            case '/juegos-por-colocar':
+              return MaterialPageRoute(
+                  builder: (_) => const JuegosAvisoScreen(
+                      tipo: JuegoAvisoTipo.porColocar));
+            case '/tipos-funda':
+              return MaterialPageRoute(
+                  builder: (_) => const TiposFundaScreen());
             case '/ubicaciones':
               return MaterialPageRoute(
                   builder: (_) => const UbicacionesScreen());

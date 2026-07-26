@@ -20,29 +20,67 @@ class JuegoRepository {
 
   JuegoRepository(this._dbService, this._outbox);
 
+  // ---------- normalización de texto (acentos/mayúsculas) ----------
+
+  /// Mapa de caracteres acentuados (mayúsculas y minúsculas) a su letra base
+  /// en minúscula. Permite buscar y ordenar ignorando acentos: "avión" == "avion".
+  static const Map<String, String> _accentMap = {
+    'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a',
+    'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+    'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+    'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
+    'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+    'ñ': 'n', 'ç': 'c',
+    'Á': 'a', 'À': 'a', 'Ä': 'a', 'Â': 'a', 'Ã': 'a',
+    'É': 'e', 'È': 'e', 'Ë': 'e', 'Ê': 'e',
+    'Í': 'i', 'Ì': 'i', 'Ï': 'i', 'Î': 'i',
+    'Ó': 'o', 'Ò': 'o', 'Ö': 'o', 'Ô': 'o', 'Õ': 'o',
+    'Ú': 'u', 'Ù': 'u', 'Ü': 'u', 'Û': 'u',
+    'Ñ': 'n', 'Ç': 'c',
+  };
+
+  /// Devuelve una expresión SQL que normaliza [column] (minúsculas + sin
+  /// acentos) para poder comparar y ordenar sin sensibilidad a tildes.
+  static String _normalizedExpr(String column) {
+    var expr = column;
+    _accentMap.forEach((k, v) {
+      expr = "REPLACE($expr, '$k', '$v')";
+    });
+    return 'LOWER($expr)';
+  }
+
+  /// Normaliza un texto en Dart igual que [_normalizedExpr] en SQL.
+  static String normalizeText(String input) {
+    var out = input.toLowerCase();
+    _accentMap.forEach((k, v) {
+      out = out.replaceAll(k.toLowerCase(), v);
+    });
+    return out;
+  }
+
   // ---------- lectura ----------
 
-  Future<int> count({String? buscar, String? estado, bool? esExpansion, int? categoriaLocalId}) async {
+  Future<int> count({
+    String? buscar,
+    String? estado,
+    bool? esExpansion,
+    int? categoriaLocalId,
+    int? propietarioLocalId,
+    List<int>? propietarioLocalIds,
+  }) async {
     final db = await _dbService.database;
     final where = <String>[];
     final args = <dynamic>[];
-    if (buscar != null && buscar.isNotEmpty) {
-      where.add('j.nombre LIKE ?');
-      args.add('%$buscar%');
-    }
-    if (estado != null && estado.isNotEmpty) {
-      where.add('j.estado = ?');
-      args.add(estado);
-    }
-    if (esExpansion == true) {
-      where.add('j.es_expansion = 1');
-    } else if (esExpansion == false) {
-      where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
-    }
-    if (categoriaLocalId != null) {
-      where.add('EXISTS (SELECT 1 FROM juego_categoria jc WHERE jc.juego_local_id = j.local_id AND jc.categoria_local_id = ?)');
-      args.add(categoriaLocalId);
-    }
+    _applyCommonFilters(
+      where,
+      args,
+      buscar: buscar,
+      estado: estado,
+      esExpansion: esExpansion,
+      categoriaLocalId: categoriaLocalId,
+      propietarioLocalId: propietarioLocalId,
+      propietarioLocalIds: propietarioLocalIds,
+    );
     final whereSql = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
     final r = await db.rawQuery('SELECT COUNT(*) AS c FROM juegos j $whereSql', args);
     return Sqflite.firstIntValue(r) ?? 0;
@@ -56,16 +94,48 @@ class JuegoRepository {
     String? estado,
     bool? esExpansion,
     int? categoriaLocalId,
+    int? propietarioLocalId,
+    List<int>? propietarioLocalIds,
   }) async {
     final db = await _dbService.database;
     final where = <String>[];
     final args = <dynamic>[];
-    if (buscar != null && buscar.isNotEmpty) {
-      where.add('j.nombre LIKE ?');
-      args.add('%$buscar%');
-    }
     if (soloBase) {
       where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
+    }
+    _applyCommonFilters(
+      where,
+      args,
+      buscar: buscar,
+      estado: estado,
+      esExpansion: esExpansion,
+      categoriaLocalId: categoriaLocalId,
+      propietarioLocalId: propietarioLocalId,
+      propietarioLocalIds: propietarioLocalIds,
+    );
+    final whereSql = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
+    final offset = (page - 1) * perPage;
+    final rows = await db.rawQuery(
+      'SELECT j.* FROM juegos j $whereSql '
+      'ORDER BY ${_normalizedExpr('j.nombre')} LIMIT ? OFFSET ?',
+      [...args, perPage, offset],
+    );
+    return _hydrateAll(rows);
+  }
+
+  void _applyCommonFilters(
+    List<String> where,
+    List<dynamic> args, {
+    String? buscar,
+    String? estado,
+    bool? esExpansion,
+    int? categoriaLocalId,
+    int? propietarioLocalId,
+    List<int>? propietarioLocalIds,
+  }) {
+    if (buscar != null && buscar.trim().isNotEmpty) {
+      where.add('${_normalizedExpr('j.nombre')} LIKE ?');
+      args.add('%${normalizeText(buscar.trim())}%');
     }
     if (estado != null && estado.isNotEmpty) {
       where.add('j.estado = ?');
@@ -80,13 +150,15 @@ class JuegoRepository {
       where.add('EXISTS (SELECT 1 FROM juego_categoria jc WHERE jc.juego_local_id = j.local_id AND jc.categoria_local_id = ?)');
       args.add(categoriaLocalId);
     }
-    final whereSql = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
-    final offset = (page - 1) * perPage;
-    final rows = await db.rawQuery(
-      'SELECT j.* FROM juegos j $whereSql ORDER BY j.nombre LIMIT ? OFFSET ?',
-      [...args, perPage, offset],
-    );
-    return _hydrateAll(rows);
+    if (propietarioLocalId != null) {
+      where.add('EXISTS (SELECT 1 FROM juego_propietario jp WHERE jp.juego_local_id = j.local_id AND jp.propietario_local_id = ?)');
+      args.add(propietarioLocalId);
+    }
+    if (propietarioLocalIds != null && propietarioLocalIds.isNotEmpty) {
+      final placeholders = List.filled(propietarioLocalIds.length, '?').join(',');
+      where.add('EXISTS (SELECT 1 FROM juego_propietario jp WHERE jp.juego_local_id = j.local_id AND jp.propietario_local_id IN ($placeholders))');
+      args.addAll(propietarioLocalIds);
+    }
   }
 
   Future<Juego?> getByLocalId(int localId) async {
@@ -220,6 +292,8 @@ class JuegoRepository {
         "SELECT COUNT(*) AS c FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido'");
     final faltanTraduccion = await db.rawQuery(
         "SELECT COUNT(*) AS c FROM juegos WHERE $_faltanTraduccionWhere");
+    final porColocar = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM juegos WHERE $_porColocarWhere');
     final expansionOtroIdioma = await _mismatchExpansionOtroIdioma(db);
     return <String, dynamic>{
       'totalJuegos': Sqflite.firstIntValue(total) ?? 0,
@@ -229,8 +303,33 @@ class JuegoRepository {
       'totalExpansiones': Sqflite.firstIntValue(exp) ?? 0,
       'juegosPorEstrenar': Sqflite.firstIntValue(porEstrenar) ?? 0,
       'juegosFaltanTraduccion': Sqflite.firstIntValue(faltanTraduccion) ?? 0,
+      'juegosPorColocar': Sqflite.firstIntValue(porColocar) ?? 0,
       'juegosExpansionOtroIdioma': expansionOtroIdioma.length,
     };
+  }
+
+  /// Condición SQL para los juegos "por colocar": no están guardados dentro de
+  /// la caja del juego base, no están vendidos y no tienen ninguna ubicación
+  /// asignada (ni a nivel de juego ni en ninguna de sus copias por propietario).
+  static const String _porColocarWhere = '''
+    COALESCE(en_caja_base, 0) = 0
+    AND ubicacion_local_id IS NULL
+    AND COALESCE(estado, '') != 'vendido'
+    AND NOT EXISTS (
+      SELECT 1 FROM juego_propietario jp
+      WHERE jp.juego_local_id = juegos.local_id
+        AND jp.ubicacion_local_id IS NOT NULL
+    )
+  ''';
+
+  /// Juegos sin ubicación asignada (por colocar), ordenados alfabéticamente.
+  Future<List<Juego>> juegosPorColocar() async {
+    final db = await _dbService.database;
+    final rows = await db.rawQuery(
+      'SELECT * FROM juegos WHERE $_porColocarWhere '
+      'ORDER BY ${_normalizedExpr('nombre')}',
+    );
+    return _hydrateAll(rows);
   }
 
   /// Condici\u00f3n SQL para los juegos "por tradumaquetar": su idioma no incluye
@@ -249,7 +348,8 @@ class JuegoRepository {
   Future<List<Juego>> juegosPorEstrenar() async {
     final db = await _dbService.database;
     final rows = await db.rawQuery(
-      "SELECT * FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido' ORDER BY nombre",
+      "SELECT * FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido' "
+      "ORDER BY ${_normalizedExpr('nombre')}",
     );
     return _hydrateAll(rows);
   }
@@ -259,7 +359,8 @@ class JuegoRepository {
   Future<List<Juego>> juegosFaltanTraduccion() async {
     final db = await _dbService.database;
     final rows = await db.rawQuery(
-      'SELECT * FROM juegos WHERE $_faltanTraduccionWhere ORDER BY nombre',
+      'SELECT * FROM juegos WHERE $_faltanTraduccionWhere '
+      'ORDER BY ${_normalizedExpr('nombre')}',
     );
     return _hydrateAll(rows);
   }
@@ -345,7 +446,7 @@ class JuegoRepository {
       result.add(ExpansionIdiomaAviso(base: base, expansiones: exps));
     });
     result.sort((a, b) =>
-        a.base.nombre.toLowerCase().compareTo(b.base.nombre.toLowerCase()));
+        normalizeText(a.base.nombre).compareTo(normalizeText(b.base.nombre)));
     return result;
   }
 
