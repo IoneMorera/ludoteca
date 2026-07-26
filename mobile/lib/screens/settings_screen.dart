@@ -401,6 +401,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(),
           ListTile(
+            leading: const Icon(Icons.style),
+            title: const Text('Fundas'),
+            subtitle: const Text('Gestiona los tipos de funda'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).pushNamed('/tipos-funda'),
+          ),
+          const Divider(),
+          ListTile(
             leading: const Icon(Icons.sports_esports),
             title: const Text('Planificar partida'),
             subtitle: const Text('Busca juegos por jugadores y edad'),

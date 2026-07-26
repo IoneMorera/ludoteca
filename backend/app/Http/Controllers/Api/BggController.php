@@ -839,13 +839,23 @@ class BggController extends Controller
         }
 
         $games = [];
+        $seen = [];
 
         foreach ($data->item as $item) {
+            $bggId = (int) $item['objectid'];
+            // La colección de BGG puede contener el mismo juego repetido
+            // (varias copias, distintos collid). Deduplicamos por bgg_id para
+            // que el total mostrado coincida con lo que realmente se importa.
+            if (!$bggId || isset($seen[$bggId])) {
+                continue;
+            }
+            $seen[$bggId] = true;
+
             $stats = $item->stats ?? null;
             $rating = $stats?->rating ?? null;
 
             $games[] = [
-                'bgg_id' => (int) $item['objectid'],
+                'bgg_id' => $bggId,
                 'name' => (string) $item->name,
                 'year' => (int) ($item->yearpublished ?? 0),
                 'image' => (string) ($item->image ?? ''),

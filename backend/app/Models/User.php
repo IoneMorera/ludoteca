@@ -22,6 +22,7 @@ class User extends Authenticatable
         'ocultar_por_estrenar',
         'ocultar_faltan_traduccion',
         'ocultar_expansion_otro_idioma',
+        'ocultar_por_colocar',
     ];
 
     protected $hidden = [
@@ -36,6 +37,7 @@ class User extends Authenticatable
         'ocultar_por_estrenar' => 'boolean',
         'ocultar_faltan_traduccion' => 'boolean',
         'ocultar_expansion_otro_idioma' => 'boolean',
+        'ocultar_por_colocar' => 'boolean',
     ];
 
     public function tenant()

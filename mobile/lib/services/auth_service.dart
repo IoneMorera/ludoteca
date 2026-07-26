@@ -71,6 +71,7 @@ class AuthService {
     bool? ocultarPorEstrenar,
     bool? ocultarFaltanTraduccion,
     bool? ocultarExpansionOtroIdioma,
+    bool? ocultarPorColocar,
   }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
@@ -84,6 +85,9 @@ class AuthService {
     }
     if (ocultarExpansionOtroIdioma != null) {
       body['ocultar_expansion_otro_idioma'] = ocultarExpansionOtroIdioma;
+    }
+    if (ocultarPorColocar != null) {
+      body['ocultar_por_colocar'] = ocultarPorColocar;
     }
     if (body.isEmpty) return null;
     final response = await _api.put('/user', data: body);

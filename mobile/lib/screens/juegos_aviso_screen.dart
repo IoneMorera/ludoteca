@@ -8,7 +8,12 @@ import '../providers/juegos_provider.dart';
 import '../widgets/game_image.dart';
 
 /// Tipos de aviso de la pantalla de Inicio que listan juegos.
-enum JuegoAvisoTipo { porEstrenar, faltanTraduccion, expansionOtroIdioma }
+enum JuegoAvisoTipo {
+  porEstrenar,
+  faltanTraduccion,
+  expansionOtroIdioma,
+  porColocar,
+}
 
 /// Pantalla gen\u00e9rica que lista los juegos de un aviso concreto (por estrenar
 /// o pendientes de tradumaquetar), similar a la de fundas faltantes.
@@ -44,9 +49,21 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
       }
       return;
     }
-    final juegos = widget.tipo == JuegoAvisoTipo.porEstrenar
-        ? await repo.juegosPorEstrenar()
-        : await repo.juegosFaltanTraduccion();
+    final List<Juego> juegos;
+    switch (widget.tipo) {
+      case JuegoAvisoTipo.porEstrenar:
+        juegos = await repo.juegosPorEstrenar();
+        break;
+      case JuegoAvisoTipo.faltanTraduccion:
+        juegos = await repo.juegosFaltanTraduccion();
+        break;
+      case JuegoAvisoTipo.porColocar:
+        juegos = await repo.juegosPorColocar();
+        break;
+      case JuegoAvisoTipo.expansionOtroIdioma:
+        juegos = const [];
+        break;
+    }
     if (mounted) {
       setState(() {
         _juegos = juegos;
@@ -71,6 +88,8 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
         return 'Faltan Traducciones';
       case JuegoAvisoTipo.expansionOtroIdioma:
         return 'Expansiones en Otro Idioma';
+      case JuegoAvisoTipo.porColocar:
+        return 'Juegos por Colocar';
     }
   }
 
@@ -82,6 +101,8 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
         return 'No hay juegos pendientes de traducir';
       case JuegoAvisoTipo.expansionOtroIdioma:
         return 'No hay expansiones en otro idioma';
+      case JuegoAvisoTipo.porColocar:
+        return 'Todos los juegos tienen ubicación';
     }
   }
 
@@ -93,6 +114,8 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
         return Colors.indigo;
       case JuegoAvisoTipo.expansionOtroIdioma:
         return Colors.deepOrange;
+      case JuegoAvisoTipo.porColocar:
+        return Colors.brown;
     }
   }
 
@@ -104,6 +127,8 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
         return Icons.translate;
       case JuegoAvisoTipo.expansionOtroIdioma:
         return Icons.language;
+      case JuegoAvisoTipo.porColocar:
+        return Icons.inventory_2_outlined;
     }
   }
 

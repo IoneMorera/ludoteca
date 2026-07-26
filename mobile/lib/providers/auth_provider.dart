@@ -22,6 +22,7 @@ class AuthProvider extends ChangeNotifier {
       _user?['ocultar_faltan_traduccion'] == true;
   bool get ocultarExpansionOtroIdioma =>
       _user?['ocultar_expansion_otro_idioma'] == true;
+  bool get ocultarPorColocar => _user?['ocultar_por_colocar'] == true;
 
   Future<bool> checkAuth() async {
     if (!await _authService.isLoggedIn()) return false;
@@ -118,6 +119,7 @@ class AuthProvider extends ChangeNotifier {
     bool? ocultarPorEstrenar,
     bool? ocultarFaltanTraduccion,
     bool? ocultarExpansionOtroIdioma,
+    bool? ocultarPorColocar,
   }) async {
     try {
       final updated = await _authService.updateUser(
@@ -127,6 +129,7 @@ class AuthProvider extends ChangeNotifier {
         ocultarPorEstrenar: ocultarPorEstrenar,
         ocultarFaltanTraduccion: ocultarFaltanTraduccion,
         ocultarExpansionOtroIdioma: ocultarExpansionOtroIdioma,
+        ocultarPorColocar: ocultarPorColocar,
       );
       if (updated != null) {
         _user = updated;

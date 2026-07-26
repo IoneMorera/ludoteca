@@ -90,7 +90,7 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma'),
+            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
             'token' => $token,
         ], 201);
     }
@@ -113,7 +113,7 @@ class AuthController extends Controller
         $token = $user->createToken('web')->plainTextToken;
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma'),
+            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
             'token' => $token,
         ]);
     }
@@ -128,7 +128,7 @@ class AuthController extends Controller
     public function user(Request $request): JsonResponse
     {
         return response()->json([
-            'user' => $request->user()->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma'),
+            'user' => $request->user()->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
         ]);
     }
 
@@ -141,6 +141,7 @@ class AuthController extends Controller
             'ocultar_por_estrenar' => 'sometimes|boolean',
             'ocultar_faltan_traduccion' => 'sometimes|boolean',
             'ocultar_expansion_otro_idioma' => 'sometimes|boolean',
+            'ocultar_por_colocar' => 'sometimes|boolean',
         ]);
 
         /** @var \App\Models\User $user */
@@ -149,7 +150,7 @@ class AuthController extends Controller
         $user->save();
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma'),
+            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
         ]);
     }
 
@@ -171,7 +172,7 @@ class AuthController extends Controller
         $token = $user->createToken('mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma'),
+            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
             'token' => $token,
         ]);
     }
