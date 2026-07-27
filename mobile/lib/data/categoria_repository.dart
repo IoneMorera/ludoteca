@@ -46,12 +46,23 @@ class CategoriaRepository {
   /// Returns a map of categoria local_id -> count of games in that category.
   Future<Map<int, int>> getJuegoCountByCategoria() async {
     final db = await _dbService.database;
+    // Contamos considerando ambas vías de asociación: la tabla pivote
+    // (juego_categoria) y la columna heredada juegos.categoria_local_id (que
+    // rellena la importación de BGG). Así el número coincide con lo que muestra
+    // el filtro por categoría.
     final rows = await db.rawQuery('''
-      SELECT jc.categoria_local_id, COUNT(DISTINCT jc.juego_local_id) AS cnt
-      FROM juego_categoria jc
-      INNER JOIN juegos j ON j.local_id = jc.juego_local_id
-      WHERE jc.categoria_local_id IS NOT NULL
-      GROUP BY jc.categoria_local_id
+      SELECT cat_id AS categoria_local_id, COUNT(DISTINCT juego_local_id) AS cnt
+      FROM (
+        SELECT jc.categoria_local_id AS cat_id, jc.juego_local_id AS juego_local_id
+        FROM juego_categoria jc
+        INNER JOIN juegos j ON j.local_id = jc.juego_local_id
+        WHERE jc.categoria_local_id IS NOT NULL
+        UNION
+        SELECT j.categoria_local_id AS cat_id, j.local_id AS juego_local_id
+        FROM juegos j
+        WHERE j.categoria_local_id IS NOT NULL
+      )
+      GROUP BY cat_id
     ''');
     final result = <int, int>{};
     for (final r in rows) {

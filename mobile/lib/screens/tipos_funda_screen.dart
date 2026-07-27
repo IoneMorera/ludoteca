@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../data/juego_repository.dart';
 import '../data/sync_service.dart';
 import '../data/tipo_funda_repository.dart';
 import '../providers/juegos_provider.dart';
@@ -28,6 +29,8 @@ class _TiposFundaScreenState extends State<TiposFundaScreen> {
     try {
       final repo = context.read<JuegosProvider>().tipoFundaRepository;
       final tipos = await repo.getAll();
+      tipos.sort((a, b) => JuegoRepository.normalizeText(a.nombre)
+          .compareTo(JuegoRepository.normalizeText(b.nombre)));
       final uso = await repo.getUsoCount();
       if (!mounted) return;
       setState(() {

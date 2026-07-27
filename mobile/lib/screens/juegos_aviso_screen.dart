@@ -38,37 +38,34 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
   }
 
   Future<void> _load() async {
-    final repo = context.read<JuegosProvider>().juegoRepository;
-    if (widget.tipo == JuegoAvisoTipo.expansionOtroIdioma) {
-      final avisos = await repo.juegosConExpansionOtroIdioma();
-      if (mounted) {
-        setState(() {
-          _avisosExpansion = avisos;
-          _loading = false;
-        });
+    if (mounted && !_loading) setState(() => _loading = true);
+    try {
+      final repo = context.read<JuegosProvider>().juegoRepository;
+      if (widget.tipo == JuegoAvisoTipo.expansionOtroIdioma) {
+        final avisos = await repo.juegosConExpansionOtroIdioma();
+        if (mounted) setState(() => _avisosExpansion = avisos);
+        return;
       }
-      return;
-    }
-    final List<Juego> juegos;
-    switch (widget.tipo) {
-      case JuegoAvisoTipo.porEstrenar:
-        juegos = await repo.juegosPorEstrenar();
-        break;
-      case JuegoAvisoTipo.faltanTraduccion:
-        juegos = await repo.juegosFaltanTraduccion();
-        break;
-      case JuegoAvisoTipo.porColocar:
-        juegos = await repo.juegosPorColocar();
-        break;
-      case JuegoAvisoTipo.expansionOtroIdioma:
-        juegos = const [];
-        break;
-    }
-    if (mounted) {
-      setState(() {
-        _juegos = juegos;
-        _loading = false;
-      });
+      final List<Juego> juegos;
+      switch (widget.tipo) {
+        case JuegoAvisoTipo.porEstrenar:
+          juegos = await repo.juegosPorEstrenar();
+          break;
+        case JuegoAvisoTipo.faltanTraduccion:
+          juegos = await repo.juegosFaltanTraduccion();
+          break;
+        case JuegoAvisoTipo.porColocar:
+          juegos = await repo.juegosPorColocar();
+          break;
+        case JuegoAvisoTipo.expansionOtroIdioma:
+          juegos = const [];
+          break;
+      }
+      if (mounted) setState(() => _juegos = juegos);
+    } catch (e, st) {
+      debugPrint('AVISO load error (${widget.tipo}): $e\n$st');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -157,40 +154,47 @@ class _JuegosAvisoScreenState extends State<JuegosAvisoScreen> {
                         ),
                       ],
                     )
-                  : ListView(
+                  : ListView.builder(
                       padding: const EdgeInsets.all(16),
-                      children: [
-                        Card(
-                          elevation: 0,
-                          color: _color.withValues(alpha: 0.08),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            side: BorderSide(
-                                color: _color.withValues(alpha: 0.35)),
-                          ),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: _color.withValues(alpha: 0.15),
-                              child: Icon(_icon, color: _color),
-                            ),
-                            title: Text(
-                              _titulo,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text('$_count juegos'),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
+                      itemCount: _count + 1,
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _buildHeaderCard(),
+                          );
+                        }
+                        final i = index - 1;
                         if (widget.tipo ==
-                            JuegoAvisoTipo.expansionOtroIdioma) ...[
-                          ..._avisosExpansion.map(_buildExpansionAvisoTile),
-                        ] else ...[
-                          ..._juegos.map(_buildJuegoTile),
-                        ],
-                      ],
+                            JuegoAvisoTipo.expansionOtroIdioma) {
+                          return _buildExpansionAvisoTile(_avisosExpansion[i]);
+                        }
+                        return _buildJuegoTile(_juegos[i]);
+                      },
                     ),
             ),
+    );
+  }
+
+  Widget _buildHeaderCard() {
+    return Card(
+      elevation: 0,
+      color: _color.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: _color.withValues(alpha: 0.35)),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: _color.withValues(alpha: 0.15),
+          child: Icon(_icon, color: _color),
+        ),
+        title: Text(
+          _titulo,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text('$_count juegos'),
+      ),
     );
   }
 
