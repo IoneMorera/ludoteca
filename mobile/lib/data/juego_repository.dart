@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/juego.dart';
 import '../services/database_service.dart';
+import '../utils/text_normalize.dart' as tn;
 import 'outbox_dao.dart';
 import 'ubicacion_repository.dart';
 
@@ -22,41 +23,14 @@ class JuegoRepository {
 
   // ---------- normalización de texto (acentos/mayúsculas) ----------
 
-  /// Mapa de caracteres acentuados (mayúsculas y minúsculas) a su letra base
-  /// en minúscula. Permite buscar y ordenar ignorando acentos: "avión" == "avion".
-  static const Map<String, String> _accentMap = {
-    'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a',
-    'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
-    'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
-    'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
-    'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
-    'ñ': 'n', 'ç': 'c',
-    'Á': 'a', 'À': 'a', 'Ä': 'a', 'Â': 'a', 'Ã': 'a',
-    'É': 'e', 'È': 'e', 'Ë': 'e', 'Ê': 'e',
-    'Í': 'i', 'Ì': 'i', 'Ï': 'i', 'Î': 'i',
-    'Ó': 'o', 'Ò': 'o', 'Ö': 'o', 'Ô': 'o', 'Õ': 'o',
-    'Ú': 'u', 'Ù': 'u', 'Ü': 'u', 'Û': 'u',
-    'Ñ': 'n', 'Ç': 'c',
-  };
+  /// Expresión SQL para ordenar/comparar sin sensibilidad a tildes usando la
+  /// columna persistente `nombre_norm` (rellenada al escribir cada juego).
+  /// Hace fallback a LOWER(nombre) por si alguna fila antigua no está migrada.
+  static String _normNombre([String prefix = '']) =>
+      'COALESCE(${prefix}nombre_norm, LOWER(${prefix}nombre))';
 
-  /// Devuelve una expresión SQL que normaliza [column] (minúsculas + sin
-  /// acentos) para poder comparar y ordenar sin sensibilidad a tildes.
-  static String _normalizedExpr(String column) {
-    var expr = column;
-    _accentMap.forEach((k, v) {
-      expr = "REPLACE($expr, '$k', '$v')";
-    });
-    return 'LOWER($expr)';
-  }
-
-  /// Normaliza un texto en Dart igual que [_normalizedExpr] en SQL.
-  static String normalizeText(String input) {
-    var out = input.toLowerCase();
-    _accentMap.forEach((k, v) {
-      out = out.replaceAll(k.toLowerCase(), v);
-    });
-    return out;
-  }
+  /// Normaliza un texto en Dart (minúsculas + sin acentos).
+  static String normalizeText(String input) => tn.normalizeText(input);
 
   // ---------- lectura ----------
 
@@ -117,7 +91,7 @@ class JuegoRepository {
     final offset = (page - 1) * perPage;
     final rows = await db.rawQuery(
       'SELECT j.* FROM juegos j $whereSql '
-      'ORDER BY ${_normalizedExpr('j.nombre')} LIMIT ? OFFSET ?',
+      'ORDER BY ${_normNombre('j.')} LIMIT ? OFFSET ?',
       [...args, perPage, offset],
     );
     return _hydrateAll(rows);
@@ -134,7 +108,7 @@ class JuegoRepository {
     List<int>? propietarioLocalIds,
   }) {
     if (buscar != null && buscar.trim().isNotEmpty) {
-      where.add('${_normalizedExpr('j.nombre')} LIKE ?');
+      where.add('${_normNombre('j.')} LIKE ?');
       args.add('%${normalizeText(buscar.trim())}%');
     }
     if (estado != null && estado.isNotEmpty) {
@@ -147,7 +121,13 @@ class JuegoRepository {
       where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
     }
     if (categoriaLocalId != null) {
-      where.add('EXISTS (SELECT 1 FROM juego_categoria jc WHERE jc.juego_local_id = j.local_id AND jc.categoria_local_id = ?)');
+      // Un juego puede tener su categoría por la tabla pivote (juego_categoria)
+      // o por la columna heredada juegos.categoria_local_id (la que rellena la
+      // importación de BGG). Comprobamos ambas para no dejar juegos fuera.
+      where.add('(EXISTS (SELECT 1 FROM juego_categoria jc '
+          'WHERE jc.juego_local_id = j.local_id AND jc.categoria_local_id = ?) '
+          'OR j.categoria_local_id = ?)');
+      args.add(categoriaLocalId);
       args.add(categoriaLocalId);
     }
     if (propietarioLocalId != null) {
@@ -327,7 +307,7 @@ class JuegoRepository {
     final db = await _dbService.database;
     final rows = await db.rawQuery(
       'SELECT * FROM juegos WHERE $_porColocarWhere '
-      'ORDER BY ${_normalizedExpr('nombre')}',
+      'ORDER BY ${_normNombre()}',
     );
     return _hydrateAll(rows);
   }
@@ -349,7 +329,7 @@ class JuegoRepository {
     final db = await _dbService.database;
     final rows = await db.rawQuery(
       "SELECT * FROM juegos WHERE sin_abrir = 1 AND COALESCE(estado, '') != 'vendido' "
-      "ORDER BY ${_normalizedExpr('nombre')}",
+      "ORDER BY ${_normNombre()}",
     );
     return _hydrateAll(rows);
   }
@@ -360,7 +340,7 @@ class JuegoRepository {
     final db = await _dbService.database;
     final rows = await db.rawQuery(
       'SELECT * FROM juegos WHERE $_faltanTraduccionWhere '
-      'ORDER BY ${_normalizedExpr('nombre')}',
+      'ORDER BY ${_normNombre()}',
     );
     return _hydrateAll(rows);
   }
@@ -735,6 +715,7 @@ class JuegoRepository {
     final values = {
       'server_id': serverId,
       'nombre': data['nombre'],
+      'nombre_norm': normalizeText((data['nombre'] as String?) ?? ''),
       'descripcion': data['descripcion'],
       'edad_minima': data['edad_minima'],
       'edad_maxima': data['edad_maxima'],
@@ -1304,10 +1285,21 @@ class JuegoRepository {
     }
 
     // Si los resultados incluyen juegos base, cargar expansiones cortas.
+    // Agrupamos las expansiones por su juego base una sola vez (O(n)) para no
+    // recorrer toda la tabla por cada juego del resultado (evita O(n²) en
+    // listados grandes como "Juegos por colocar").
+    final childRowsByBase = <int, List<Map<String, dynamic>>>{};
+    for (final r in allRows) {
+      final baseLocal = r['juego_base_local_id'] as int?;
+      if (baseLocal == null) continue;
+      (childRowsByBase[baseLocal] ??= []).add(r);
+    }
     for (final juego in result) {
-      if (juego.localId == null) continue;
-      final exps = allRows
-          .where((r) => r['juego_base_local_id'] == juego.localId)
+      final lid = juego.localId;
+      if (lid == null) continue;
+      final childRows = childRowsByBase[lid];
+      if (childRows == null || childRows.isEmpty) continue;
+      expansionesByBaseLocal[lid] = childRows
           .map((r) => Juego(
                 id: (r['server_id'] as int?) ?? -(r['local_id'] as int),
                 localId: r['local_id'] as int,
@@ -1315,9 +1307,6 @@ class JuegoRepository {
                 nombre: r['nombre'] as String,
               ))
           .toList();
-      if (exps.isNotEmpty) {
-        expansionesByBaseLocal[juego.localId!] = exps;
-      }
     }
 
     return result
@@ -1377,6 +1366,7 @@ class JuegoRepository {
 
     return {
       'nombre': juego.nombre,
+      'nombre_norm': normalizeText(juego.nombre),
       'descripcion': juego.descripcion,
       'edad_minima': juego.edadMinima,
       'edad_maxima': juego.edadMaxima,

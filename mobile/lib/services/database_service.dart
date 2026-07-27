@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
 import '../models/partida.dart';
+import '../utils/text_normalize.dart';
 
 /// Servicio singleton para acceder a la BBDD SQLite local.
 ///
@@ -18,7 +19,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 10;
+  static const int _schemaVersion = 11;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -77,6 +78,9 @@ class DatabaseService {
         }
         if (oldVersion < 10) {
           await _migrateToV10(db);
+        }
+        if (oldVersion < 11) {
+          await _migrateToV11(db);
         }
       },
     );
@@ -190,6 +194,7 @@ class DatabaseService {
         local_id INTEGER PRIMARY KEY AUTOINCREMENT,
         server_id INTEGER UNIQUE,
         nombre TEXT NOT NULL,
+        nombre_norm TEXT,
         descripcion TEXT,
         edad_minima INTEGER,
         edad_maxima INTEGER,
@@ -227,6 +232,7 @@ class DatabaseService {
       )
     ''');
     await db.execute('CREATE INDEX idx_juegos_nombre ON juegos(nombre)');
+    await db.execute('CREATE INDEX idx_juegos_nombre_norm ON juegos(nombre_norm)');
     await db.execute('CREATE INDEX idx_juegos_base ON juegos(juego_base_server_id)');
 
     await db.execute('''
@@ -497,6 +503,30 @@ class DatabaseService {
 
     // Fuerza un re-pull completo para traer el nuevo campo del servidor.
     await db.delete('sync_state', where: "key = 'last_pull_at'");
+  }
+
+  /// Columna persistente `nombre_norm` (minúsculas + sin acentos) para poder
+  /// ordenar y buscar de forma insensible a tildes sin usar expresiones SQL
+  /// frágiles (REPLACE anidados) que fallan en el SQLite de algunos dispositivos.
+  Future<void> _migrateToV11(Database db) async {
+    await db.execute('ALTER TABLE juegos ADD COLUMN nombre_norm TEXT');
+
+    // Backfill de las filas existentes normalizando en Dart.
+    final rows = await db.query('juegos', columns: ['local_id', 'nombre']);
+    final batch = db.batch();
+    for (final r in rows) {
+      final nombre = (r['nombre'] as String?) ?? '';
+      batch.update(
+        'juegos',
+        {'nombre_norm': normalizeText(nombre)},
+        where: 'local_id = ?',
+        whereArgs: [r['local_id']],
+      );
+    }
+    await batch.commit(noResult: true);
+
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_juegos_nombre_norm ON juegos(nombre_norm)');
   }
 
   // ---------- sync_state helpers ----------

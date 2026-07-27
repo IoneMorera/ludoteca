@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
+import '../data/juego_repository.dart';
 import '../providers/auth_provider.dart';
 import '../providers/juegos_provider.dart';
 
@@ -100,7 +101,12 @@ class _FundasFaltantesScreenState extends State<FundasFaltantesScreen> {
                     final juegosRaw = funda['juegos_json'] as String?;
                     final juegos = juegosRaw != null
                         ? (jsonDecode(juegosRaw) as List).cast<Map>()
-                        : const [];
+                        : const <Map>[];
+                    final juegosOrdenados = List<Map>.from(juegos)
+                      ..sort((a, b) => JuegoRepository.normalizeText(
+                              (a['juego_nombre'] ?? '').toString())
+                          .compareTo(JuegoRepository.normalizeText(
+                              (b['juego_nombre'] ?? '').toString())));
                     return Card(
                       elevation: 0,
                       margin: const EdgeInsets.only(bottom: 10),
@@ -124,7 +130,7 @@ class _FundasFaltantesScreenState extends State<FundasFaltantesScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        children: juegos.map((item) {
+                        children: juegosOrdenados.map((item) {
                           return ListTile(
                             title: Text(
                               (item['juego_nombre'] ?? 'Juego no disponible')
