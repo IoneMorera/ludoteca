@@ -187,6 +187,31 @@ class UbicacionRepository {
     return localId;
   }
 
+  /// Cuenta juegos distintos por ubicación (nivel de juego o por copia de
+  /// propietario), para que el número coincida con el listado filtrado.
+  Future<Map<int, int>> getJuegoCountByUbicacion() async {
+    final db = await _dbService.database;
+    final result = <int, int>{};
+    final rows = await db.rawQuery('''
+      SELECT ub_id AS ubicacion_local_id, COUNT(DISTINCT juego_local_id) AS c
+      FROM (
+        SELECT ubicacion_local_id AS ub_id, local_id AS juego_local_id
+        FROM juegos
+        WHERE ubicacion_local_id IS NOT NULL
+        UNION
+        SELECT ubicacion_local_id AS ub_id, juego_local_id
+        FROM juego_propietario
+        WHERE ubicacion_local_id IS NOT NULL
+      )
+      GROUP BY ub_id
+    ''');
+    for (final r in rows) {
+      final ubId = r['ubicacion_local_id'] as int?;
+      if (ubId != null) result[ubId] = (r['c'] as int?) ?? 0;
+    }
+    return result;
+  }
+
   Future<List<UbicacionRow>> getAll() async {
     final db = await _dbService.database;
     final rows = await db.rawQuery('''

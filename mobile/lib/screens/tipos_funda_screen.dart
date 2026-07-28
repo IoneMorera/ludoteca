@@ -259,6 +259,10 @@ class _TiposFundaScreenState extends State<TiposFundaScreen> {
                           subtitle: Text('${tipo.anchoMm} x ${tipo.altoMm} mm',
                               style: TextStyle(
                                   fontSize: 12, color: Colors.grey[600])),
+                          onTap: () => Navigator.of(context).pushNamed(
+                            '/juegos',
+                            arguments: {'tipoFundaLocalId': tipo.localId},
+                          ),
                           trailing: PopupMenuButton<String>(
                             onSelected: (action) {
                               if (action == 'edit') {

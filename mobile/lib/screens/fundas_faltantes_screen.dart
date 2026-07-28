@@ -97,7 +97,12 @@ class _FundasFaltantesScreenState extends State<FundasFaltantesScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  ...fundasFaltantes.map((funda) {
+                  ...(List<Map<String, dynamic>>.from(fundasFaltantes)
+                        ..sort((a, b) => JuegoRepository.normalizeText(
+                                (a['tipo_nombre'] ?? '').toString())
+                            .compareTo(JuegoRepository.normalizeText(
+                                (b['tipo_nombre'] ?? '').toString()))))
+                      .map((funda) {
                     final juegosRaw = funda['juegos_json'] as String?;
                     final juegos = juegosRaw != null
                         ? (jsonDecode(juegosRaw) as List).cast<Map>()

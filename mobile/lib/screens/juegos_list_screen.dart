@@ -12,6 +12,8 @@ class JuegosListScreen extends StatefulWidget {
   final String? initialEstado;
   final bool? initialEsExpansion;
   final int? categoriaLocalId;
+  final int? tipoFundaLocalId;
+  final int? ubicacionLocalId;
   final VoidCallback? onBack;
 
   const JuegosListScreen({
@@ -19,6 +21,8 @@ class JuegosListScreen extends StatefulWidget {
     this.initialEstado,
     this.initialEsExpansion,
     this.categoriaLocalId,
+    this.tipoFundaLocalId,
+    this.ubicacionLocalId,
     this.onBack,
   });
 
@@ -32,8 +36,12 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
   String? _estadoFilter;
   bool? _esExpansionFilter;
   int? _categoriaLocalId;
+  int? _tipoFundaLocalId;
+  int? _ubicacionLocalId;
   List<CategoriaRow> _categorias = [];
   String? _categoriaNombre;
+  String? _tipoFundaNombre;
+  String? _ubicacionNombre;
 
   @override
   void initState() {
@@ -41,24 +49,36 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     _estadoFilter = widget.initialEstado;
     _esExpansionFilter = widget.initialEsExpansion;
     _categoriaLocalId = widget.categoriaLocalId;
+    _tipoFundaLocalId = widget.tipoFundaLocalId;
+    _ubicacionLocalId = widget.ubicacionLocalId;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<JuegosProvider>();
       provider.resetFilters();
-      if (_estadoFilter != null || _esExpansionFilter != null || _categoriaLocalId != null) {
+      if (_estadoFilter != null ||
+          _esExpansionFilter != null ||
+          _categoriaLocalId != null ||
+          _tipoFundaLocalId != null ||
+          _ubicacionLocalId != null) {
         provider.setFilters(
           estado: _estadoFilter,
           esExpansion: _esExpansionFilter,
           categoriaLocalId: _categoriaLocalId,
+          tipoFundaLocalId: _tipoFundaLocalId,
+          ubicacionLocalId: _ubicacionLocalId,
         );
       }
       provider.fetchJuegos(
         estado: _estadoFilter,
         esExpansion: _esExpansionFilter,
         categoriaLocalId: _categoriaLocalId,
+        tipoFundaLocalId: _tipoFundaLocalId,
+        ubicacionLocalId: _ubicacionLocalId,
       );
       _lastSyncStatus = context.read<SyncProvider>().status;
       context.read<SyncProvider>().addListener(_onSyncChanged);
       _loadCategorias();
+      _loadTipoFunda();
+      _loadUbicacion();
     });
   }
 
@@ -72,6 +92,28 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
           setState(() => _categoriaNombre = match.first.nombre);
         }
       }
+    }
+  }
+
+  Future<void> _loadTipoFunda() async {
+    if (_tipoFundaLocalId == null) return;
+    final tipo = await context
+        .read<JuegosProvider>()
+        .tipoFundaRepository
+        .getByLocalId(_tipoFundaLocalId!);
+    if (mounted && tipo != null) {
+      setState(() => _tipoFundaNombre = tipo.nombre);
+    }
+  }
+
+  Future<void> _loadUbicacion() async {
+    if (_ubicacionLocalId == null) return;
+    final ubic = await context
+        .read<JuegosProvider>()
+        .ubicacionRepository
+        .getByLocalId(_ubicacionLocalId!);
+    if (mounted && ubic != null) {
+      setState(() => _ubicacionNombre = ubic.rutaCompleta);
     }
   }
 
@@ -90,11 +132,15 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       estado: _estadoFilter,
       esExpansion: _esExpansionFilter,
       categoriaLocalId: _categoriaLocalId,
+      tipoFundaLocalId: _tipoFundaLocalId,
+      ubicacionLocalId: _ubicacionLocalId,
     );
     provider.fetchJuegos(
       estado: _estadoFilter,
       esExpansion: _esExpansionFilter,
       categoriaLocalId: _categoriaLocalId,
+      tipoFundaLocalId: _tipoFundaLocalId,
+      ubicacionLocalId: _ubicacionLocalId,
     );
   }
 
@@ -104,12 +150,20 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       _esExpansionFilter = null;
       _categoriaLocalId = null;
       _categoriaNombre = null;
+      _tipoFundaLocalId = null;
+      _tipoFundaNombre = null;
+      _ubicacionLocalId = null;
+      _ubicacionNombre = null;
     });
     _applyFilters();
   }
 
   bool get _hasActiveFilters =>
-      _estadoFilter != null || _esExpansionFilter != null || _categoriaLocalId != null;
+      _estadoFilter != null ||
+      _esExpansionFilter != null ||
+      _categoriaLocalId != null ||
+      _tipoFundaLocalId != null ||
+      _ubicacionLocalId != null;
 
   Future<void> _confirmDelete(Juego juego) async {
     if (juego.localId == null) return;
@@ -590,6 +644,47 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
             setState(() {
               _categoriaLocalId = null;
               _categoriaNombre = null;
+            });
+            _applyFilters();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+      ));
+    }
+    if (_tipoFundaLocalId != null) {
+      chips.add(Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InputChip(
+          label: Text(_tipoFundaNombre ?? 'Funda',
+              style: TextStyle(
+                  color: Colors.deepOrange[800], fontWeight: FontWeight.w600)),
+          avatar:
+              Icon(Icons.style, size: 16, color: Colors.deepOrange[700]),
+          backgroundColor: Colors.deepOrange[100],
+          onDeleted: () {
+            setState(() {
+              _tipoFundaLocalId = null;
+              _tipoFundaNombre = null;
+            });
+            _applyFilters();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+      ));
+    }
+    if (_ubicacionLocalId != null) {
+      chips.add(Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InputChip(
+          label: Text(_ubicacionNombre ?? 'Ubicación',
+              style: TextStyle(
+                  color: Colors.brown[800], fontWeight: FontWeight.w600)),
+          avatar: Icon(Icons.location_on, size: 16, color: Colors.brown[700]),
+          backgroundColor: Colors.brown[100],
+          onDeleted: () {
+            setState(() {
+              _ubicacionLocalId = null;
+              _ubicacionNombre = null;
             });
             _applyFilters();
           },

@@ -59,30 +59,52 @@ class JuegosProvider extends ChangeNotifier {
   String? _estadoFilter;
   bool? _esExpansionFilter;
   int? _categoriaLocalId;
+  int? _tipoFundaLocalId;
+  int? _ubicacionLocalId;
 
   String? get estadoFilter => _estadoFilter;
   bool? get esExpansionFilter => _esExpansionFilter;
 
-  void setFilters({String? estado, bool? esExpansion, int? categoriaLocalId}) {
+  void setFilters({
+    String? estado,
+    bool? esExpansion,
+    int? categoriaLocalId,
+    int? tipoFundaLocalId,
+    int? ubicacionLocalId,
+  }) {
     _estadoFilter = estado;
     _esExpansionFilter = esExpansion;
     _categoriaLocalId = categoriaLocalId;
+    _tipoFundaLocalId = tipoFundaLocalId;
+    _ubicacionLocalId = ubicacionLocalId;
   }
 
   void resetFilters() {
     _estadoFilter = null;
     _esExpansionFilter = null;
     _categoriaLocalId = null;
+    _tipoFundaLocalId = null;
+    _ubicacionLocalId = null;
     _busqueda = '';
   }
 
-  Future<void> fetchJuegos({int page = 1, String? buscar, String? estado, bool? esExpansion, int? categoriaLocalId}) async {
+  Future<void> fetchJuegos({
+    int page = 1,
+    String? buscar,
+    String? estado,
+    bool? esExpansion,
+    int? categoriaLocalId,
+    int? tipoFundaLocalId,
+    int? ubicacionLocalId,
+  }) async {
     _loading = true;
     notifyListeners();
     if (buscar != null) _busqueda = buscar;
     if (estado != null) _estadoFilter = estado;
     if (esExpansion != null) _esExpansionFilter = esExpansion;
     if (categoriaLocalId != null) _categoriaLocalId = categoriaLocalId;
+    if (tipoFundaLocalId != null) _tipoFundaLocalId = tipoFundaLocalId;
+    if (ubicacionLocalId != null) _ubicacionLocalId = ubicacionLocalId;
     try {
       _items = await _juegos.search(
         buscar: _busqueda.isEmpty ? null : _busqueda,
@@ -91,12 +113,16 @@ class JuegosProvider extends ChangeNotifier {
         estado: _estadoFilter,
         esExpansion: _esExpansionFilter,
         categoriaLocalId: _categoriaLocalId,
+        tipoFundaLocalId: _tipoFundaLocalId,
+        ubicacionLocalId: _ubicacionLocalId,
       );
       _total = await _juegos.count(
         buscar: _busqueda.isEmpty ? null : _busqueda,
         estado: _estadoFilter,
         esExpansion: _esExpansionFilter,
         categoriaLocalId: _categoriaLocalId,
+        tipoFundaLocalId: _tipoFundaLocalId,
+        ubicacionLocalId: _ubicacionLocalId,
       );
       _currentPage = page;
       _lastPage = ((_total / _perPage).ceil()).clamp(1, 9999);
