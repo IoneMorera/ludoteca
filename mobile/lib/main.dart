@@ -97,6 +97,8 @@ class LudotecaApp extends StatelessWidget {
                         initialEstado: args?['estado'] as String?,
                         initialEsExpansion: args?['esExpansion'] as bool?,
                         categoriaLocalId: args?['categoriaLocalId'] as int?,
+                        tipoFundaLocalId: args?['tipoFundaLocalId'] as int?,
+                        ubicacionLocalId: args?['ubicacionLocalId'] as int?,
                       ));
             case '/juego/nuevo':
               final prefill = settings.arguments as Map<String, dynamic>?;

@@ -53,18 +53,25 @@ class VisionController extends Controller
         $model = config('services.openai.model', 'gpt-4o');
 
         $prompt = <<<'PROMPT'
-Identifica el juego de mesa que aparece en la imagen (puede ser una caja,
-una portada, una carta o un componente). Responde EXCLUSIVAMENTE con un objeto
-JSON con esta forma exacta, sin texto adicional ni Markdown:
+Identifica el juego de mesa que aparece en la imagen (caja, portada, carta o
+componente). Responde EXCLUSIVAMENTE con un objeto JSON con esta forma exacta,
+sin texto adicional ni Markdown:
 
 {
   "candidates": [
-    {"name": "Nombre principal en inglés o como aparece", "year": 2020, "confidence": 0.85, "reasoning": "breve"}
+    {"name": "Nombre canónico en inglés", "year": 2020, "confidence": 0.85, "reasoning": "breve"}
   ]
 }
 
-Devuelve hasta 3 candidatos ordenados por confianza descendente. Si no
-reconoces nada, devuelve {"candidates": []}.
+Reglas:
+- Usa el nombre oficial en inglés tal como aparece en BoardGameGeek cuando lo
+  conozcas (p. ej. "Catan", "Ticket to Ride", "Wingspan").
+- Si el título visible está en otro idioma, incluye también la variante en
+  inglés como candidato separado si es distinta.
+- Incluye el año de publicación si es visible en la caja o lo conoces con
+  seguridad; si no, usa null.
+- Devuelve hasta 3 candidatos ordenados por confianza descendente.
+- Si no reconoces nada, devuelve {"candidates": []}.
 PROMPT;
 
         try {
@@ -128,7 +135,7 @@ PROMPT;
 
         $bggMatches = [];
         if ($request->boolean('lookup_bgg', true) && !empty($candidates)) {
-            $bggMatches = $this->lookupBgg($candidates[0]['name']);
+            $bggMatches = $this->lookupBggForCandidates($candidates);
         }
 
         return response()->json([
@@ -147,6 +154,35 @@ PROMPT;
             return $decoded;
         }
         return ['candidates' => []];
+    }
+
+    /**
+     * Busca en BGG para hasta 3 candidatos de la IA y fusiona sin duplicados.
+     */
+    private function lookupBggForCandidates(array $candidates): array
+    {
+        $merged = [];
+        $seenIds = [];
+
+        foreach (array_slice($candidates, 0, 3) as $candidate) {
+            $name = trim((string) ($candidate['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            foreach ($this->lookupBgg($name) as $game) {
+                $bggId = $game['bgg_id'] ?? null;
+                if ($bggId !== null) {
+                    if (isset($seenIds[$bggId])) {
+                        continue;
+                    }
+                    $seenIds[$bggId] = true;
+                }
+                $merged[] = $game;
+            }
+        }
+
+        return $merged;
     }
 
     /**

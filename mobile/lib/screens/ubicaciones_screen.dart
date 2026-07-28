@@ -17,6 +17,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
   List<HabitacionRow> _habitaciones = [];
   List<MuebleRow> _muebles = [];
   List<UbicacionRow> _ubicaciones = [];
+  Map<int, int> _juegoCount = {};
   bool _loading = true;
 
   @override
@@ -32,11 +33,13 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
       final h = await repo.listHabitaciones();
       final m = await repo.listMuebles();
       final u = await repo.getAll();
+      final counts = await repo.getJuegoCountByUbicacion();
       if (mounted) {
         setState(() {
           _habitaciones = h;
           _muebles = m;
           _ubicaciones = u;
+          _juegoCount = counts;
           _loading = false;
         });
       }
@@ -824,29 +827,33 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                   ),
                 ),
               ]
-            : ubicacionesList
-                .map((u) => ListTile(
-                      dense: true,
-                      contentPadding:
-                          const EdgeInsets.only(left: 40, right: 16),
-                      leading: Icon(Icons.shelves,
-                          size: 18, color: Colors.grey[500]),
-                      title: Text(
-                        u.nombre,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (action) {
-                          if (action == 'edit') _editUbicacion(u);
-                          if (action == 'delete') _deleteUbicacion(u);
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'edit', child: Text('Editar')),
-                          PopupMenuItem(value: 'delete', child: Text('Eliminar')),
-                        ],
-                      ),
-                    ))
-                .toList(),
+            : ubicacionesList.map((u) {
+                final count = _juegoCount[u.localId] ?? 0;
+                return ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.only(left: 40, right: 16),
+                  leading:
+                      Icon(Icons.shelves, size: 18, color: Colors.grey[500]),
+                  title: Text(
+                    '${u.nombre} ($count)',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  onTap: () => Navigator.of(context).pushNamed(
+                    '/juegos',
+                    arguments: {'ubicacionLocalId': u.localId},
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (action) {
+                      if (action == 'edit') _editUbicacion(u);
+                      if (action == 'delete') _deleteUbicacion(u);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Editar')),
+                      PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                    ],
+                  ),
+                );
+              }).toList(),
       ),
     );
   }

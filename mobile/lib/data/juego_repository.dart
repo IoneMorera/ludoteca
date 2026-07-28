@@ -39,6 +39,8 @@ class JuegoRepository {
     String? estado,
     bool? esExpansion,
     int? categoriaLocalId,
+    int? tipoFundaLocalId,
+    int? ubicacionLocalId,
     int? propietarioLocalId,
     List<int>? propietarioLocalIds,
   }) async {
@@ -52,6 +54,8 @@ class JuegoRepository {
       estado: estado,
       esExpansion: esExpansion,
       categoriaLocalId: categoriaLocalId,
+      tipoFundaLocalId: tipoFundaLocalId,
+      ubicacionLocalId: ubicacionLocalId,
       propietarioLocalId: propietarioLocalId,
       propietarioLocalIds: propietarioLocalIds,
     );
@@ -68,6 +72,8 @@ class JuegoRepository {
     String? estado,
     bool? esExpansion,
     int? categoriaLocalId,
+    int? tipoFundaLocalId,
+    int? ubicacionLocalId,
     int? propietarioLocalId,
     List<int>? propietarioLocalIds,
   }) async {
@@ -84,6 +90,8 @@ class JuegoRepository {
       estado: estado,
       esExpansion: esExpansion,
       categoriaLocalId: categoriaLocalId,
+      tipoFundaLocalId: tipoFundaLocalId,
+      ubicacionLocalId: ubicacionLocalId,
       propietarioLocalId: propietarioLocalId,
       propietarioLocalIds: propietarioLocalIds,
     );
@@ -104,6 +112,8 @@ class JuegoRepository {
     String? estado,
     bool? esExpansion,
     int? categoriaLocalId,
+    int? tipoFundaLocalId,
+    int? ubicacionLocalId,
     int? propietarioLocalId,
     List<int>? propietarioLocalIds,
   }) {
@@ -129,6 +139,24 @@ class JuegoRepository {
           'OR j.categoria_local_id = ?)');
       args.add(categoriaLocalId);
       args.add(categoriaLocalId);
+    }
+    if (tipoFundaLocalId != null) {
+      // Fundas a nivel de juego o a nivel de copia de propietario.
+      where.add('(EXISTS (SELECT 1 FROM juego_fundas jf '
+          'WHERE jf.juego_local_id = j.local_id AND jf.tipo_funda_local_id = ?) '
+          'OR EXISTS (SELECT 1 FROM juego_propietario_fundas jpf '
+          'INNER JOIN juego_propietario jp ON jp.local_id = jpf.juego_propietario_local_id '
+          'WHERE jp.juego_local_id = j.local_id AND jpf.tipo_funda_local_id = ?))');
+      args.add(tipoFundaLocalId);
+      args.add(tipoFundaLocalId);
+    }
+    if (ubicacionLocalId != null) {
+      // Ubicación del juego o de alguna copia de propietario.
+      where.add('(j.ubicacion_local_id = ? OR EXISTS ('
+          'SELECT 1 FROM juego_propietario jp '
+          'WHERE jp.juego_local_id = j.local_id AND jp.ubicacion_local_id = ?))');
+      args.add(ubicacionLocalId);
+      args.add(ubicacionLocalId);
     }
     if (propietarioLocalId != null) {
       where.add('EXISTS (SELECT 1 FROM juego_propietario jp WHERE jp.juego_local_id = j.local_id AND jp.propietario_local_id = ?)');

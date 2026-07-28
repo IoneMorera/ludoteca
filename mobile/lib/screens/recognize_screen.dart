@@ -111,7 +111,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
             ? 'No se ha encontrado nada con "${_manualController.text.trim()}".'
             : 'No se ha podido identificar el juego. Prueba a editar el texto detectado.';
       } else {
-        _error = null;
+        _error = result.visionWarning;
       }
     });
   }
@@ -181,7 +181,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 8),
-                    Text('Analizando...'),
+                    Text('Analizando local + BGG + IA\u2026'),
                   ],
                 ),
               ),
@@ -192,8 +192,10 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
               margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child:
-                    Text(_error!, style: TextStyle(color: Colors.orange[800])),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Colors.orange[800]),
+                ),
               ),
             ),
           ],
@@ -202,14 +204,17 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
             const SizedBox(height: 16),
             if (result.localMatches.isNotEmpty)
               _buildLocalMatches(theme, result),
-            if (result.bggGames.isNotEmpty)
-              _buildBggGames(theme, result),
-            if (result.source != RecognitionSource.none) ...[
+            if (result.bggGames.isNotEmpty) _buildBggGames(theme, result),
+            if (result.sources.isNotEmpty &&
+                !result.sources.contains(RecognitionSource.none)) ...[
               const SizedBox(height: 8),
               Text(
-                'Fuente: ${_sourceLabel(result.source)}',
-                style:
-                    TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+                'Fuentes: ${_sourcesLabel(result.sources)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ],
           ],
@@ -328,7 +333,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Resultados externos',
+        Text('En BGG (a\u00f1adir)',
             style: theme.textTheme.titleMedium
                 ?.copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -367,12 +372,22 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
 
   String _sourceLabel(RecognitionSource s) {
     return switch (s) {
-      RecognitionSource.ocrFuzzy => 'OCR + b\u00fasqueda local',
-      RecognitionSource.phash => 'comparaci\u00f3n visual de portada',
-      RecognitionSource.bggSearch => 'BGG',
+      RecognitionSource.ocrFuzzy => 'OCR + ludoteca local',
+      RecognitionSource.phash => 'similitud visual de portada',
+      RecognitionSource.bggSearch => 'BGG por texto',
       RecognitionSource.vision => 'IA de visi\u00f3n + BGG',
       RecognitionSource.manual => 'b\u00fasqueda manual',
+      RecognitionSource.combined => 'varias fuentes',
       RecognitionSource.none => 'sin resultado',
     };
+  }
+
+  String _sourcesLabel(Set<RecognitionSource> sources) {
+    final labels = sources
+        .where((s) => s != RecognitionSource.none && s != RecognitionSource.combined)
+        .map(_sourceLabel)
+        .toList();
+    if (labels.isEmpty) return _sourceLabel(RecognitionSource.none);
+    return labels.join(', ');
   }
 }

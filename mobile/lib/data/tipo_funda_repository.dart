@@ -112,27 +112,29 @@ class TipoFundaRepository {
   }
 
   /// Devuelve el nº de fundas de juego que usan cada tipo (local_id -> count),
-  /// sumando tanto fundas a nivel de juego como por copia de propietario.
+  /// Cuenta juegos distintos que usan cada tipo de funda (nivel de juego o
+  /// por copia de propietario), para que el número coincida con el listado.
   Future<Map<int, int>> getUsoCount() async {
     final db = await _dbService.database;
     final result = <int, int>{};
     final rows = await db.rawQuery('''
-      SELECT tipo_funda_local_id AS tid, COUNT(*) AS c FROM juego_fundas
-      WHERE tipo_funda_local_id IS NOT NULL
-      GROUP BY tipo_funda_local_id
+      SELECT tid, COUNT(DISTINCT juego_local_id) AS c
+      FROM (
+        SELECT tipo_funda_local_id AS tid, juego_local_id
+        FROM juego_fundas
+        WHERE tipo_funda_local_id IS NOT NULL
+        UNION
+        SELECT jpf.tipo_funda_local_id AS tid, jp.juego_local_id
+        FROM juego_propietario_fundas jpf
+        INNER JOIN juego_propietario jp
+          ON jp.local_id = jpf.juego_propietario_local_id
+        WHERE jpf.tipo_funda_local_id IS NOT NULL
+      )
+      GROUP BY tid
     ''');
     for (final r in rows) {
       final tid = r['tid'] as int?;
       if (tid != null) result[tid] = (r['c'] as int?) ?? 0;
-    }
-    final rows2 = await db.rawQuery('''
-      SELECT tipo_funda_local_id AS tid, COUNT(*) AS c FROM juego_propietario_fundas
-      WHERE tipo_funda_local_id IS NOT NULL
-      GROUP BY tipo_funda_local_id
-    ''');
-    for (final r in rows2) {
-      final tid = r['tid'] as int?;
-      if (tid != null) result[tid] = (result[tid] ?? 0) + ((r['c'] as int?) ?? 0);
     }
     return result;
   }

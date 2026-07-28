@@ -12,35 +12,53 @@ import 'fuzzy_matcher.dart';
 import 'phash_service.dart';
 
 class RecognitionResult {
-  /// Coincidencia local (un juego ya en la BBDD). Vac\u00edo si no hubo match
-  /// suficientemente fiable.
+  /// Coincidencias locales (juegos ya en la BBDD).
   final List<LocalMatch> localMatches;
 
-  /// Candidatos venidos del backend (BGG / Vision API). Solo se rellena si
-  /// el matching local falla.
+  /// Candidatos de BGG (texto OCR y/o IA de visión), siempre que haya red.
   final List<Map<String, dynamic>> bggGames;
 
   /// Texto bruto detectado por OCR (informativo / editable).
   final String extractedText;
   final List<String> triedQueries;
-  final RecognitionSource source;
+
+  /// Fuentes que aportaron resultados (puede haber varias a la vez).
+  final Set<RecognitionSource> sources;
+
+  /// Aviso si Vision falló pero hay otros resultados parciales.
+  final String? visionWarning;
 
   RecognitionResult({
     required this.localMatches,
     required this.bggGames,
     required this.extractedText,
     required this.triedQueries,
-    required this.source,
+    required this.sources,
+    this.visionWarning,
   });
+
+  /// Fuente principal (compatibilidad con UI antigua).
+  RecognitionSource get source {
+    if (sources.isEmpty) return RecognitionSource.none;
+    if (sources.length == 1) return sources.first;
+    return RecognitionSource.combined;
+  }
 
   bool get hasLocal => localMatches.isNotEmpty;
   bool get hasAny => localMatches.isNotEmpty || bggGames.isNotEmpty;
 }
 
-enum RecognitionSource { none, ocrFuzzy, phash, vision, bggSearch, manual }
+enum RecognitionSource {
+  none,
+  ocrFuzzy,
+  phash,
+  vision,
+  bggSearch,
+  manual,
+  combined,
+}
 
 class LocalMatch {
-  /// localId del juego ya en la BBDD.
   final int juegoLocalId;
   final int? juegoServerId;
   final String nombre;
@@ -56,11 +74,21 @@ class LocalMatch {
   });
 }
 
-/// Servicio de reconocimiento en cascada:
+class _VisionResult {
+  final List<Map<String, dynamic>> games;
+  final String? warning;
+
+  const _VisionResult({required this.games, this.warning});
+}
+
+/// Servicio de reconocimiento en paralelo:
 ///
-/// 1. OCR (ML Kit) -> matching difuso contra los juegos locales.
-/// 2. pHash de la foto -> distancia Hamming contra `juegos.phash`.
-/// 3. Vision API (OpenAI) -> nombre identificado -> b\u00fasqueda BGG.
+/// 1. OCR (ML Kit) -> matching difuso contra juegos locales.
+/// 2. aHash de la foto -> distancia Hamming contra `juegos.phash`.
+/// 3. BGG por texto OCR.
+/// 4. Vision API (OpenAI) -> identificación visual -> BGG.
+///
+/// Siempre devuelve coincidencias locales y candidatos BGG juntos.
 class RecognitionService {
   final _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
   final _api = ApiService();
@@ -69,11 +97,10 @@ class RecognitionService {
     OutboxDao(DatabaseService()),
   );
 
-  static const double _fuzzyThresholdHigh = 0.82;
   static const double _fuzzyThresholdLow = 0.65;
   static const int _phashMaxDistance = 14;
 
-  /// Pipeline completo: OCR + local fuzzy + pHash + (opcional) Vision API.
+  /// Pipeline completo: OCR + local + pHash + BGG + Vision en paralelo.
   Future<RecognitionResult> recognizeGame(File imageFile) async {
     String extractedText = '';
     final tried = <String>[];
@@ -85,76 +112,44 @@ class RecognitionService {
       final queries = _buildQueries(recognized);
       tried.addAll(queries);
 
-      // 1) Matching local difuso usando OCR.
-      if (queries.isNotEmpty) {
-        final local = await _searchLocalByText(queries);
-        if (local.isNotEmpty && local.first.score >= _fuzzyThresholdHigh) {
-          return RecognitionResult(
-            localMatches: local,
-            bggGames: const [],
-            extractedText: extractedText,
-            triedQueries: tried,
-            source: RecognitionSource.ocrFuzzy,
-          );
-        }
-        // Si el mejor candidato local tiene score medio, guardarlo como
-        // sugerencia mientras seguimos con pHash y Vision.
-        if (local.isNotEmpty) {
-          final phash = await _phashMatches(imageFile);
-          final combined = _combineMatches(local, phash);
-          if (combined.first.score >= _fuzzyThresholdHigh ||
-              phash.isNotEmpty && phash.first.score >= 0.78) {
-            return RecognitionResult(
-              localMatches: combined,
-              bggGames: const [],
-              extractedText: extractedText,
-              triedQueries: tried,
-              source: phash.isNotEmpty
-                  ? RecognitionSource.phash
-                  : RecognitionSource.ocrFuzzy,
-            );
-          }
-        }
-      }
+      final fuzzyFuture = queries.isNotEmpty
+          ? _searchLocalByText(queries)
+          : Future<List<LocalMatch>>.value(const []);
+      final phashFuture = _phashMatches(imageFile);
+      final bggFuture = queries.isNotEmpty
+          ? _runBggQueries(queries)
+          : Future<List<Map<String, dynamic>>>.value(const []);
+      final visionFuture = _visionFallback(imageFile);
 
-      // 2) pHash puro (sin texto).
-      final phash = await _phashMatches(imageFile);
-      if (phash.isNotEmpty && phash.first.score >= 0.78) {
-        return RecognitionResult(
-          localMatches: phash,
-          bggGames: const [],
-          extractedText: extractedText,
-          triedQueries: tried,
-          source: RecognitionSource.phash,
-        );
-      }
+      final results = await Future.wait([
+        fuzzyFuture,
+        phashFuture,
+        bggFuture,
+        visionFuture,
+      ]);
 
-      // 3) BGG por texto (sin local). Lo intentamos antes de Vision para
-      // ahorrar llamadas pagadas si OCR estaba razonable.
-      if (queries.isNotEmpty) {
-        final bgg = await _runBggQueries(queries);
-        if (bgg.isNotEmpty) {
-          return RecognitionResult(
-            localMatches: const [],
-            bggGames: bgg,
-            extractedText: extractedText,
-            triedQueries: tried,
-            source: RecognitionSource.bggSearch,
-          );
-        }
-      }
+      final fuzzy = results[0] as List<LocalMatch>;
+      final phash = results[1] as List<LocalMatch>;
+      final bggText = results[2] as List<Map<String, dynamic>>;
+      final vision = results[3] as _VisionResult;
 
-      // 4) Vision API fallback.
-      final vision = await _visionFallback(imageFile);
-      if (vision != null && vision.isNotEmpty) {
-        return RecognitionResult(
-          localMatches: const [],
-          bggGames: vision,
-          extractedText: extractedText,
-          triedQueries: tried,
-          source: RecognitionSource.vision,
-        );
-      }
+      final localMatches = _combineMatches(fuzzy, phash);
+      final bggGames = _mergeBggGames([bggText, vision.games]);
+      final sources = _buildSources(
+        fuzzy: fuzzy,
+        phash: phash,
+        bggText: bggText,
+        vision: vision,
+      );
+
+      return RecognitionResult(
+        localMatches: localMatches,
+        bggGames: bggGames,
+        extractedText: extractedText,
+        triedQueries: tried,
+        sources: sources,
+        visionWarning: vision.warning,
+      );
     } catch (e) {
       debugPrint('RECOGNITION ERROR: $e');
     }
@@ -164,12 +159,11 @@ class RecognitionService {
       bggGames: const [],
       extractedText: extractedText,
       triedQueries: tried,
-      source: RecognitionSource.none,
+      sources: const {RecognitionSource.none},
     );
   }
 
-  /// B\u00fasqueda manual a partir de un texto introducido por el usuario.
-  /// Usa primero el matching local, luego BGG.
+  /// Búsqueda manual: siempre local + BGG en paralelo.
   Future<RecognitionResult> searchByText(String rawText) async {
     final cleaned = _cleanText(rawText);
     if (cleaned.isEmpty) {
@@ -178,27 +172,29 @@ class RecognitionService {
         bggGames: const [],
         extractedText: rawText.trim(),
         triedQueries: const [],
-        source: RecognitionSource.none,
+        sources: const {RecognitionSource.none},
       );
     }
     final queries = [cleaned, ..._variantsOf(cleaned)];
-    final local = await _searchLocalByText(queries);
-    if (local.isNotEmpty && local.first.score >= _fuzzyThresholdLow) {
-      return RecognitionResult(
-        localMatches: local,
-        bggGames: const [],
-        extractedText: rawText.trim(),
-        triedQueries: queries,
-        source: RecognitionSource.manual,
-      );
-    }
-    final bgg = await _runBggQueries(queries);
+
+    final results = await Future.wait([
+      _searchLocalByText(queries),
+      _runBggQueries(queries),
+    ]);
+
+    final local = results[0] as List<LocalMatch>;
+    final bgg = results[1] as List<Map<String, dynamic>>;
+
+    final sources = <RecognitionSource>{RecognitionSource.manual};
+    if (local.isNotEmpty) sources.add(RecognitionSource.ocrFuzzy);
+    if (bgg.isNotEmpty) sources.add(RecognitionSource.bggSearch);
+
     return RecognitionResult(
       localMatches: local,
       bggGames: bgg,
       extractedText: rawText.trim(),
       triedQueries: queries,
-      source: bgg.isNotEmpty ? RecognitionSource.bggSearch : RecognitionSource.manual,
+      sources: sources,
     );
   }
 
@@ -211,13 +207,10 @@ class RecognitionService {
       final nombre = (row['nombre'] as String?) ?? '';
       if (nombre.isEmpty) continue;
       double best = 0;
-      String via = 'fuzzy';
+      const via = 'fuzzy';
       for (final q in queries) {
         final s = FuzzyMatcher.similarity(q, nombre);
-        if (s > best) {
-          best = s;
-          via = 'fuzzy';
-        }
+        if (s > best) best = s;
       }
       if (best >= _fuzzyThresholdLow) {
         matches.add(LocalMatch(
@@ -285,26 +278,67 @@ class RecognitionService {
 
   Future<List<Map<String, dynamic>>> _runBggQueries(
       List<String> queries) async {
-    final seen = <String>{};
+    final seenQueries = <String>{};
+    final merged = <Map<String, dynamic>>[];
+
     for (final q in queries) {
       final query = q.trim();
       if (query.isEmpty) continue;
-      if (!seen.add(query.toLowerCase())) continue;
+      if (!seenQueries.add(query.toLowerCase())) continue;
       try {
         final response =
             await _api.get('/bgg/search', params: {'query': query});
         final games = (response.data['games'] as List?)
                 ?.cast<Map<String, dynamic>>() ??
             [];
-        if (games.isNotEmpty) return games;
+        merged.addAll(games);
       } catch (e) {
         debugPrint('BGG search error: $e');
       }
     }
-    return const [];
+
+    return _mergeBggGames([merged]);
   }
 
-  Future<List<Map<String, dynamic>>?> _visionFallback(File file) async {
+  List<Map<String, dynamic>> _mergeBggGames(
+      List<List<Map<String, dynamic>>> lists) {
+    final byKey = <String, Map<String, dynamic>>{};
+
+    for (final list in lists) {
+      for (final game in list) {
+        final key = _bggGameKey(game);
+        byKey.putIfAbsent(key, () => game);
+      }
+    }
+
+    return byKey.values.toList();
+  }
+
+  String _bggGameKey(Map<String, dynamic> game) {
+    final bggId = game['bgg_id'];
+    if (bggId != null) return 'id:$bggId';
+    final name = (game['name']?.toString() ?? '').toLowerCase().trim();
+    return 'name:$name';
+  }
+
+  Set<RecognitionSource> _buildSources({
+    required List<LocalMatch> fuzzy,
+    required List<LocalMatch> phash,
+    required List<Map<String, dynamic>> bggText,
+    required _VisionResult vision,
+  }) {
+    final sources = <RecognitionSource>{};
+
+    if (fuzzy.isNotEmpty) sources.add(RecognitionSource.ocrFuzzy);
+    if (phash.isNotEmpty) sources.add(RecognitionSource.phash);
+    if (bggText.isNotEmpty) sources.add(RecognitionSource.bggSearch);
+    if (vision.games.isNotEmpty) sources.add(RecognitionSource.vision);
+
+    if (sources.isEmpty) sources.add(RecognitionSource.none);
+    return sources;
+  }
+
+  Future<_VisionResult> _visionFallback(File file) async {
     try {
       final formData = FormData.fromMap({
         'image': await MultipartFile.fromFile(file.path),
@@ -313,11 +347,12 @@ class RecognitionService {
       final response = await _api.upload('/vision/recognize', formData);
       final data = response.data as Map<String, dynamic>;
       final bgg = (data['bgg_games'] as List?)?.cast<Map<String, dynamic>>();
-      if (bgg != null && bgg.isNotEmpty) return bgg;
-      // Si no hay match en BGG, devolvemos los candidatos textuales de la IA
+      if (bgg != null && bgg.isNotEmpty) {
+        return _VisionResult(games: bgg);
+      }
       final candidates =
           (data['candidates'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      return candidates
+      final games = candidates
           .map((c) => {
                 'name': c['name'],
                 'year': c['year'],
@@ -326,13 +361,28 @@ class RecognitionService {
                 'description': c['reasoning'],
               })
           .toList();
+      return _VisionResult(games: games);
     } on DioException catch (e) {
       debugPrint('VISION ERROR: ${e.message}');
-      return null;
+      final status = e.response?.statusCode;
+      String? warning;
+      if (status == 503) {
+        warning = 'La IA de visión no está configurada en el servidor.';
+      } else if (status == 502) {
+        warning = 'No se pudo contactar con la IA de visión.';
+      } else if (status == 401) {
+        warning = 'Sesión caducada; no se pudo usar la IA de visión.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        warning = 'Tiempo de espera agotado al consultar la IA de visión.';
+      } else if (e.type == DioExceptionType.connectionError) {
+        warning = 'Sin conexión; no se pudo usar la IA de visión.';
+      } else {
+        warning = 'Error al consultar la IA de visión.';
+      }
+      return _VisionResult(games: const [], warning: warning);
     }
   }
-
-  // ---------- helpers de OCR (mantienen las heur\u00edsticas previas) ----------
 
   List<String> _buildQueries(RecognizedText recognized) {
     final lines = <_ScoredLine>[];
@@ -359,7 +409,6 @@ class RecognitionService {
       queries.add(line.text);
       queries.addAll(_variantsOf(line.text));
     }
-    // palabras sueltas largas (suelen ser t\u00edtulos de una palabra)
     final words = <String>{};
     for (final line in lines.take(3)) {
       for (final w in line.text.split(RegExp(r'\s+'))) {
