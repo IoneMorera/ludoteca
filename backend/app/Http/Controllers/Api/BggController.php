@@ -551,6 +551,10 @@ class BggController extends Controller
             $query = mb_substr($query, 0, 120);
         }
 
+        $light = $request->boolean('light');
+        $limit = max(1, min((int) $request->input('limit', $light ? 8 : 10), 15));
+        $exact = $request->boolean('exact');
+
         $apiKey = config('services.bgg.api_key');
         $headers = [
             'Accept' => 'application/xml',
@@ -560,12 +564,17 @@ class BggController extends Controller
             $headers['Authorization'] = 'Bearer ' . $apiKey;
         }
 
+        $searchParams = [
+            'query' => $query,
+            'type' => 'boardgame,boardgameexpansion',
+        ];
+        if ($exact) {
+            $searchParams['exact'] = 1;
+        }
+
         try {
-            $response = Http::timeout(30)->withHeaders($headers)
-                ->get(self::BGG_API_URL . '/search', [
-                    'query' => $query,
-                    'type' => 'boardgame,boardgameexpansion',
-                ]);
+            $response = Http::timeout($light ? 15 : 30)->withHeaders($headers)
+                ->get(self::BGG_API_URL . '/search', $searchParams);
         } catch (\Throwable $e) {
             Log::warning('BGG search request failed', [
                 'query' => $query,
@@ -584,10 +593,12 @@ class BggController extends Controller
             ], $response->status());
         }
 
-        $games = $this->parseSearchXml($response->body());
+        $games = array_slice($this->parseSearchXml($response->body()), 0, $limit);
 
         if (!empty($games)) {
-            $topIds = array_slice(array_map(fn ($g) => $g['bgg_id'], $games), 0, 10);
+            // En modo light pedimos menos detalles (miniaturas) para ganar velocidad.
+            $detailCount = $light ? min(5, count($games)) : min(10, count($games));
+            $topIds = array_slice(array_map(fn ($g) => $g['bgg_id'], $games), 0, $detailCount);
             $details = $this->fetchThingDetails($topIds, $apiKey);
             foreach ($games as &$game) {
                 if (isset($details[$game['bgg_id']])) {

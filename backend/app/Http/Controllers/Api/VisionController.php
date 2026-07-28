@@ -14,16 +14,17 @@ class VisionController extends Controller
      * Identifica un juego de mesa a partir de una imagen usando OpenAI Vision.
      *
      * Espera un upload `image` (multipart) o `image_base64` en JSON.
-     * Devuelve {candidates: [{name, year, confidence, reasoning}]} y, opcionalmente,
-     * resultados de BGG si `lookup_bgg` viene a true (por defecto).
+     * Opcional: `ocr_hint` con texto detectado por OCR (puede contener errores).
+     * Devuelve {candidates, bgg_games}.
      */
     public function recognize(Request $request): JsonResponse
     {
         $request->validate([
-            'image' => 'sometimes|file|image|max:8192',
+            'image' => 'sometimes|file|image|max:12288',
             'image_base64' => 'sometimes|string',
             // form-data puede enviar 1/0 o "true"/"false"; boolean() lo normaliza.
             'lookup_bgg' => 'sometimes',
+            'ocr_hint' => 'sometimes|string|max:500',
         ]);
 
         $apiKey = config('services.openai.api_key');
@@ -64,31 +65,12 @@ class VisionController extends Controller
         }
 
         $model = config('services.openai.model', 'gpt-4o');
+        $ocrHint = trim((string) $request->input('ocr_hint', ''));
 
-        $prompt = <<<'PROMPT'
-Identifica el juego de mesa que aparece en la imagen (caja, portada, carta o
-componente). Responde EXCLUSIVAMENTE con un objeto JSON con esta forma exacta,
-sin texto adicional ni Markdown:
-
-{
-  "candidates": [
-    {"name": "Nombre canónico en inglés", "year": 2020, "confidence": 0.85, "reasoning": "breve"}
-  ]
-}
-
-Reglas:
-- Usa el nombre oficial en inglés tal como aparece en BoardGameGeek cuando lo
-  conozcas (p. ej. "Catan", "Ticket to Ride", "Wingspan").
-- Si el título visible está en otro idioma, incluye también la variante en
-  inglés como candidato separado si es distinta.
-- Incluye el año de publicación si es visible en la caja o lo conoces con
-  seguridad; si no, usa null.
-- Devuelve hasta 3 candidatos ordenados por confianza descendente.
-- Si no reconoces nada, devuelve {"candidates": []}.
-PROMPT;
+        $prompt = $this->buildPrompt($ocrHint);
 
         try {
-            $response = Http::timeout(60)
+            $response = Http::timeout(90)
                 ->withHeaders([
                     'Authorization' => 'Bearer ' . $apiKey,
                     'Content-Type' => 'application/json',
@@ -96,7 +78,7 @@ PROMPT;
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
                     'temperature' => 0,
-                    'max_tokens' => 400,
+                    'max_tokens' => 500,
                     'response_format' => ['type' => 'json_object'],
                     'messages' => [[
                         'role' => 'user',
@@ -106,8 +88,7 @@ PROMPT;
                                 'type' => 'image_url',
                                 'image_url' => [
                                     'url' => "data:{$mime};base64,{$imageData}",
-                                    // low = mucho más rápido; suficiente para portadas
-                                    'detail' => 'low',
+                                    'detail' => 'high',
                                 ],
                             ],
                         ],
@@ -153,9 +134,8 @@ PROMPT;
 
         $bggMatches = [];
         if ($request->boolean('lookup_bgg', true) && !empty($candidates)) {
-            // Solo el mejor candidato: cada lookup BGG es costoso y el cliente
-            // ya busca BGG por OCR en paralelo.
-            $bggMatches = $this->lookupBggForCandidates(array_slice($candidates, 0, 1));
+            // Hasta 2 candidatos: balance precisión / latencia.
+            $bggMatches = $this->lookupBggForCandidates(array_slice($candidates, 0, 2));
         }
 
         return response()->json([
@@ -164,8 +144,49 @@ PROMPT;
         ]);
     }
 
+    private function buildPrompt(string $ocrHint): string
+    {
+        $hintBlock = '';
+        if ($ocrHint !== '') {
+            $safe = mb_substr($ocrHint, 0, 400);
+            $hintBlock = <<<HINT
+
+Texto OCR aproximado (puede contener errores de lectura; úsalo solo como pista,
+nunca como verdad absoluta):
+"{$safe}"
+HINT;
+        }
+
+        return <<<PROMPT
+Eres un experto en juegos de mesa. Identifica EXACTAMENTE el juego cuya caja,
+portada o componente aparece en la imagen.
+{$hintBlock}
+
+Responde EXCLUSIVAMENTE con un objeto JSON (sin Markdown):
+
+{
+  "candidates": [
+    {"name": "Nombre oficial", "year": 2020, "confidence": 0.85, "reasoning": "breve"}
+  ]
+}
+
+Reglas estrictas:
+1. Lee el TÍTULO visible en la portada. El nombre debe corresponder a ESE juego,
+   no a uno parecido por arte, temática o editorial.
+2. Si reconoces la portada, usa el nombre canónico de BoardGameGeek en inglés
+   (p. ej. "Catan", "Ticket to Ride", "Wingspan", "Brass: Birmingham").
+3. Si el título está en otro idioma, pon primero el nombre BGG en inglés y,
+   si difiere, un segundo candidato con el título tal como se ve.
+4. NO inventes ni propongas juegos solo porque el arte se parece. Si no estás
+   seguro, baja la confidence o deja candidates vacío.
+5. Incluye year solo si lo ves en la caja o lo conoces con seguridad; si no, null.
+6. Máximo 3 candidatos, ordenados por confianza descendente.
+7. Si no puedes identificar el juego concreto, responde {"candidates": []}.
+PROMPT;
+    }
+
     /**
-     * Normaliza la imagen a JPEG reducido para reducir latencia/coste de Vision.
+     * Normaliza a JPEG de calidad alta (máx. 2048px) para Vision con detail=high.
      *
      * @return array{0: string, 1: string} [base64, mime]
      */
@@ -182,7 +203,7 @@ PROMPT;
 
         $width = imagesx($src);
         $height = imagesy($src);
-        $maxSide = 1280;
+        $maxSide = 2048;
 
         if ($width > $maxSide || $height > $maxSide) {
             if ($width >= $height) {
@@ -199,7 +220,7 @@ PROMPT;
         }
 
         ob_start();
-        imagejpeg($src, null, 70);
+        imagejpeg($src, null, 90);
         $jpeg = ob_get_clean();
         imagedestroy($src);
 
@@ -222,9 +243,6 @@ PROMPT;
         return ['candidates' => []];
     }
 
-    /**
-     * Busca en BGG para los candidatos de la IA y fusiona sin duplicados.
-     */
     private function lookupBggForCandidates(array $candidates): array
     {
         $merged = [];
@@ -251,10 +269,6 @@ PROMPT;
         return $merged;
     }
 
-    /**
-     * Reutiliza la búsqueda de BGG existente para devolver match real
-     * (con bgg_id, imágenes, etc.) a partir del nombre identificado.
-     */
     private function lookupBgg(string $name): array
     {
         try {
