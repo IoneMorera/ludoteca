@@ -143,7 +143,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
         children: [
           Text(
             'Recorta solo el t\u00edtulo/portada y procura buena luz. '
-            'Si el OCR falla, la IA y BGG siguen buscando.',
+            'Se buscar\u00e1 en tu ludoteca y en BGG.',
             style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
             textAlign: TextAlign.center,
           ),
@@ -182,7 +182,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 8),
-                    Text('Analizando local + BGG + IA\u2026'),
+                    Text('Analizando OCR + BGG\u2026'),
                   ],
                 ),
               ),
