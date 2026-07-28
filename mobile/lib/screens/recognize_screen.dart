@@ -60,8 +60,8 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
     final cropper = ImageCropper();
     final cropped = await cropper.cropImage(
       sourcePath: path,
-      compressFormat: ImageCompressFormat.png,
-      compressQuality: 100,
+      compressFormat: ImageCompressFormat.jpg,
+      compressQuality: 95,
       uiSettings: [
         AndroidUiSettings(
           toolbarTitle: 'Recorta la portada',
@@ -142,7 +142,8 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           Text(
-            'Toma una foto enfocando bien la portada para mejores resultados.',
+            'Recorta solo el t\u00edtulo/portada y procura buena luz. '
+            'Si el OCR falla, la IA y BGG siguen buscando.',
             style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
             textAlign: TextAlign.center,
           ),

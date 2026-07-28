@@ -37,11 +37,23 @@ class VisionController extends Controller
 
         if ($request->hasFile('image')) {
             $file = $request->file('image');
-            $imageData = base64_encode(file_get_contents($file->getRealPath()));
-            $mime = $file->getMimeType() ?: 'image/jpeg';
+            $raw = file_get_contents($file->getRealPath());
+            [$imageData, $mime] = $this->prepareImagePayload(
+                $raw,
+                $file->getMimeType() ?: 'image/jpeg'
+            );
         } elseif ($request->filled('image_base64')) {
-            $imageData = $request->input('image_base64');
-            $mime = $request->input('image_mime', 'image/jpeg');
+            $rawB64 = $request->input('image_base64');
+            $raw = base64_decode($rawB64, true);
+            if ($raw === false) {
+                return response()->json([
+                    'message' => 'image_base64 no es válida.',
+                ], 422);
+            }
+            [$imageData, $mime] = $this->prepareImagePayload(
+                $raw,
+                $request->input('image_mime', 'image/jpeg')
+            );
         }
 
         if (!$imageData) {
@@ -75,7 +87,7 @@ Reglas:
 PROMPT;
 
         try {
-            $response = Http::timeout(45)
+            $response = Http::timeout(60)
                 ->withHeaders([
                     'Authorization' => 'Bearer ' . $apiKey,
                     'Content-Type' => 'application/json',
@@ -83,6 +95,7 @@ PROMPT;
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
                     'temperature' => 0,
+                    'max_tokens' => 400,
                     'response_format' => ['type' => 'json_object'],
                     'messages' => [[
                         'role' => 'user',
@@ -92,7 +105,8 @@ PROMPT;
                                 'type' => 'image_url',
                                 'image_url' => [
                                     'url' => "data:{$mime};base64,{$imageData}",
-                                    'detail' => 'high',
+                                    // low = mucho más rápido; suficiente para portadas
+                                    'detail' => 'low',
                                 ],
                             ],
                         ],
@@ -103,7 +117,7 @@ PROMPT;
                 'error' => $e->getMessage(),
             ]);
             return response()->json([
-                'message' => 'No se pudo contactar con el servicio de visi\u00f3n.',
+                'message' => 'No se pudo contactar con el servicio de visión.',
             ], 502);
         }
 
@@ -112,8 +126,11 @@ PROMPT;
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
+            $openAiMsg = $response->json('error.message');
             return response()->json([
-                'message' => 'Error en el servicio de visi\u00f3n.',
+                'message' => $openAiMsg
+                    ? "Error en el servicio de visión: {$openAiMsg}"
+                    : 'Error en el servicio de visión.',
                 'status' => $response->status(),
             ], 502);
         }
@@ -135,13 +152,61 @@ PROMPT;
 
         $bggMatches = [];
         if ($request->boolean('lookup_bgg', true) && !empty($candidates)) {
-            $bggMatches = $this->lookupBggForCandidates($candidates);
+            // Solo el mejor candidato: cada lookup BGG es costoso y el cliente
+            // ya busca BGG por OCR en paralelo.
+            $bggMatches = $this->lookupBggForCandidates(array_slice($candidates, 0, 1));
         }
 
         return response()->json([
             'candidates' => $candidates,
             'bgg_games' => $bggMatches,
         ]);
+    }
+
+    /**
+     * Normaliza la imagen a JPEG reducido para reducir latencia/coste de Vision.
+     *
+     * @return array{0: string, 1: string} [base64, mime]
+     */
+    private function prepareImagePayload(string $raw, string $mime): array
+    {
+        if (!function_exists('imagecreatefromstring')) {
+            return [base64_encode($raw), $mime ?: 'image/jpeg'];
+        }
+
+        $src = @imagecreatefromstring($raw);
+        if ($src === false) {
+            return [base64_encode($raw), $mime ?: 'image/jpeg'];
+        }
+
+        $width = imagesx($src);
+        $height = imagesy($src);
+        $maxSide = 1280;
+
+        if ($width > $maxSide || $height > $maxSide) {
+            if ($width >= $height) {
+                $newW = $maxSide;
+                $newH = (int) round($height * ($maxSide / $width));
+            } else {
+                $newH = $maxSide;
+                $newW = (int) round($width * ($maxSide / $height));
+            }
+            $dst = imagecreatetruecolor($newW, $newH);
+            imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $width, $height);
+            imagedestroy($src);
+            $src = $dst;
+        }
+
+        ob_start();
+        imagejpeg($src, null, 70);
+        $jpeg = ob_get_clean();
+        imagedestroy($src);
+
+        if ($jpeg === false || $jpeg === '') {
+            return [base64_encode($raw), $mime ?: 'image/jpeg'];
+        }
+
+        return [base64_encode($jpeg), 'image/jpeg'];
     }
 
     private function parseJson(?string $content): array
@@ -157,14 +222,14 @@ PROMPT;
     }
 
     /**
-     * Busca en BGG para hasta 3 candidatos de la IA y fusiona sin duplicados.
+     * Busca en BGG para los candidatos de la IA y fusiona sin duplicados.
      */
     private function lookupBggForCandidates(array $candidates): array
     {
         $merged = [];
         $seenIds = [];
 
-        foreach (array_slice($candidates, 0, 3) as $candidate) {
+        foreach ($candidates as $candidate) {
             $name = trim((string) ($candidate['name'] ?? ''));
             if ($name === '') {
                 continue;
@@ -186,8 +251,8 @@ PROMPT;
     }
 
     /**
-     * Reutiliza la b\u00fasqueda de BGG existente para devolver match real
-     * (con bgg_id, im\u00e1genes, etc.) a partir del nombre identificado.
+     * Reutiliza la búsqueda de BGG existente para devolver match real
+     * (con bgg_id, imágenes, etc.) a partir del nombre identificado.
      */
     private function lookupBgg(string $name): array
     {
