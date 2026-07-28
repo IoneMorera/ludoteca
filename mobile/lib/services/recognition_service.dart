@@ -375,7 +375,8 @@ class RecognitionService {
           uploadFile.path,
           filename: 'cover.jpg',
         ),
-        'lookup_bgg': true,
+        // Multipart convierte bool a "true"/"false"; Laravel solo acepta 0/1.
+        'lookup_bgg': '1',
       });
       final response = await _api.dio.post(
         '/vision/recognize',

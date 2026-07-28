@@ -22,7 +22,8 @@ class VisionController extends Controller
         $request->validate([
             'image' => 'sometimes|file|image|max:8192',
             'image_base64' => 'sometimes|string',
-            'lookup_bgg' => 'sometimes|boolean',
+            // form-data puede enviar 1/0 o "true"/"false"; boolean() lo normaliza.
+            'lookup_bgg' => 'sometimes',
         ]);
 
         $apiKey = config('services.openai.api_key');
