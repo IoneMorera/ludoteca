@@ -1107,13 +1107,16 @@ class BggController extends Controller
             ];
         }
 
-        $headers = $this->bggWriteHeaders($user, $bggId);
+        $headers = $this->warmUpBggWriteSession($user, $bggId);
 
         // Intento JSON moderno.
         $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
             'own' => false,
             'prevowned' => true,
         ]);
+        if ($jsonResponse) {
+            $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
+        }
 
         if ($jsonResponse) {
             if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
@@ -1127,7 +1130,7 @@ class BggController extends Controller
             ]);
 
             if (in_array($jsonResponse->status(), [409, 422], true)) {
-                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body());
+                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body(), $headers);
                 $status = $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
                 if ($status['success']) {
                     return $status;
@@ -1135,16 +1138,23 @@ class BggController extends Controller
             }
         }
 
-        $collId = $this->resolveCollId($user, $bggId);
+        $collId = $this->resolveCollId($user, $bggId, null, $headers);
 
         if (!$collId) {
             $addResponse = $this->requestBggAddItem($headers, $bggId);
+            if ($addResponse) {
+                $headers = $this->mergeSetCookiesIntoHeaders($headers, $addResponse);
+            }
 
-            if ($addResponse && ($addResponse->failed() && $addResponse->status() !== 200)) {
+            if ($addResponse && ($addResponse->failed() && $addResponse->status() !== 200
+                || $this->looksLikeBggBlockedOrLogin($addResponse->body()))) {
                 // Puede haberse añadido igual pese al 403; intentamos resolver.
-                $collId = $this->resolveCollId($user, $bggId, $addResponse->body());
+                $collId = $this->resolveCollId($user, $bggId, $addResponse->body(), $headers, true);
                 if (!$collId) {
                     $status = $addResponse->status();
+                    if ($this->looksLikeBggBlockedOrLogin($addResponse->body()) && $status === 200) {
+                        $status = 403;
+                    }
                     $message = in_array($status, [403, 429], true)
                         ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Reintenta más tarde.'
                         : 'BGG rechazó Previously Owned (HTTP '.$status.').';
@@ -1161,7 +1171,8 @@ class BggController extends Controller
                     ];
                 }
             } elseif ($addResponse) {
-                $collId = $this->resolveCollId($user, $bggId, $addResponse->body());
+                sleep(2);
+                $collId = $this->resolveCollId($user, $bggId, $addResponse->body(), $headers, true);
             }
 
             if (!$collId) {
@@ -1189,12 +1200,15 @@ class BggController extends Controller
             ];
         }
 
-        $headers = $this->bggWriteHeaders($user, $bggId);
+        $headers = $this->warmUpBggWriteSession($user, $bggId);
 
         // 1) Intento con la API JSON moderna de BGG.
         $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
             'own' => true,
         ]);
+        if ($jsonResponse) {
+            $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
+        }
 
         if ($jsonResponse) {
             if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
@@ -1203,7 +1217,7 @@ class BggController extends Controller
 
             // Si el item ya existe, algunos endpoints responden 409/422.
             if (in_array($jsonResponse->status(), [409, 422], true)) {
-                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body());
+                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body(), $headers);
                 if ($collId) {
                     $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
                 }
@@ -1220,39 +1234,68 @@ class BggController extends Controller
 
         // 2) Fallback clásico: geekcollection.php (additem + own), con reintentos.
         $addResponse = $this->requestBggAddItem($headers, $bggId);
+        if ($addResponse) {
+            $headers = $this->mergeSetCookiesIntoHeaders($headers, $addResponse);
+        }
 
-        if ($addResponse && ($addResponse->successful() || $addResponse->status() === 200)) {
+        $addOk = $addResponse
+            && ($addResponse->successful() || $addResponse->status() === 200)
+            && !$this->looksLikeBggBlockedOrLogin($addResponse->body());
+
+        if ($addOk) {
             Log::info('BGG geekcollection additem response', [
                 'bgg_id' => $bggId,
                 'status' => $addResponse->status(),
                 'body' => substr($addResponse->body(), 0, 400),
             ]);
 
-            $collId = $this->resolveCollId($user, $bggId, $addResponse->body());
+            // Tras un 200, BGG a veces tarda en indexar el collid.
+            sleep(2);
+            $collId = $this->resolveCollId($user, $bggId, $addResponse->body(), $headers, true);
             if ($collId) {
-                $ownResult = $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
-                if (!$ownResult['success']) {
-                    Log::warning('BGG set own after additem soft-fail', [
-                        'bgg_id' => $bggId,
-                        'collid' => $collId,
-                        'message' => $ownResult['message'] ?? null,
-                    ]);
-                }
+                $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
 
                 return ['success' => true];
             }
+
+            // Alta aceptada (200) pero sin collid: reintentar marcar own vía JSON.
+            $retryJson = $this->postBggCollectionItem($headers, $bggId, ['own' => true]);
+            if ($retryJson && ($retryJson->successful() || in_array($retryJson->status(), [200, 201, 204, 409, 422], true))) {
+                return ['success' => true];
+            }
+
+            if ($this->isBggIdOwnedByUser((string) $user->bgg_username, $bggId)) {
+                return ['success' => true];
+            }
+
+            Log::warning('BGG additem HTTP 200 but collid not confirmed', [
+                'bgg_id' => $bggId,
+                'body' => substr($addResponse->body(), 0, 400),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'BGG aceptó el alta (HTTP 200) pero no se pudo confirmar el ítem. Reintenta este juego.',
+            ];
         }
 
-        // 3) Último recurso: a veces el 403 llega tras añadir igual, o el ítem
-        // ya existía. Si aparece en la colección, marcamos own y damos OK.
-        $collId = $this->resolveCollId($user, $bggId, $addResponse?->body());
+        // 3) Último recurso tras 403/etc.: si el ítem aparece en colección, OK.
+        $collId = $this->resolveCollId($user, $bggId, $addResponse?->body(), $headers, true);
         if ($collId) {
             $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
 
             return ['success' => true];
         }
 
+        if ($this->isBggIdOwnedByUser((string) $user->bgg_username, $bggId)) {
+            return ['success' => true];
+        }
+
         $status = $addResponse?->status() ?? $jsonResponse?->status() ?? 0;
+        if ($addResponse && $this->looksLikeBggBlockedOrLogin($addResponse->body())) {
+            $status = $status === 200 ? 403 : $status;
+        }
+
         $message = in_array($status, [403, 429], true)
             ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Reintenta más tarde o con menos juegos seguidos.'
             : ($status > 0
@@ -1287,7 +1330,94 @@ class BggController extends Controller
     }
 
     /**
+     * Visita la ficha del juego para “calentar” cookies/WAF antes de escribir.
+     *
+     * @return array<string, string>
+     */
+    private function warmUpBggWriteSession(User $user, int $bggId): array
+    {
+        $headers = $this->bggWriteHeaders($user, $bggId);
+        $pageHeaders = $headers;
+        $pageHeaders['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+        unset($pageHeaders['X-Requested-With']);
+
+        try {
+            $response = Http::timeout(30)
+                ->withHeaders($pageHeaders)
+                ->get('https://boardgamegeek.com/boardgame/'.$bggId);
+
+            return $this->mergeSetCookiesIntoHeaders($headers, $response);
+        } catch (\Throwable $e) {
+            Log::info('BGG warm-up request failed', [
+                'bgg_id' => $bggId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $headers;
+        }
+    }
+
+    /**
+     * @param  array<string, string>  $headers
+     * @return array<string, string>
+     */
+    private function mergeSetCookiesIntoHeaders(array $headers, \Illuminate\Http\Client\Response $response): array
+    {
+        $extra = $this->extractSessionCookie($response);
+        if ($extra === null || $extra === '') {
+            return $headers;
+        }
+
+        $jar = [];
+        foreach (explode(';', (string) ($headers['Cookie'] ?? '')) as $part) {
+            $part = trim($part);
+            if ($part === '' || !str_contains($part, '=')) {
+                continue;
+            }
+            [$name, $value] = explode('=', $part, 2);
+            $name = trim($name);
+            if ($name !== '') {
+                $jar[$name] = trim($value);
+            }
+        }
+
+        foreach (explode(';', $extra) as $part) {
+            $part = trim($part);
+            if ($part === '' || !str_contains($part, '=')) {
+                continue;
+            }
+            [$name, $value] = explode('=', $part, 2);
+            $name = trim($name);
+            if ($name !== '') {
+                $jar[$name] = trim($value);
+            }
+        }
+
+        $parts = [];
+        foreach ($jar as $name => $value) {
+            $parts[] = $name.'='.$value;
+        }
+        $headers['Cookie'] = implode('; ', $parts);
+
+        return $headers;
+    }
+
+    private function looksLikeBggBlockedOrLogin(string $body): bool
+    {
+        $lower = strtolower($body);
+
+        return str_contains($lower, 'cf-browser-verification')
+            || str_contains($lower, 'just a moment')
+            || str_contains($lower, 'attention required')
+            || str_contains($lower, 'challenge-platform')
+            || str_contains($lower, 'must be logged in')
+            || str_contains($lower, 'not logged')
+            || (str_contains($lower, 'sign in') && str_contains($lower, 'password'));
+    }
+
+    /**
      * @param  array{own?: bool, prevowned?: bool}  $status
+     * @param  array<string, string>  $headers
      */
     private function postBggCollectionItem(array $headers, int $bggId, array $status): ?\Illuminate\Http\Client\Response
     {
@@ -1336,6 +1466,9 @@ class BggController extends Controller
         return $last;
     }
 
+    /**
+     * @param  array<string, string>  $headers
+     */
     private function requestBggAddItem(array $headers, int $bggId): ?\Illuminate\Http\Client\Response
     {
         $last = null;
@@ -1374,10 +1507,14 @@ class BggController extends Controller
             }
 
             if ($last->successful() || $last->status() === 200) {
-                return $last;
+                // 200 con página de login/WAF no cuenta como alta real.
+                if (!$this->looksLikeBggBlockedOrLogin($last->body())) {
+                    return $last;
+                }
             }
 
-            if (!in_array($last->status(), [403, 429, 502, 503], true)) {
+            if (!in_array($last->status(), [403, 429, 502, 503], true)
+                && !$this->looksLikeBggBlockedOrLogin($last->body())) {
                 return $last;
             }
 
@@ -1394,10 +1531,17 @@ class BggController extends Controller
 
     /**
      * Obtiene collid desde el body de respuesta y, si hace falta, consultando
-     * la colección (XML + JSON autenticado) con reintentos cortos.
+     * la colección (XML + JSON autenticado + ficha HTML) con reintentos.
+     *
+     * @param  array<string, string>|null  $writeHeaders
      */
-    private function resolveCollId(User $user, int $bggId, ?string $responseBody = null): ?int
-    {
+    private function resolveCollId(
+        User $user,
+        int $bggId,
+        ?string $responseBody = null,
+        ?array $writeHeaders = null,
+        bool $patient = false,
+    ): ?int {
         if (is_string($responseBody) && $responseBody !== '') {
             $fromBody = $this->extractCollId($responseBody);
             if ($fromBody) {
@@ -1405,9 +1549,11 @@ class BggController extends Controller
             }
         }
 
-        for ($attempt = 0; $attempt < 3; $attempt++) {
+        $attempts = $patient ? 5 : 3;
+
+        for ($attempt = 0; $attempt < $attempts; $attempt++) {
             if ($attempt > 0) {
-                usleep(900000);
+                sleep($patient ? 2 : 1);
             }
 
             $collId = $this->findCollectionCollId($user, $bggId);
@@ -1415,7 +1561,12 @@ class BggController extends Controller
                 return $collId;
             }
 
-            $collId = $this->findCollIdViaJsonApi($user, $bggId);
+            $collId = $this->findCollIdViaJsonApi($user, $bggId, $writeHeaders);
+            if ($collId) {
+                return $collId;
+            }
+
+            $collId = $this->findCollIdFromGamePage($user, $bggId, $writeHeaders);
             if ($collId) {
                 return $collId;
             }
@@ -1481,21 +1632,50 @@ class BggController extends Controller
         return null;
     }
 
-    private function findCollIdViaJsonApi(User $user, int $bggId): ?int
+    private function findCollIdViaJsonApi(User $user, int $bggId, ?array $writeHeaders = null): ?int
     {
         if (!filled($user->bgg_session) || $bggId <= 0) {
             return null;
         }
 
         try {
+            $headers = $writeHeaders ?? $this->bggWriteHeaders($user, $bggId);
             $response = Http::timeout(30)
-                ->withHeaders($this->bggWriteHeaders($user, $bggId))
+                ->withHeaders($headers)
                 ->get('https://boardgamegeek.com/api/collectionitems', [
                     'objecttype' => 'thing',
                     'objectid' => $bggId,
                 ]);
 
             if ($response->failed()) {
+                return null;
+            }
+
+            return $this->extractCollId($response->body());
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * @param  array<string, string>|null  $writeHeaders
+     */
+    private function findCollIdFromGamePage(User $user, int $bggId, ?array $writeHeaders = null): ?int
+    {
+        if (!filled($user->bgg_session) || $bggId <= 0) {
+            return null;
+        }
+
+        try {
+            $headers = $writeHeaders ?? $this->bggWriteHeaders($user, $bggId);
+            $headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+            unset($headers['X-Requested-With']);
+
+            $response = Http::timeout(30)
+                ->withHeaders($headers)
+                ->get('https://boardgamegeek.com/boardgame/'.$bggId);
+
+            if ($response->failed() || $this->looksLikeBggBlockedOrLogin($response->body())) {
                 return null;
             }
 
