@@ -368,18 +368,8 @@ class _BggScreenState extends State<BggScreen> {
               _ExportLogLine(nombre: nombre, ok: false, message: msg),
             ],
           );
-          if (data['session_expired'] == true) {
-            progress.value = progress.value.copyWith(
-              aborted: true,
-              abortReason:
-                  'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-            );
-            try {
-              await context.read<AuthProvider>().checkAuth();
-              context.read<BggCollectionProvider>().clear();
-            } catch (_) {}
-            break;
-          }
+          // No abortar ni refrescar auth: un fallo de un juego (WAF/rate-limit)
+          // no debe desconectar BGG ni parar el resto del export.
         }
       } catch (e) {
         fail++;
@@ -388,22 +378,6 @@ class _BggScreenState extends State<BggScreen> {
           final data = (e as dynamic).response?.data;
           if (data is Map && data['message'] is String) {
             msg = data['message'] as String;
-            if (data['session_expired'] == true) {
-              progress.value = progress.value.copyWith(
-                aborted: true,
-                abortReason:
-                    'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-                log: [
-                  ...progress.value.log,
-                  _ExportLogLine(nombre: nombre, ok: false, message: msg),
-                ],
-              );
-              try {
-                await context.read<AuthProvider>().checkAuth();
-                context.read<BggCollectionProvider>().clear();
-              } catch (_) {}
-              break;
-            }
           }
         } catch (_) {}
         progress.value = progress.value.copyWith(
@@ -414,9 +388,9 @@ class _BggScreenState extends State<BggScreen> {
         );
       }
 
-      // Ritmo suave para no saturar BGG.
+      // Ritmo más lento para reducir bloqueos WAF/rate-limit de BGG.
       if (i < toUpload.length - 1) {
-        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
       }
     }
 
