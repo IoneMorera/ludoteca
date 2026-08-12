@@ -1110,21 +1110,12 @@ class BggController extends Controller
         $headers = $this->bggWriteHeaders($user, $bggId);
 
         // Intento JSON moderno.
-        try {
-            $jsonResponse = Http::timeout(30)
-                ->withHeaders(array_merge($headers, [
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                ]))
-                ->post('https://boardgamegeek.com/api/collectionitems', [
-                    'objecttype' => 'thing',
-                    'objectid' => $bggId,
-                    'status' => [
-                        'own' => false,
-                        'prevowned' => true,
-                    ],
-                ]);
+        $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
+            'own' => false,
+            'prevowned' => true,
+        ]);
 
+        if ($jsonResponse) {
             if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
                 return ['success' => true];
             }
@@ -1136,51 +1127,44 @@ class BggController extends Controller
             ]);
 
             if (in_array($jsonResponse->status(), [409, 422], true)) {
-                $collId = $this->extractCollId($jsonResponse->body())
-                    ?? $this->findCollectionCollId($user->bgg_username, $bggId);
+                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body());
                 $status = $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
                 if ($status['success']) {
                     return $status;
                 }
             }
-        } catch (\Throwable $e) {
-            Log::warning('BGG prevowned JSON request failed', [
-                'bgg_id' => $bggId,
-                'error' => $e->getMessage(),
-            ]);
         }
 
-        $collId = $this->findCollectionCollId($user->bgg_username, $bggId);
+        $collId = $this->resolveCollId($user, $bggId);
 
         if (!$collId) {
-            try {
-                $addResponse = Http::timeout(30)
-                    ->asForm()
-                    ->withHeaders($headers)
-                    ->post('https://boardgamegeek.com/geekcollection.php', [
-                        'action' => 'additem',
-                        'objecttype' => 'thing',
-                        'objectid' => $bggId,
-                        'ajax' => 1,
-                        'instanceid' => 0,
-                    ]);
+            $addResponse = $this->requestBggAddItem($headers, $bggId);
 
-                if ($addResponse->failed() && $addResponse->status() !== 200) {
+            if ($addResponse && ($addResponse->failed() && $addResponse->status() !== 200)) {
+                // Puede haberse añadido igual pese al 403; intentamos resolver.
+                $collId = $this->resolveCollId($user, $bggId, $addResponse->body());
+                if (!$collId) {
+                    $status = $addResponse->status();
+                    $message = in_array($status, [403, 429], true)
+                        ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Reintenta más tarde.'
+                        : 'BGG rechazó Previously Owned (HTTP '.$status.').';
+
                     Log::warning('BGG prevowned additem failed', [
                         'bgg_id' => $bggId,
-                        'status' => $addResponse->status(),
+                        'status' => $status,
                         'body' => substr($addResponse->body(), 0, 400),
                     ]);
 
                     return [
                         'success' => false,
-                        'message' => 'BGG rechazó Previously Owned (HTTP '.$addResponse->status().').',
+                        'message' => $message,
                     ];
                 }
+            } elseif ($addResponse) {
+                $collId = $this->resolveCollId($user, $bggId, $addResponse->body());
+            }
 
-                $collId = $this->extractCollId($addResponse->body())
-                    ?? $this->findCollectionCollId($user->bgg_username, $bggId);
-            } catch (\Throwable $e) {
+            if (!$collId) {
                 return [
                     'success' => false,
                     'message' => 'No se pudo crear/actualizar el ítem en BGG.',
@@ -1208,33 +1192,21 @@ class BggController extends Controller
         $headers = $this->bggWriteHeaders($user, $bggId);
 
         // 1) Intento con la API JSON moderna de BGG.
-        try {
-            $jsonResponse = Http::timeout(30)
-                ->withHeaders(array_merge($headers, [
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                ]))
-                ->post('https://boardgamegeek.com/api/collectionitems', [
-                    'objecttype' => 'thing',
-                    'objectid' => $bggId,
-                    'status' => [
-                        'own' => true,
-                    ],
-                ]);
+        $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
+            'own' => true,
+        ]);
 
+        if ($jsonResponse) {
             if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
                 return ['success' => true];
             }
 
             // Si el item ya existe, algunos endpoints responden 409/422.
             if (in_array($jsonResponse->status(), [409, 422], true)) {
-                $this->setBggCollectionStatus(
-                    $headers,
-                    $bggId,
-                    $this->extractCollId($jsonResponse->body()),
-                    true,
-                    false,
-                );
+                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body());
+                if ($collId) {
+                    $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
+                }
 
                 return ['success' => true];
             }
@@ -1244,91 +1216,250 @@ class BggController extends Controller
                 'status' => $jsonResponse->status(),
                 'body' => substr($jsonResponse->body(), 0, 300),
             ]);
-        } catch (\Throwable $e) {
-            Log::warning('BGG api/collectionitems request failed', [
-                'bgg_id' => $bggId,
-                'error' => $e->getMessage(),
-            ]);
         }
 
-        // 2) Fallback clásico: geekcollection.php (additem + own).
-        try {
-            $addResponse = Http::timeout(30)
-                ->asForm()
-                ->withHeaders($headers)
-                ->post('https://boardgamegeek.com/geekcollection.php', [
-                    'action' => 'additem',
-                    'objecttype' => 'thing',
-                    'objectid' => $bggId,
-                    'ajax' => 1,
-                    'instanceid' => 0,
-                ]);
+        // 2) Fallback clásico: geekcollection.php (additem + own), con reintentos.
+        $addResponse = $this->requestBggAddItem($headers, $bggId);
 
-            if ($addResponse->failed() && $addResponse->status() !== 200) {
-                Log::warning('BGG geekcollection additem failed', [
-                    'bgg_id' => $bggId,
-                    'status' => $addResponse->status(),
-                    'body' => substr($addResponse->body(), 0, 400),
-                ]);
+        if ($addResponse && ($addResponse->successful() || $addResponse->status() === 200)) {
+            Log::info('BGG geekcollection additem response', [
+                'bgg_id' => $bggId,
+                'status' => $addResponse->status(),
+                'body' => substr($addResponse->body(), 0, 400),
+            ]);
 
-                return [
-                    'success' => false,
-                    'message' => 'BGG rechazó la alta del juego (HTTP '.$addResponse->status().').',
-                ];
-            }
-
-            $collId = $this->extractCollId($addResponse->body());
-            $ownResult = $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
-            if (!$ownResult['success']) {
-                if ($collId) {
-                    return ['success' => true];
+            $collId = $this->resolveCollId($user, $bggId, $addResponse->body());
+            if ($collId) {
+                $ownResult = $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
+                if (!$ownResult['success']) {
+                    Log::warning('BGG set own after additem soft-fail', [
+                        'bgg_id' => $bggId,
+                        'collid' => $collId,
+                        'message' => $ownResult['message'] ?? null,
+                    ]);
                 }
 
-                return $ownResult;
+                return ['success' => true];
             }
+        }
+
+        // 3) Último recurso: a veces el 403 llega tras añadir igual, o el ítem
+        // ya existía. Si aparece en la colección, marcamos own y damos OK.
+        $collId = $this->resolveCollId($user, $bggId, $addResponse?->body());
+        if ($collId) {
+            $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
 
             return ['success' => true];
-        } catch (\Throwable $e) {
-            Log::warning('BGG geekcollection add failed', [
-                'bgg_id' => $bggId,
-                'error' => $e->getMessage(),
-            ]);
-
-            return [
-                'success' => false,
-                'message' => 'No se pudo contactar con BoardGameGeek para exportar.',
-            ];
         }
+
+        $status = $addResponse?->status() ?? $jsonResponse?->status() ?? 0;
+        $message = in_array($status, [403, 429], true)
+            ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Reintenta más tarde o con menos juegos seguidos.'
+            : ($status > 0
+                ? 'BGG rechazó la alta del juego (HTTP '.$status.').'
+                : 'No se pudo contactar con BoardGameGeek para exportar.');
+
+        Log::warning('BGG add game failed after retries', [
+            'bgg_id' => $bggId,
+            'status' => $status,
+            'body' => substr((string) ($addResponse?->body() ?? $jsonResponse?->body() ?? ''), 0, 400),
+        ]);
+
+        return [
+            'success' => false,
+            'message' => $message,
+        ];
     }
 
     private function bggWriteHeaders(User $user, int $bggId): array
     {
-        $apiKey = config('services.bgg.api_key');
-        $headers = [
-            'User-Agent' => self::IMAGE_USER_AGENT,
+        // UA de navegador: el UA custom dispara WAF/Cloudflare (403) en writes.
+        // No enviar Bearer API key aquí: estos endpoints web van con cookie de sesión.
+        return [
+            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Cookie' => (string) $user->bgg_session,
             'Accept' => 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language' => 'en-US,en;q=0.9,es;q=0.8',
             'X-Requested-With' => 'XMLHttpRequest',
+            'Origin' => 'https://boardgamegeek.com',
             'Referer' => 'https://boardgamegeek.com/boardgame/'.$bggId,
+        ];
+    }
+
+    /**
+     * @param  array{own?: bool, prevowned?: bool}  $status
+     */
+    private function postBggCollectionItem(array $headers, int $bggId, array $status): ?\Illuminate\Http\Client\Response
+    {
+        $last = null;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            if ($attempt > 0) {
+                sleep($attempt * 2);
+            }
+
+            try {
+                $last = Http::timeout(30)
+                    ->withHeaders(array_merge($headers, [
+                        'Content-Type' => 'application/json',
+                        'Accept' => 'application/json',
+                    ]))
+                    ->post('https://boardgamegeek.com/api/collectionitems', [
+                        'objecttype' => 'thing',
+                        'objectid' => $bggId,
+                        'status' => $status,
+                    ]);
+            } catch (\Throwable $e) {
+                Log::warning('BGG api/collectionitems request failed', [
+                    'bgg_id' => $bggId,
+                    'attempt' => $attempt + 1,
+                    'error' => $e->getMessage(),
+                ]);
+                continue;
+            }
+
+            if ($last->successful() || in_array($last->status(), [200, 201, 204, 409, 422], true)) {
+                return $last;
+            }
+
+            if (!in_array($last->status(), [403, 429, 502, 503], true)) {
+                return $last;
+            }
+
+            Log::info('BGG api/collectionitems retryable status', [
+                'bgg_id' => $bggId,
+                'status' => $last->status(),
+                'attempt' => $attempt + 1,
+            ]);
+        }
+
+        return $last;
+    }
+
+    private function requestBggAddItem(array $headers, int $bggId): ?\Illuminate\Http\Client\Response
+    {
+        $last = null;
+        $payload = [
+            'action' => 'additem',
+            'objecttype' => 'thing',
+            'objectid' => $bggId,
+            'ajax' => 1,
+            'instanceid' => 0,
+        ];
+
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            if ($attempt > 0) {
+                sleep($attempt * 2);
+            }
+
+            try {
+                if ($attempt % 2 === 0) {
+                    $last = Http::timeout(30)
+                        ->asForm()
+                        ->withHeaders($headers)
+                        ->post('https://boardgamegeek.com/geekcollection.php', $payload);
+                } else {
+                    // Alternativa GET: a veces el WAF deja pasar una y bloquea la otra.
+                    $last = Http::timeout(30)
+                        ->withHeaders($headers)
+                        ->get('https://boardgamegeek.com/geekcollection.php', $payload);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('BGG geekcollection additem request failed', [
+                    'bgg_id' => $bggId,
+                    'attempt' => $attempt + 1,
+                    'error' => $e->getMessage(),
+                ]);
+                continue;
+            }
+
+            if ($last->successful() || $last->status() === 200) {
+                return $last;
+            }
+
+            if (!in_array($last->status(), [403, 429, 502, 503], true)) {
+                return $last;
+            }
+
+            Log::info('BGG geekcollection additem retryable status', [
+                'bgg_id' => $bggId,
+                'status' => $last->status(),
+                'attempt' => $attempt + 1,
+                'body' => substr($last->body(), 0, 200),
+            ]);
+        }
+
+        return $last;
+    }
+
+    /**
+     * Obtiene collid desde el body de respuesta y, si hace falta, consultando
+     * la colección (XML + JSON autenticado) con reintentos cortos.
+     */
+    private function resolveCollId(User $user, int $bggId, ?string $responseBody = null): ?int
+    {
+        if (is_string($responseBody) && $responseBody !== '') {
+            $fromBody = $this->extractCollId($responseBody);
+            if ($fromBody) {
+                return $fromBody;
+            }
+        }
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            if ($attempt > 0) {
+                usleep(900000);
+            }
+
+            $collId = $this->findCollectionCollId($user, $bggId);
+            if ($collId) {
+                return $collId;
+            }
+
+            $collId = $this->findCollIdViaJsonApi($user, $bggId);
+            if ($collId) {
+                return $collId;
+            }
+        }
+
+        return null;
+    }
+
+    private function findCollectionCollId(User $user, int $bggId): ?int
+    {
+        $username = trim((string) $user->bgg_username);
+        $apiKey = config('services.bgg.api_key');
+        if ($username === '' || $bggId <= 0) {
+            return null;
+        }
+
+        $headers = [
+            'Accept' => 'application/xml',
+            'User-Agent' => self::IMAGE_USER_AGENT,
         ];
         if (!empty($apiKey)) {
             $headers['Authorization'] = 'Bearer '.$apiKey;
         }
-
-        return $headers;
-    }
-
-    private function findCollectionCollId(string $username, int $bggId): ?int
-    {
-        $apiKey = config('services.bgg.api_key');
-        if (empty($apiKey) || $bggId <= 0) {
-            return null;
+        // Cookie de sesión: necesaria si la colección es privada o BGG exige auth.
+        if (filled($user->bgg_session)) {
+            $headers['Cookie'] = (string) $user->bgg_session;
         }
 
-        $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', [
-            'username' => $username,
-            'id' => $bggId,
-        ], $apiKey);
+        $response = null;
+        for ($attempt = 0; $attempt < self::MAX_RETRIES; $attempt++) {
+            $response = Http::timeout(30)
+                ->withHeaders($headers)
+                ->get(self::BGG_API_URL.'/collection', [
+                    'username' => $username,
+                    'id' => $bggId,
+                    'showprivate' => 1,
+                ]);
+
+            if ($response->status() !== 202) {
+                break;
+            }
+
+            sleep(self::RETRY_DELAY_SECONDS);
+        }
 
         if (!$response || $response->failed()) {
             return null;
@@ -1350,6 +1481,30 @@ class BggController extends Controller
         return null;
     }
 
+    private function findCollIdViaJsonApi(User $user, int $bggId): ?int
+    {
+        if (!filled($user->bgg_session) || $bggId <= 0) {
+            return null;
+        }
+
+        try {
+            $response = Http::timeout(30)
+                ->withHeaders($this->bggWriteHeaders($user, $bggId))
+                ->get('https://boardgamegeek.com/api/collectionitems', [
+                    'objecttype' => 'thing',
+                    'objectid' => $bggId,
+                ]);
+
+            if ($response->failed()) {
+                return null;
+            }
+
+            return $this->extractCollId($response->body());
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     /**
      * @return array{success: bool, message?: string}
      */
@@ -1368,27 +1523,39 @@ class BggController extends Controller
         }
 
         try {
-            $saveResponse = Http::timeout(30)
-                ->asForm()
-                ->withHeaders($headers)
-                ->post('https://boardgamegeek.com/geekcollection.php', [
-                    'action' => 'savedata',
-                    'ajax' => 1,
-                    'collid' => $collId,
-                    'fieldname' => 'status',
-                    'own' => $own ? 1 : 0,
-                    'prevowned' => $prevOwned ? 1 : 0,
-                    'objecttype' => 'thing',
-                    'objectid' => $bggId,
-                ]);
+            $saveResponse = null;
+            for ($attempt = 0; $attempt < 3; $attempt++) {
+                if ($attempt > 0) {
+                    sleep($attempt * 2);
+                }
 
-            if ($saveResponse->successful() || $saveResponse->status() === 200) {
-                return ['success' => true];
+                $saveResponse = Http::timeout(30)
+                    ->asForm()
+                    ->withHeaders($headers)
+                    ->post('https://boardgamegeek.com/geekcollection.php', [
+                        'action' => 'savedata',
+                        'ajax' => 1,
+                        'collid' => $collId,
+                        'fieldname' => 'status',
+                        'own' => $own ? 1 : 0,
+                        'prevowned' => $prevOwned ? 1 : 0,
+                        'objecttype' => 'thing',
+                        'objectid' => $bggId,
+                    ]);
+
+                if ($saveResponse->successful() || $saveResponse->status() === 200) {
+                    return ['success' => true];
+                }
+
+                if (!in_array($saveResponse->status(), [403, 429, 502, 503], true)) {
+                    break;
+                }
             }
 
             return [
                 'success' => false,
-                'message' => 'No se pudo actualizar el estado en BGG.',
+                'message' => 'No se pudo actualizar el estado en BGG'
+                    .($saveResponse ? ' (HTTP '.$saveResponse->status().')' : '').'.',
             ];
         } catch (\Throwable $e) {
             return [
@@ -1415,6 +1582,17 @@ class BggController extends Controller
 
     private function extractCollId(string $body): ?int
     {
+        $body = trim($body);
+        if ($body === '') {
+            return null;
+        }
+
+        if (ctype_digit($body)) {
+            $id = (int) $body;
+
+            return $id > 0 ? $id : null;
+        }
+
         if (preg_match('/\bcollid["\'\s:=]+(\d+)/i', $body, $m)) {
             return (int) $m[1];
         }
@@ -1424,19 +1602,57 @@ class BggController extends Controller
         if (preg_match('/editownership_(\d+)/', $body, $m)) {
             return (int) $m[1];
         }
+        if (preg_match('/data-collid=["\']?(\d+)/i', $body, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('#/collection/item/(\d+)#i', $body, $m)) {
+            return (int) $m[1];
+        }
 
         $json = json_decode($body, true);
         if (is_array($json)) {
-            foreach (['collid', 'collectionid', 'id'] as $key) {
-                if (isset($json[$key]) && is_numeric($json[$key])) {
-                    return (int) $json[$key];
-                }
+            $found = $this->extractCollIdFromArray($json);
+            if ($found) {
+                return $found;
             }
-            if (isset($json['item']) && is_array($json['item'])) {
-                foreach (['collid', 'collectionid', 'id'] as $key) {
-                    if (isset($json['item'][$key]) && is_numeric($json['item'][$key])) {
-                        return (int) $json['item'][$key];
+        }
+
+        return null;
+    }
+
+    private function extractCollIdFromArray(array $data): ?int
+    {
+        foreach (['collid', 'collectionid', 'collection_id', 'id'] as $key) {
+            if (isset($data[$key]) && is_numeric($data[$key]) && (int) $data[$key] > 0) {
+                // Evitar confundir objectid del juego con collid.
+                if ($key === 'id' && isset($data['objectid']) && (int) $data['id'] === (int) $data['objectid']) {
+                    continue;
+                }
+
+                return (int) $data[$key];
+            }
+        }
+
+        foreach (['item', 'items', 'data', 'collectionitems'] as $nestedKey) {
+            if (!isset($data[$nestedKey]) || !is_array($data[$nestedKey])) {
+                continue;
+            }
+
+            $nested = $data[$nestedKey];
+            if (array_is_list($nested)) {
+                foreach ($nested as $entry) {
+                    if (!is_array($entry)) {
+                        continue;
                     }
+                    $found = $this->extractCollIdFromArray($entry);
+                    if ($found) {
+                        return $found;
+                    }
+                }
+            } else {
+                $found = $this->extractCollIdFromArray($nested);
+                if ($found) {
+                    return $found;
                 }
             }
         }
