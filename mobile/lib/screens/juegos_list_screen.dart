@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart';
 import '../data/categoria_repository.dart';
+import '../providers/bgg_collection_provider.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
 import '../models/juego.dart';
@@ -708,11 +709,35 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              GameImage(
-                juego: juego,
-                width: 56,
-                height: 56,
-                borderRadius: BorderRadius.circular(8),
+              Stack(
+                children: [
+                  GameImage(
+                    juego: juego,
+                    width: 56,
+                    height: 56,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  if (context
+                      .watch<BggCollectionProvider>()
+                      .isInBggCollection(juego.bggId))
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade600,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        child: const Icon(
+                          Icons.check,
+                          size: 12,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -833,6 +858,10 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
 
   List<Widget> _buildBadges(Juego juego) {
     final badges = <Widget>[];
+    final inBgg = context.watch<BggCollectionProvider>().isInBggCollection(juego.bggId);
+    if (inBgg) {
+      badges.add(_badge('✓ BGG', Colors.green[50], Colors.green[700]));
+    }
     if (juego.propietarios.length > 1 && !juego.variasCopias) {
       badges.add(_badge('Compartido', Colors.lightBlue[50], Colors.lightBlue[700]));
     }

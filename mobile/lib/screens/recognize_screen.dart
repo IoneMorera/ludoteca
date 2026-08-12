@@ -64,7 +64,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
       compressQuality: 95,
       uiSettings: [
         AndroidUiSettings(
-          toolbarTitle: 'Recorta la portada',
+          toolbarTitle: 'Recorta el t\u00edtulo',
           toolbarColor: Theme.of(context).colorScheme.primary,
           toolbarWidgetColor: Colors.white,
           activeControlsWidgetColor: Theme.of(context).colorScheme.primary,
@@ -73,7 +73,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
           hideBottomControls: false,
         ),
         IOSUiSettings(
-          title: 'Recorta la portada',
+          title: 'Recorta el t\u00edtulo',
           aspectRatioLockEnabled: false,
         ),
       ],
@@ -103,7 +103,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
   void _applyResult(RecognitionResult result, {bool manual = false}) {
     setState(() {
       _result = result;
-      if (!manual && _manualController.text.isEmpty) {
+      if (!manual) {
         _manualController.text = result.extractedText;
       }
       if (result.localMatches.isEmpty && result.bggGames.isEmpty) {
@@ -142,8 +142,8 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           Text(
-            'Recorta solo el t\u00edtulo/portada y procura buena luz. '
-            'Se buscar\u00e1 en tu ludoteca y en BGG.',
+            'Recorta centrándote en el t\u00edtulo (suele estar abajo). '
+            'Si hay varias opciones, elige el t\u00edtulo correcto en los chips.',
             style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
             textAlign: TextAlign.center,
           ),
@@ -261,13 +261,44 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.edit_note, size: 20, color: theme.colorScheme.primary),
+                Icon(Icons.title, size: 20, color: theme.colorScheme.primary),
                 const SizedBox(width: 8),
-                Text('Texto detectado (editable)',
+                Text('T\u00edtulo detectado',
                     style: theme.textTheme.titleSmall
                         ?.copyWith(fontWeight: FontWeight.bold)),
               ],
             ),
+            if (result.titleCandidates.length > 1) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Elige el t\u00edtulo correcto:',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: result.titleCandidates.map((title) {
+                  final selected =
+                      _manualController.text.trim().toLowerCase() ==
+                          title.toLowerCase();
+                  return ChoiceChip(
+                    label: Text(title),
+                    selected: selected,
+                    onSelected: _processing
+                        ? null
+                        : (_) {
+                            setState(() {
+                              _manualController.text = title;
+                            });
+                            _searchManually();
+                          },
+                  );
+                }).toList(),
+              ),
+            ],
             const SizedBox(height: 8),
             TextField(
               controller: _manualController,

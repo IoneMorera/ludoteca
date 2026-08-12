@@ -633,6 +633,20 @@ class JuegoRepository {
     }
   }
 
+  /// Persiste un `bgg_id` ya guardado en el servidor, sin marcar dirty/outbox.
+  Future<void> applyServerBggId({
+    required int serverId,
+    required int bggId,
+  }) async {
+    final db = await _dbService.database;
+    await db.update(
+      'juegos',
+      {'bgg_id': bggId},
+      where: 'server_id = ?',
+      whereArgs: [serverId],
+    );
+  }
+
   /// Updates only the ubicacion (quick update from detail screen).
   Future<void> updateUbicacion(
     int localId, {

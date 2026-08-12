@@ -90,7 +90,7 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
+            'user' => $user->toApiArray(),
             'token' => $token,
         ], 201);
     }
@@ -113,7 +113,7 @@ class AuthController extends Controller
         $token = $user->createToken('web')->plainTextToken;
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
+            'user' => $user->toApiArray(),
             'token' => $token,
         ]);
     }
@@ -128,7 +128,7 @@ class AuthController extends Controller
     public function user(Request $request): JsonResponse
     {
         return response()->json([
-            'user' => $request->user()->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
+            'user' => $request->user()->toApiArray(),
         ]);
     }
 
@@ -150,7 +150,7 @@ class AuthController extends Controller
         $user->save();
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
+            'user' => $user->toApiArray(),
         ]);
     }
 
@@ -172,7 +172,7 @@ class AuthController extends Controller
         $token = $user->createToken('mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email', 'bgg_username', 'no_enfundo', 'ocultar_por_estrenar', 'ocultar_faltan_traduccion', 'ocultar_expansion_otro_idioma', 'ocultar_por_colocar'),
+            'user' => $user->toApiArray(),
             'token' => $token,
         ]);
     }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/bgg_collection_provider.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -12,13 +13,13 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late TextEditingController _nombreCtrl;
-  late TextEditingController _bggCtrl;
   bool _noEnfundo = false;
   bool _ocultarPorEstrenar = false;
   bool _ocultarFaltanTraduccion = false;
   bool _ocultarExpansionOtroIdioma = false;
   bool _ocultarPorColocar = false;
   bool _saving = false;
+  bool _bggBusy = false;
   String? _error;
 
   @override
@@ -26,7 +27,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     final auth = context.read<AuthProvider>();
     _nombreCtrl = TextEditingController(text: auth.userName);
-    _bggCtrl = TextEditingController(text: auth.bggUsername ?? '');
     _noEnfundo = auth.noEnfundo;
     _ocultarPorEstrenar = auth.ocultarPorEstrenar;
     _ocultarFaltanTraduccion = auth.ocultarFaltanTraduccion;
@@ -37,7 +37,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _nombreCtrl.dispose();
-    _bggCtrl.dispose();
     super.dispose();
   }
 
@@ -49,7 +48,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final auth = context.read<AuthProvider>();
     final ok = await auth.updateProfile(
       name: _nombreCtrl.text.trim(),
-      bggUsername: _bggCtrl.text.trim(),
       noEnfundo: _noEnfundo,
       ocultarPorEstrenar: _ocultarPorEstrenar,
       ocultarFaltanTraduccion: _ocultarFaltanTraduccion,
@@ -66,6 +64,234 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SnackBar(content: Text('Perfil actualizado')),
       );
     }
+  }
+
+  Future<void> _showConnectBggDialog() async {
+    final auth = context.read<AuthProvider>();
+    final usernameCtrl =
+        TextEditingController(text: auth.bggUsername ?? '');
+    final passwordCtrl = TextEditingController();
+    var obscure = true;
+    String? dialogError;
+    var connecting = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Conectar a BoardGameGeek'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Introduce tu usuario y contraseña de BGG. '
+                      'La contraseña no se guarda: solo se usa para crear la sesión.',
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: usernameCtrl,
+                      autofocus: true,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Usuario BGG',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person_outline),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordCtrl,
+                      obscureText: obscure,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) async {
+                        if (connecting) return;
+                        setDialogState(() {
+                          connecting = true;
+                          dialogError = null;
+                        });
+                        final err = await auth.connectBgg(
+                          username: usernameCtrl.text.trim(),
+                          password: passwordCtrl.text,
+                        );
+                        if (!ctx.mounted) return;
+                        if (err == null) {
+                          Navigator.of(ctx).pop();
+                          return;
+                        }
+                        setDialogState(() {
+                          connecting = false;
+                          dialogError = err;
+                        });
+                      },
+                      decoration: InputDecoration(
+                        labelText: 'Contraseña',
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            obscure
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                          onPressed: () =>
+                              setDialogState(() => obscure = !obscure),
+                        ),
+                      ),
+                    ),
+                    if (dialogError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        dialogError!,
+                        style: TextStyle(
+                          color: Theme.of(ctx).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: connecting ? null : () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: connecting
+                      ? null
+                      : () async {
+                          final username = usernameCtrl.text.trim();
+                          final password = passwordCtrl.text;
+                          if (username.isEmpty || password.isEmpty) {
+                            setDialogState(() {
+                              dialogError =
+                                  'Usuario y contraseña son obligatorios.';
+                            });
+                            return;
+                          }
+                          setDialogState(() {
+                            connecting = true;
+                            dialogError = null;
+                          });
+                          final err = await auth.connectBgg(
+                            username: username,
+                            password: password,
+                          );
+                          if (!ctx.mounted) return;
+                          if (err == null) {
+                            Navigator.of(ctx).pop();
+                            return;
+                          }
+                          setDialogState(() {
+                            connecting = false;
+                            dialogError = err;
+                          });
+                        },
+                  child: connecting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Conectar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    usernameCtrl.dispose();
+    passwordCtrl.dispose();
+
+    if (!mounted) return;
+    if (auth.bggConnected) {
+      context.read<BggCollectionProvider>().fetchOwnedIds(force: true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Conectado a BGG como ${auth.bggUsername}'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _disconnectBgg() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Desconectar BGG'),
+        content: const Text(
+          '¿Quieres desconectar tu cuenta de BoardGameGeek? '
+          'Podrás volver a conectarla cuando quieras.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Desconectar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _bggBusy = true);
+    final err = await context.read<AuthProvider>().disconnectBgg();
+    if (!mounted) return;
+    context.read<BggCollectionProvider>().clear();
+    setState(() => _bggBusy = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(err ?? 'Desconectado de BoardGameGeek'),
+      ),
+    );
+  }
+
+  Widget _bggBadge(AuthProvider auth, ThemeData theme) {
+    final connected = auth.bggConnected;
+    final color = connected
+        ? Colors.green.shade700
+        : theme.colorScheme.onSurfaceVariant;
+    final bg = connected
+        ? Colors.green.shade50
+        : theme.colorScheme.surfaceContainerHighest;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            connected ? Icons.check_circle : Icons.link_off,
+            size: 14,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            connected
+                ? 'Conectado a BGG · ${auth.bggUsername}'
+                : 'No conectado a BGG',
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -94,6 +320,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          Center(
+            child: Text(
+              auth.userName,
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(child: _bggBadge(auth, theme)),
           const SizedBox(height: 20),
           TextField(
             controller: _nombreCtrl,
@@ -114,18 +350,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
               helperText: 'No se puede modificar',
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _bggCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Usuario de BoardGameGeek',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.casino_outlined),
-              helperText: 'Se usa para importar tu colecci\u00f3n desde BGG',
+          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'BoardGameGeek',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    auth.bggConnected
+                        ? 'Tu cuenta está vinculada para poder sincronizar e importar tu colección a BGG.'
+                        : 'Conecta tu cuenta de BGG para poder importar tu colección a BoardGameGeek.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (auth.bggConnected)
+                    OutlinedButton.icon(
+                      onPressed: _bggBusy ? null : _disconnectBgg,
+                      icon: _bggBusy
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.link_off),
+                      label: const Text('Desconectar de la BGG'),
+                    )
+                  else
+                    FilledButton.icon(
+                      onPressed: _bggBusy ? null : _showConnectBggDialog,
+                      icon: const Icon(Icons.link),
+                      label: const Text('Conectar a la BGG'),
+                    ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 20),
-          const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
