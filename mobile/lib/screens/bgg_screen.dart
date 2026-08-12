@@ -306,6 +306,7 @@ class _BggScreenState extends State<BggScreen> {
 
     var ok = 0;
     var fail = 0;
+    var consecutiveRateLimits = 0;
     final bggProvider = context.read<BggCollectionProvider>();
     final uploadedIds = <int>[];
     final prevOwnedIds = <int>[];
@@ -322,6 +323,7 @@ class _BggScreenState extends State<BggScreen> {
         currentName: isPrevOwned ? '$nombre (Previously Owned)' : nombre,
       );
 
+      var rateLimited = false;
       try {
         final response = await _api.post('/bgg/export/item', data: {
           'juego_id': juegoId,
@@ -332,9 +334,13 @@ class _BggScreenState extends State<BggScreen> {
             (success ? 'OK' : 'Error desconocido');
         final returnedBggId = (data['bgg_id'] as num?)?.toInt() ?? bggId;
         final bggIdSaved = data['bgg_id_saved'] == true;
+        rateLimited = data['rate_limited'] == true ||
+            msg.contains('403') ||
+            msg.contains('bloqueó temporalmente');
 
         if (success) {
           ok++;
+          consecutiveRateLimits = 0;
           if (returnedBggId != null) {
             if (data['action']?.toString() == 'prevowned' || isPrevOwned) {
               prevOwnedIds.add(returnedBggId);
@@ -362,14 +368,17 @@ class _BggScreenState extends State<BggScreen> {
           );
         } else {
           fail++;
+          if (rateLimited) {
+            consecutiveRateLimits++;
+          } else {
+            consecutiveRateLimits = 0;
+          }
           progress.value = progress.value.copyWith(
             log: [
               ...progress.value.log,
               _ExportLogLine(nombre: nombre, ok: false, message: msg),
             ],
           );
-          // No abortar ni refrescar auth: un fallo de un juego (WAF/rate-limit)
-          // no debe desconectar BGG ni parar el resto del export.
         }
       } catch (e) {
         fail++;
@@ -378,8 +387,16 @@ class _BggScreenState extends State<BggScreen> {
           final data = (e as dynamic).response?.data;
           if (data is Map && data['message'] is String) {
             msg = data['message'] as String;
+            rateLimited = data['rate_limited'] == true ||
+                msg.contains('403') ||
+                msg.contains('bloqueó temporalmente');
           }
         } catch (_) {}
+        if (rateLimited) {
+          consecutiveRateLimits++;
+        } else {
+          consecutiveRateLimits = 0;
+        }
         progress.value = progress.value.copyWith(
           log: [
             ...progress.value.log,
@@ -388,9 +405,18 @@ class _BggScreenState extends State<BggScreen> {
         );
       }
 
-      // Ritmo lento: BGG/Cloudflare responde 403 si se escribe demasiado rápido.
       if (i < toUpload.length - 1) {
-        await Future<void>.delayed(const Duration(milliseconds: 3000));
+        // Tras 403, pausa larga para que Cloudflare baje el bloqueo.
+        final waitMs = rateLimited
+            ? (consecutiveRateLimits >= 3 ? 45000 : 20000)
+            : 6000;
+        if (rateLimited) {
+          progress.value = progress.value.copyWith(
+            currentName:
+                'BGG limitó escrituras — esperando ${(waitMs / 1000).round()}s…',
+          );
+        }
+        await Future<void>.delayed(Duration(milliseconds: waitMs));
       }
     }
 
@@ -711,6 +737,7 @@ class _ExportPreviewDialogState extends State<_ExportPreviewDialog> {
                 color: Colors.green,
                 title: 'Ya en BGG (sin cambios)',
                 value: already,
+                detail: 'Incluye owned y Previously Owned ya correctos',
               ),
               if (omitted.isNotEmpty) ...[
                 const SizedBox(height: 8),
