@@ -318,7 +318,7 @@ class BggController extends Controller
                     'action' => 'prevowned',
                     'message' => $result['message'] ?? 'No se pudo marcar como Previously Owned',
                     'session_expired' => (bool) ($result['session_expired'] ?? false),
-                ], !empty($result['session_expired']) ? 401 : 502);
+                ], !empty($result['session_expired']) ? 422 : 502);
             }
 
             return response()->json([
@@ -367,7 +367,7 @@ class BggController extends Controller
                 'action' => 'own',
                 'message' => $result['message'] ?? 'No se pudo añadir a BGG',
                 'session_expired' => (bool) ($result['session_expired'] ?? false),
-            ], !empty($result['session_expired']) ? 401 : 502);
+            ], !empty($result['session_expired']) ? 422 : 502);
         }
 
         return response()->json([
@@ -1468,20 +1468,21 @@ class BggController extends Controller
     private function isBggAuthFailure(\Illuminate\Http\Client\Response $response): bool
     {
         $status = $response->status();
-        if (in_array($status, [401, 403], true)) {
-            return true;
-        }
-
         $body = strtolower($response->body());
-        if (str_contains($body, 'not logged') || str_contains($body, 'login required')) {
+
+        // 401 suele indicar sesión inválida de verdad.
+        if ($status === 401) {
             return true;
         }
 
-        // Cloudflare interstitial without session often looks like a challenge page.
-        if ($status === 403 && str_contains($body, 'just a moment')) {
+        if (str_contains($body, 'not logged')
+            || str_contains($body, 'login required')
+            || str_contains($body, 'must be logged in')) {
             return true;
         }
 
+        // Un 403 genérico (Cloudflare, rate-limit, WAF) NO implica sesión caducada.
+        // Tratarlo como tal desconectaba al usuario en mitad del export.
         return false;
     }
 
