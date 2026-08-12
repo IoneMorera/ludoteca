@@ -596,19 +596,38 @@ class _ExportPreviewDialog extends StatelessWidget {
 
   final Map<String, dynamic> preview;
 
-  @override
-  Widget build(BuildContext context) {
-    final counts = Map<String, dynamic>.from(preview['counts'] as Map? ?? {});
-    final toUpload = (preview['to_upload'] as List?) ?? [];
-    final already = (counts['already_in_bgg'] as num?)?.toInt() ?? 0;
-    final byName = (counts['match_by_name'] as num?)?.toInt() ?? 0;
-    final prevOwned = (counts['to_prev_owned'] as num?)?.toInt() ?? 0;
-    final omitted = (preview['omitted'] as List?)
+  List<Map<String, dynamic>> _maps(String key) {
+    return (preview[key] as List?)
             ?.cast<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList() ??
         [];
-    final uploadCount = (counts['to_upload'] as num?)?.toInt() ?? toUpload.length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = Map<String, dynamic>.from(preview['counts'] as Map? ?? {});
+    final toUpload = _maps('to_upload');
+    final toPrevOwned = _maps('to_prev_owned');
+    final omitted = _maps('omitted');
+
+    final uploadCount =
+        (counts['to_upload'] as num?)?.toInt() ?? toUpload.length;
+    final prevOwnedCount =
+        (counts['to_prev_owned'] as num?)?.toInt() ?? toPrevOwned.length;
+    final already = (counts['already_in_bgg'] as num?)?.toInt() ?? 0;
+    final uploadByName =
+        toUpload.where((e) => e['match_by_name'] == true).length;
+    final prevByName =
+        toPrevOwned.where((e) => e['match_by_name'] == true).length;
+    final totalChanges = uploadCount + prevOwnedCount;
+    final propietario = preview['propietario'] is Map
+        ? Map<String, dynamic>.from(preview['propietario'] as Map)
+        : null;
+    final propietarioNombre = propietario?['nombre']?.toString();
+    final bggUsername =
+        preview['username']?.toString() ?? propietario?['bgg_username']?.toString();
+    final coleccionLocal = (counts['coleccion_local'] as num?)?.toInt();
 
     return AlertDialog(
       title: const Text('Revisión de exportación'),
@@ -619,58 +638,89 @@ class _ExportPreviewDialog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (propietarioNombre != null || bggUsername != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Colección de ${propietarioNombre ?? 'propietario'}'
+                    '${bggUsername != null ? ' (BGG: $bggUsername)' : ''}'
+                    '${coleccionLocal != null ? ' · $coleccionLocal juegos locales' : ''}',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                  ),
+                ),
               Text(
-                'Se subirán $uploadCount juego${uploadCount == 1 ? '' : 's'} a BGG.',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                'Cambios previstos: $totalChanges',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
-              if (byName > 0) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '$byName se buscarán por nombre en BGG (no tenían ID) y, si se encuentran, se guardará el ID en la ludoteca.',
-                ),
-              ],
+              const SizedBox(height: 12),
+              _PreviewStatRow(
+                icon: Icons.upload,
+                color: Colors.blue,
+                title: 'Altas nuevas en BGG',
+                value: uploadCount,
+                detail: uploadByName > 0
+                    ? 'De ellas, $uploadByName sin ID se buscarán por nombre'
+                    : null,
+              ),
               const SizedBox(height: 8),
-              if (prevOwned > 0) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '$prevOwned vendidos se marcarán en BGG como Previously Owned (dejarán de estar en Owned).',
-                ),
-              ],
-              Text(
-                '$already ya están en tu colección de BGG y no se subirán.',
+              _PreviewStatRow(
+                icon: Icons.sell_outlined,
+                color: Colors.orange,
+                title: 'Vendidos → Previously Owned',
+                value: prevOwnedCount,
+                detail: prevByName > 0
+                    ? 'De ellas, $prevByName sin ID se buscarán por nombre'
+                    : null,
+              ),
+              const SizedBox(height: 8),
+              _PreviewStatRow(
+                icon: Icons.check_circle_outline,
+                color: Colors.green,
+                title: 'Ya en BGG (sin cambios)',
+                value: already,
               ),
               if (omitted.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text(
-                  'No se subirán (${omitted.length}) por otros motivos:',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                const SizedBox(height: 8),
+                _PreviewStatRow(
+                  icon: Icons.info_outline,
+                  color: Colors.grey,
+                  title: 'Omitidos',
+                  value: omitted.length,
                 ),
                 const SizedBox(height: 8),
-                ...omitted.take(40).map((item) {
+                ...omitted.take(20).map((item) {
                   final nombre = item['nombre']?.toString() ?? 'Juego';
-                  final reason = item['reason']?.toString() ?? 'Motivo desconocido';
+                  final reason =
+                      item['reason']?.toString() ?? 'Motivo desconocido';
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Icon(Icons.info_outline, size: 16),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '$nombre — $reason',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ),
-                      ],
+                    padding: const EdgeInsets.only(bottom: 4, left: 4),
+                    child: Text(
+                      '• $nombre — $reason',
+                      style: const TextStyle(fontSize: 12),
                     ),
                   );
                 }),
-                if (omitted.length > 40)
+                if (omitted.length > 20)
                   Text(
-                    '... y ${omitted.length - 40} más',
+                    '... y ${omitted.length - 20} más',
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
+              ],
+              if (totalChanges > 0) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    showDialog<void>(
+                      context: context,
+                      builder: (ctx) => _ExportChangesListDialog(
+                        toUpload: toUpload,
+                        toPrevOwned: toPrevOwned,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.list_alt),
+                  label: const Text('Ver listado completo de cambios'),
+                ),
               ],
             ],
           ),
@@ -682,12 +732,197 @@ class _ExportPreviewDialog extends StatelessWidget {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: (uploadCount + prevOwned) == 0
-              ? null
-              : () => Navigator.of(context).pop(true),
+          onPressed:
+              totalChanges == 0 ? null : () => Navigator.of(context).pop(true),
           child: const Text('Aceptar'),
         ),
       ],
+    );
+  }
+}
+
+class _PreviewStatRow extends StatelessWidget {
+  const _PreviewStatRow({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.value,
+    this.detail,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final int value;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$title: $value',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              if (detail != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    detail!,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExportChangesListDialog extends StatelessWidget {
+  const _ExportChangesListDialog({
+    required this.toUpload,
+    required this.toPrevOwned,
+  });
+
+  final List<Map<String, dynamic>> toUpload;
+  final List<Map<String, dynamic>> toPrevOwned;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: SizedBox(
+        width: double.maxFinite,
+        height: MediaQuery.of(context).size.height * 0.75,
+        child: DefaultTabController(
+          length: 2,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Listado de cambios',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              TabBar(
+                tabs: [
+                  Tab(text: 'Altas (${toUpload.length})'),
+                  Tab(text: 'Vendidos (${toPrevOwned.length})'),
+                ],
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _ChangesList(
+                      items: toUpload,
+                      emptyLabel: 'No hay altas nuevas',
+                      subtitleFor: (item) {
+                        final byName = item['match_by_name'] == true;
+                        final bggId = item['bgg_id'];
+                        if (byName) {
+                          return 'Buscar por nombre → añadir como Owned';
+                        }
+                        return 'BGG #$bggId → añadir como Owned';
+                      },
+                    ),
+                    _ChangesList(
+                      items: toPrevOwned,
+                      emptyLabel: 'No hay cambios de vendidos',
+                      subtitleFor: (item) {
+                        final byName = item['match_by_name'] == true;
+                        final bggId = item['bgg_id'];
+                        if (byName) {
+                          return 'Buscar por nombre → Previously Owned';
+                        }
+                        return 'BGG #$bggId → Previously Owned';
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cerrar'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChangesList extends StatelessWidget {
+  const _ChangesList({
+    required this.items,
+    required this.emptyLabel,
+    required this.subtitleFor,
+  });
+
+  final List<Map<String, dynamic>> items;
+  final String emptyLabel;
+  final String Function(Map<String, dynamic> item) subtitleFor;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Center(
+        child: Text(emptyLabel, style: TextStyle(color: Colors.grey[600])),
+      );
+    }
+
+    final sorted = [...items]
+      ..sort(
+        (a, b) => (a['nombre']?.toString() ?? '')
+            .toLowerCase()
+            .compareTo((b['nombre']?.toString() ?? '').toLowerCase()),
+      );
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      itemCount: sorted.length,
+      separatorBuilder: (context, index) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final item = sorted[index];
+        final nombre = item['nombre']?.toString() ?? 'Juego';
+        return ListTile(
+          dense: true,
+          title: Text(nombre, style: const TextStyle(fontSize: 14)),
+          subtitle: Text(
+            subtitleFor(item),
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+        );
+      },
     );
   }
 }

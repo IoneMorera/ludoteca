@@ -142,6 +142,13 @@ class BggController extends Controller
             ], 422);
         }
 
+        $propietario = $this->resolveExportPropietario($user);
+        if (!$propietario) {
+            return response()->json([
+                'message' => 'No hay un propietario vinculado al usuario BGG «'.$user->bgg_username.'».',
+            ], 422);
+        }
+
         $owned = $this->fetchOwnedBggIds($user->bgg_username);
         if ($owned['error'] !== null) {
             return response()->json([
@@ -151,6 +158,9 @@ class BggController extends Controller
 
         $ownedSet = array_fill_keys($owned['ids'], true);
         $juegos = Juego::query()
+            ->whereHas('propietarios', function ($q) use ($propietario) {
+                $q->where('propietarios.id', $propietario->id);
+            })
             ->orderBy('nombre')
             ->get(['id', 'nombre', 'bgg_id', 'es_expansion', 'juego_base_id', 'estado']);
 
@@ -193,6 +203,11 @@ class BggController extends Controller
 
         return response()->json([
             'username' => $user->bgg_username,
+            'propietario' => [
+                'id' => $propietario->id,
+                'nombre' => $propietario->nombre,
+                'bgg_username' => $propietario->bgg_username,
+            ],
             'to_upload' => $toUpload,
             'to_prev_owned' => $toPrevOwned,
             'already_in_bgg' => $already,
@@ -203,6 +218,8 @@ class BggController extends Controller
                 'already_in_bgg' => count($already),
                 'omitted' => count($omitted),
                 'match_by_name' => $byNameCount,
+                'total_changes' => count($toUpload) + count($toPrevOwned),
+                'coleccion_local' => $juegos->count(),
             ],
         ]);
     }
@@ -222,11 +239,25 @@ class BggController extends Controller
             'juego_id' => 'required|integer',
         ]);
 
-        $juego = Juego::find($validated['juego_id']);
+        $propietario = $this->resolveExportPropietario($user);
+        if (!$propietario) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay un propietario vinculado al usuario BGG «'.$user->bgg_username.'».',
+            ], 422);
+        }
+
+        $juego = Juego::query()
+            ->whereKey($validated['juego_id'])
+            ->whereHas('propietarios', function ($q) use ($propietario) {
+                $q->where('propietarios.id', $propietario->id);
+            })
+            ->first();
+
         if (!$juego) {
             return response()->json([
                 'success' => false,
-                'message' => 'Juego no encontrado.',
+                'message' => 'Juego no encontrado en la colección del propietario BGG conectado.',
             ], 404);
         }
 
@@ -826,6 +857,26 @@ class BggController extends Controller
             || str_contains($joined, 'bggpassword=');
 
         return $hasAuth ? $joined : null;
+    }
+
+    /**
+     * Propietario local cuya colección se sincroniza con la cuenta BGG conectada.
+     */
+    private function resolveExportPropietario(User $user): ?Propietario
+    {
+        $username = trim((string) $user->bgg_username);
+        if ($username === '') {
+            return null;
+        }
+
+        $byUsername = Propietario::whereRaw('LOWER(bgg_username) = ?', [strtolower($username)])
+            ->first();
+        if ($byUsername) {
+            return $byUsername;
+        }
+
+        // Fallback: el propietario principal (se sincroniza el username al conectar).
+        return Propietario::where('es_principal', true)->first();
     }
 
     /**
