@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'config/api_config.dart';
 import 'data/sync_service.dart';
 import 'providers/auth_provider.dart';
+import 'providers/bgg_collection_provider.dart';
 import 'providers/juegos_provider.dart';
 import 'providers/sync_provider.dart';
 import 'screens/bgg_screen.dart';
@@ -45,6 +46,7 @@ class LudotecaApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => JuegosProvider()),
         ChangeNotifierProvider(create: (_) => SyncProvider()),
+        ChangeNotifierProvider(create: (_) => BggCollectionProvider()),
       ],
       child: MaterialApp(
         title: 'Ludoteca',
@@ -184,6 +186,10 @@ class _AuthGateState extends State<AuthGate> {
     if (loggedIn) {
       // Sincronizaci\u00f3n inicial: full pull si nunca se ha sincronizado.
       SyncService().syncAll();
+      if (auth.bggConnected) {
+        // ignore: unawaited_futures
+        context.read<BggCollectionProvider>().fetchOwnedIds();
+      }
     }
 
     setState(() => _checking = false);

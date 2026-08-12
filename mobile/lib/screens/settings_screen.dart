@@ -352,16 +352,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(auth.userName,
-                          style: theme.textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      Text(auth.user?['email'] ?? '',
-                          style: TextStyle(
-                              color: Colors.grey[600], fontSize: 13)),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(auth.userName,
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold)),
+                        Text(auth.user?['email'] ?? '',
+                            style: TextStyle(
+                                color: Colors.grey[600], fontSize: 13)),
+                        const SizedBox(height: 6),
+                        _BggStatusBadge(connected: auth.bggConnected, username: auth.bggUsername),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -371,7 +375,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.person_outline),
             title: const Text('Mi perfil'),
-            subtitle: const Text('Nombre, usuario BGG y preferencias'),
+            subtitle: const Text('Nombre, conexión BGG y preferencias'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).pushNamed('/profile'),
           ),
@@ -419,7 +423,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.cloud_download),
             title: const Text('BGG'),
-            subtitle: const Text('Importar desde BoardGameGeek'),
+            subtitle: const Text('Importar / exportar colección'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).pushNamed('/bgg'),
           ),
@@ -500,5 +504,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
 
+class _BggStatusBadge extends StatelessWidget {
+  const _BggStatusBadge({
+    required this.connected,
+    this.username,
+  });
+
+  final bool connected;
+  final String? username;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color =
+        connected ? Colors.green.shade700 : theme.colorScheme.onSurfaceVariant;
+    final bg = connected
+        ? Colors.green.shade50
+        : theme.colorScheme.surfaceContainerHighest;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            connected ? Icons.check_circle : Icons.link_off,
+            size: 12,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              connected
+                  ? 'BGG · ${username ?? ''}'
+                  : 'BGG no conectado',
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

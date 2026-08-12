@@ -16,6 +16,7 @@ class AuthProvider extends ChangeNotifier {
   String get userName => _user?['name'] ?? '';
   String get userEmail => _user?['email'] ?? '';
   String? get bggUsername => _user?['bgg_username'];
+  bool get bggConnected => _user?['bgg_connected'] == true;
   bool get noEnfundo => _user?['no_enfundo'] == true;
   bool get ocultarPorEstrenar => _user?['ocultar_por_estrenar'] == true;
   bool get ocultarFaltanTraduccion =>
@@ -142,5 +143,41 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  Future<String?> connectBgg({
+    required String username,
+    required String password,
+  }) async {
+    try {
+      _user = await _authService.connectBgg(
+        username: username,
+        password: password,
+      );
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return _parseApiError(e, 'No se pudo conectar con BoardGameGeek.');
+    }
+  }
+
+  Future<String?> disconnectBgg() async {
+    try {
+      _user = await _authService.disconnectBgg();
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return _parseApiError(e, 'No se pudo desconectar de BoardGameGeek.');
+    }
+  }
+
+  String _parseApiError(Object e, String fallback) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['message'] is String) {
+        return data['message'] as String;
+      }
+    }
+    return fallback;
   }
 }

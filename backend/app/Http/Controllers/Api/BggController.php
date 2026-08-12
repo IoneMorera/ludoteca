@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Categoria;
 use App\Models\Juego;
 use App\Models\Propietario;
+use App\Models\User;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,10 +18,341 @@ use Illuminate\Support\Facades\Storage;
 class BggController extends Controller
 {
     private const BGG_API_URL = 'https://boardgamegeek.com/xmlapi2';
+    private const BGG_LOGIN_URL = 'https://boardgamegeek.com/login/api/v1';
     private const MAX_RETRIES = 5;
     private const RETRY_DELAY_SECONDS = 2;
     private const IMAGE_USER_AGENT = 'Ludoteca/1.0 (BoardGameGeek Integration)';
     private const IMAGE_TIMEOUT = 20;
+
+    public function connect(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'username' => 'required|string|max:255',
+            'password' => 'required|string',
+        ]);
+
+        $username = trim($validated['username']);
+        $password = $validated['password'];
+
+        try {
+            $cookieJar = new \GuzzleHttp\Cookie\CookieJar();
+
+            $response = Http::withOptions(['cookies' => $cookieJar])
+                ->withHeaders([
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                    'User-Agent' => self::IMAGE_USER_AGENT,
+                ])->post(self::BGG_LOGIN_URL, [
+                    'credentials' => [
+                        'username' => $username,
+                        'password' => $password,
+                    ],
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('BGG connect login request failed', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'No se pudo contactar con BoardGameGeek.',
+            ], 502);
+        }
+
+        if ($response->status() >= 400) {
+            return response()->json([
+                'message' => 'Usuario o contraseña de BGG incorrectos.',
+            ], 422);
+        }
+
+        $session = $this->cookieJarToHeader($cookieJar)
+            ?? $this->extractSessionCookie($response);
+
+        if ($session === null) {
+            Log::warning('BGG connect succeeded without session cookies', [
+                'status' => $response->status(),
+            ]);
+
+            return response()->json([
+                'message' => 'BGG no devolvió una sesión válida. Inténtalo de nuevo.',
+            ], 502);
+        }
+
+        /** @var User $user */
+        $user = $request->user();
+        $user->bgg_username = $username;
+        $user->bgg_session = $session;
+        $user->bgg_connected_at = now();
+        $user->save();
+
+        Propietario::where('es_principal', true)->update([
+            'bgg_username' => $username,
+        ]);
+
+        return response()->json([
+            'message' => 'Conectado a BoardGameGeek.',
+            'user' => $user->toApiArray(),
+        ]);
+    }
+
+    public function disconnect(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $user->bgg_session = null;
+        $user->bgg_connected_at = null;
+        $user->save();
+
+        return response()->json([
+            'message' => 'Desconectado de BoardGameGeek.',
+            'user' => $user->toApiArray(),
+        ]);
+    }
+
+    public function ownedIds(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        if (!$user->isBggConnected()) {
+            return response()->json([
+                'message' => 'Conecta tu cuenta de BGG en el perfil primero.',
+            ], 422);
+        }
+
+        $result = $this->fetchOwnedBggIds($user->bgg_username);
+        if ($result['error'] !== null) {
+            return response()->json([
+                'message' => $result['error'],
+            ], $result['status'] ?? 502);
+        }
+
+        return response()->json([
+            'username' => $user->bgg_username,
+            'ids' => array_values($result['ids']),
+            'total' => count($result['ids']),
+        ]);
+    }
+
+    public function exportPreview(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        if (!$user->isBggConnected()) {
+            return response()->json([
+                'message' => 'Conecta tu cuenta de BGG en el perfil primero.',
+            ], 422);
+        }
+
+        $owned = $this->fetchOwnedBggIds($user->bgg_username);
+        if ($owned['error'] !== null) {
+            return response()->json([
+                'message' => $owned['error'],
+            ], $owned['status'] ?? 502);
+        }
+
+        $ownedSet = array_fill_keys($owned['ids'], true);
+        $juegos = Juego::query()
+            ->orderBy('nombre')
+            ->get(['id', 'nombre', 'bgg_id', 'es_expansion', 'juego_base_id', 'estado']);
+
+        $toUpload = [];
+        $toPrevOwned = [];
+        $already = [];
+        $omitted = [];
+        $byNameCount = 0;
+
+        foreach ($juegos as $juego) {
+            $payload = [
+                'id' => $juego->id,
+                'nombre' => $juego->nombre,
+                'bgg_id' => $juego->bgg_id,
+                'es_expansion' => (bool) ($juego->es_expansion || $juego->juego_base_id),
+                'match_by_name' => !$juego->bgg_id,
+                'action' => 'own',
+            ];
+
+            if (($juego->estado ?? '') === 'vendido') {
+                $payload['action'] = 'prevowned';
+                if (!$juego->bgg_id) {
+                    $byNameCount++;
+                }
+                $toPrevOwned[] = $payload;
+                continue;
+            }
+
+            if ($juego->bgg_id && isset($ownedSet[(int) $juego->bgg_id])) {
+                $already[] = $payload;
+                continue;
+            }
+
+            if (!$juego->bgg_id) {
+                $byNameCount++;
+            }
+
+            $toUpload[] = $payload;
+        }
+
+        return response()->json([
+            'username' => $user->bgg_username,
+            'to_upload' => $toUpload,
+            'to_prev_owned' => $toPrevOwned,
+            'already_in_bgg' => $already,
+            'omitted' => $omitted,
+            'counts' => [
+                'to_upload' => count($toUpload),
+                'to_prev_owned' => count($toPrevOwned),
+                'already_in_bgg' => count($already),
+                'omitted' => count($omitted),
+                'match_by_name' => $byNameCount,
+            ],
+        ]);
+    }
+
+    public function exportItem(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        if (!$user->isBggConnected()) {
+            return response()->json([
+                'message' => 'Conecta tu cuenta de BGG en el perfil primero.',
+                'success' => false,
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'juego_id' => 'required|integer',
+        ]);
+
+        $juego = Juego::find($validated['juego_id']);
+        if (!$juego) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Juego no encontrado.',
+            ], 404);
+        }
+
+        $markPrevOwned = ($juego->estado ?? '') === 'vendido';
+
+        $resolvedByName = false;
+        $matchedName = null;
+        $bggId = $juego->bgg_id ? (int) $juego->bgg_id : null;
+
+        if (!$bggId) {
+            $resolved = $this->resolveBggIdByName($juego);
+            if (isset($resolved['error'])) {
+                return response()->json([
+                    'success' => false,
+                    'juego_id' => $juego->id,
+                    'nombre' => $juego->nombre,
+                    'message' => $resolved['error'],
+                ], 422);
+            }
+
+            $bggId = (int) $resolved['bgg_id'];
+            $resolvedByName = true;
+            $matchedName = $resolved['matched_name'] ?? null;
+
+            $duplicate = Juego::where('bgg_id', $bggId)
+                ->where('id', '!=', $juego->id)
+                ->first();
+            if ($duplicate) {
+                return response()->json([
+                    'success' => false,
+                    'juego_id' => $juego->id,
+                    'nombre' => $juego->nombre,
+                    'bgg_id' => $bggId,
+                    'message' => 'El ID BGG #'.$bggId.' ya está vinculado a «'.$duplicate->nombre.'»',
+                ], 422);
+            }
+
+            $juego->bgg_id = $bggId;
+            $juego->save();
+        }
+
+        if ($markPrevOwned) {
+            $result = $this->markGameAsPreviouslyOwnedOnBgg($user, $bggId);
+            if (!$result['success']) {
+                if (!empty($result['session_expired'])) {
+                    $user->bgg_session = null;
+                    $user->bgg_connected_at = null;
+                    $user->save();
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'juego_id' => $juego->id,
+                    'nombre' => $juego->nombre,
+                    'bgg_id' => $bggId,
+                    'bgg_id_saved' => $resolvedByName,
+                    'matched_name' => $matchedName,
+                    'action' => 'prevowned',
+                    'message' => $result['message'] ?? 'No se pudo marcar como Previously Owned',
+                    'session_expired' => (bool) ($result['session_expired'] ?? false),
+                ], !empty($result['session_expired']) ? 401 : 502);
+            }
+
+            return response()->json([
+                'success' => true,
+                'skipped' => false,
+                'juego_id' => $juego->id,
+                'nombre' => $juego->nombre,
+                'bgg_id' => $bggId,
+                'bgg_id_saved' => $resolvedByName,
+                'matched_name' => $matchedName,
+                'action' => 'prevowned',
+                'message' => 'Marcado como Previously Owned en BGG',
+            ]);
+        }
+
+        if ($resolvedByName && $this->isBggIdOwnedByUser($user->bgg_username, $bggId)) {
+            return response()->json([
+                'success' => true,
+                'skipped' => true,
+                'juego_id' => $juego->id,
+                'nombre' => $juego->nombre,
+                'bgg_id' => $bggId,
+                'bgg_id_saved' => true,
+                'matched_name' => $matchedName,
+                'action' => 'own',
+                'message' => 'Encontrado por nombre; ya estaba en tu colección BGG',
+            ]);
+        }
+
+        $result = $this->addGameToBggCollection($user, $bggId);
+
+        if (!$result['success']) {
+            if (!empty($result['session_expired'])) {
+                $user->bgg_session = null;
+                $user->bgg_connected_at = null;
+                $user->save();
+            }
+
+            return response()->json([
+                'success' => false,
+                'juego_id' => $juego->id,
+                'nombre' => $juego->nombre,
+                'bgg_id' => $bggId,
+                'bgg_id_saved' => $resolvedByName,
+                'matched_name' => $matchedName,
+                'action' => 'own',
+                'message' => $result['message'] ?? 'No se pudo añadir a BGG',
+                'session_expired' => (bool) ($result['session_expired'] ?? false),
+            ], !empty($result['session_expired']) ? 401 : 502);
+        }
+
+        return response()->json([
+            'success' => true,
+            'skipped' => false,
+            'juego_id' => $juego->id,
+            'nombre' => $juego->nombre,
+            'bgg_id' => $bggId,
+            'bgg_id_saved' => $resolvedByName,
+            'matched_name' => $matchedName,
+            'action' => 'own',
+            'message' => $resolvedByName
+                ? 'Encontrado por nombre y añadido a BGG'
+                : 'Añadido a la colección de BGG',
+        ]);
+    }
 
     public function collection(string $username): JsonResponse
     {
@@ -470,6 +802,673 @@ class BggController extends Controller
         }
 
         return Propietario::whereRaw('LOWER(bgg_username) = ?', [strtolower($bggUsername)])->first();
+    }
+
+    private function cookieJarToHeader(\GuzzleHttp\Cookie\CookieJar $cookieJar): ?string
+    {
+        $parts = [];
+        foreach ($cookieJar as $cookie) {
+            $name = $cookie->getName();
+            $value = $cookie->getValue();
+            if ($name === '' || $value === '') {
+                continue;
+            }
+            $parts[] = $name.'='.$value;
+        }
+
+        if ($parts === []) {
+            return null;
+        }
+
+        $joined = implode('; ', array_unique($parts));
+        $hasAuth = str_contains($joined, 'bggusername=')
+            || str_contains($joined, 'SessionID=')
+            || str_contains($joined, 'bggpassword=');
+
+        return $hasAuth ? $joined : null;
+    }
+
+    /**
+     * Busca un juego en BGG por nombre (exacto y, si hace falta, aproximado).
+     *
+     * @return array{bgg_id: int, matched_name: string}|array{error: string}
+     */
+    private function resolveBggIdByName(Juego $juego): array
+    {
+        $name = trim((string) $juego->nombre);
+        if ($name === '') {
+            return ['error' => 'El juego no tiene nombre para buscar en BGG'];
+        }
+
+        $isExpansion = (bool) ($juego->es_expansion || $juego->juego_base_id);
+
+        $exact = $this->searchBggByName($name, true);
+        $match = $this->pickBestBggMatch($name, $exact, $isExpansion);
+        if ($match !== null) {
+            return $match;
+        }
+
+        $fuzzy = $this->searchBggByName($name, false);
+        $match = $this->pickBestBggMatch($name, $fuzzy, $isExpansion);
+        if ($match !== null) {
+            return $match;
+        }
+
+        if ($exact === [] && $fuzzy === []) {
+            return ['error' => 'No se encontró en BGG por nombre'];
+        }
+
+        return ['error' => 'Varias coincidencias en BGG; no se pudo decidir automáticamente'];
+    }
+
+    /**
+     * @return list<array{bgg_id: int, name: string, year: int, type: string}>
+     */
+    private function searchBggByName(string $query, bool $exact): array
+    {
+        $apiKey = config('services.bgg.api_key');
+        $headers = [
+            'Accept' => 'application/xml',
+            'User-Agent' => self::IMAGE_USER_AGENT,
+        ];
+        if ($apiKey) {
+            $headers['Authorization'] = 'Bearer '.$apiKey;
+        }
+
+        $params = [
+            'query' => mb_substr($query, 0, 120),
+            'type' => 'boardgame,boardgameexpansion',
+        ];
+        if ($exact) {
+            $params['exact'] = 1;
+        }
+
+        try {
+            $response = Http::timeout(20)->withHeaders($headers)
+                ->get(self::BGG_API_URL.'/search', $params);
+        } catch (\Throwable $e) {
+            Log::warning('BGG name search failed', [
+                'query' => $query,
+                'exact' => $exact,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+
+        if ($response->failed()) {
+            return [];
+        }
+
+        return array_slice($this->parseSearchXml($response->body()), 0, 20);
+    }
+
+    /**
+     * @param  list<array{bgg_id: int, name: string, year: int, type: string}>  $candidates
+     * @return array{bgg_id: int, matched_name: string}|null
+     */
+    private function pickBestBggMatch(string $nombre, array $candidates, bool $preferExpansion): ?array
+    {
+        if ($candidates === []) {
+            return null;
+        }
+
+        $normalized = $this->normalizeGameName($nombre);
+        $exact = array_values(array_filter(
+            $candidates,
+            fn ($c) => $this->normalizeGameName((string) $c['name']) === $normalized
+        ));
+
+        $pool = $exact !== [] ? $exact : $candidates;
+
+        $preferredType = $preferExpansion ? 'boardgameexpansion' : 'boardgame';
+        $typed = array_values(array_filter(
+            $pool,
+            fn ($c) => ($c['type'] ?? '') === $preferredType
+        ));
+        if ($typed !== []) {
+            $pool = $typed;
+        }
+
+        if (count($pool) === 1) {
+            return [
+                'bgg_id' => (int) $pool[0]['bgg_id'],
+                'matched_name' => (string) $pool[0]['name'],
+            ];
+        }
+
+        // Si hay varios con el mismo nombre normalizado, cogemos el de año más reciente.
+        if ($exact !== [] && count($pool) > 1) {
+            usort($pool, fn ($a, $b) => ((int) ($b['year'] ?? 0)) <=> ((int) ($a['year'] ?? 0)));
+
+            return [
+                'bgg_id' => (int) $pool[0]['bgg_id'],
+                'matched_name' => (string) $pool[0]['name'],
+            ];
+        }
+
+        return null;
+    }
+
+    private function normalizeGameName(string $name): string
+    {
+        $name = mb_strtolower(trim($name));
+        $name = strtr($name, [
+            'á' => 'a', 'à' => 'a', 'ä' => 'a', 'â' => 'a',
+            'é' => 'e', 'è' => 'e', 'ë' => 'e', 'ê' => 'e',
+            'í' => 'i', 'ì' => 'i', 'ï' => 'i', 'î' => 'i',
+            'ó' => 'o', 'ò' => 'o', 'ö' => 'o', 'ô' => 'o',
+            'ú' => 'u', 'ù' => 'u', 'ü' => 'u', 'û' => 'u',
+            'ñ' => 'n', 'ç' => 'c',
+        ]);
+        $name = preg_replace('/[^a-z0-9]+/u', '', $name) ?? $name;
+
+        return $name;
+    }
+
+    private function isBggIdOwnedByUser(string $username, int $bggId): bool
+    {
+        $apiKey = config('services.bgg.api_key');
+        if (empty($apiKey) || $bggId <= 0) {
+            return false;
+        }
+
+        $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', [
+            'username' => $username,
+            'id' => $bggId,
+            'own' => 1,
+        ], $apiKey);
+
+        if (!$response || $response->failed()) {
+            return false;
+        }
+
+        $data = @simplexml_load_string($response->body());
+        if ($data === false || !isset($data->item)) {
+            return false;
+        }
+
+        foreach ($data->item as $item) {
+            if ((int) $item['objectid'] === $bggId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{ids: list<int>, error: ?string, status?: int}
+     */
+    private function fetchOwnedBggIds(string $username): array
+    {
+        $apiKey = config('services.bgg.api_key');
+        if (empty($apiKey)) {
+            return ['ids' => [], 'error' => 'BGG_API_KEY no configurada.', 'status' => 500];
+        }
+
+        $ids = [];
+        foreach ([
+            ['subtype' => 'boardgame', 'excludesubtype' => 'boardgameexpansion'],
+            ['subtype' => 'boardgameexpansion'],
+        ] as $filters) {
+            $params = array_merge([
+                'username' => $username,
+                'own' => 1,
+                'stats' => 0,
+            ], $filters);
+
+            $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', $params, $apiKey);
+            if (!$response) {
+                return [
+                    'ids' => [],
+                    'error' => 'BGG está procesando la colección, inténtalo de nuevo en unos segundos.',
+                    'status' => 202,
+                ];
+            }
+            if ($response->failed()) {
+                return [
+                    'ids' => [],
+                    'error' => 'Error al obtener la colección de BGG.',
+                    'status' => $response->status() >= 400 ? $response->status() : 502,
+                ];
+            }
+
+            $data = @simplexml_load_string($response->body());
+            if ($data === false || !isset($data->item)) {
+                continue;
+            }
+
+            foreach ($data->item as $item) {
+                $bggId = (int) $item['objectid'];
+                if ($bggId > 0) {
+                    $ids[$bggId] = $bggId;
+                }
+            }
+        }
+
+        return ['ids' => array_values($ids), 'error' => null];
+    }
+
+    /**
+     * @return array{success: bool, message?: string, session_expired?: bool}
+     */
+    private function markGameAsPreviouslyOwnedOnBgg(User $user, int $bggId): array
+    {
+        $session = $user->bgg_session;
+        if (!$session) {
+            return [
+                'success' => false,
+                'message' => 'Sesión de BGG no disponible.',
+                'session_expired' => true,
+            ];
+        }
+
+        $headers = $this->bggWriteHeaders($user, $bggId);
+
+        // Intento JSON moderno.
+        try {
+            $jsonResponse = Http::timeout(30)
+                ->withHeaders(array_merge($headers, [
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ]))
+                ->post('https://boardgamegeek.com/api/collectionitems', [
+                    'objecttype' => 'thing',
+                    'objectid' => $bggId,
+                    'status' => [
+                        'own' => false,
+                        'prevowned' => true,
+                    ],
+                ]);
+
+            if ($this->isBggAuthFailure($jsonResponse)) {
+                return [
+                    'success' => false,
+                    'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
+                    'session_expired' => true,
+                ];
+            }
+
+            if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
+                return ['success' => true];
+            }
+
+            if (in_array($jsonResponse->status(), [409, 422], true)) {
+                $collId = $this->extractCollId($jsonResponse->body())
+                    ?? $this->findCollectionCollId($user->bgg_username, $bggId);
+                $status = $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
+                if ($status['success']) {
+                    return $status;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('BGG prevowned JSON request failed', [
+                'bgg_id' => $bggId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $collId = $this->findCollectionCollId($user->bgg_username, $bggId);
+
+        if (!$collId) {
+            try {
+                $addResponse = Http::timeout(30)
+                    ->asForm()
+                    ->withHeaders($headers)
+                    ->post('https://boardgamegeek.com/geekcollection.php', [
+                        'action' => 'additem',
+                        'objecttype' => 'thing',
+                        'objectid' => $bggId,
+                        'ajax' => 1,
+                        'instanceid' => 0,
+                    ]);
+
+                if ($this->isBggAuthFailure($addResponse)) {
+                    return [
+                        'success' => false,
+                        'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
+                        'session_expired' => true,
+                    ];
+                }
+
+                $collId = $this->extractCollId($addResponse->body())
+                    ?? $this->findCollectionCollId($user->bgg_username, $bggId);
+            } catch (\Throwable $e) {
+                return [
+                    'success' => false,
+                    'message' => 'No se pudo crear/actualizar el ítem en BGG.',
+                ];
+            }
+        }
+
+        return $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
+    }
+
+    /**
+     * @return array{success: bool, message?: string, session_expired?: bool}
+     */
+    private function addGameToBggCollection(User $user, int $bggId): array
+    {
+        $session = $user->bgg_session;
+        if (!$session) {
+            return [
+                'success' => false,
+                'message' => 'Sesión de BGG no disponible.',
+                'session_expired' => true,
+            ];
+        }
+
+        $headers = $this->bggWriteHeaders($user, $bggId);
+
+        // 1) Intento con la API JSON moderna de BGG.
+        try {
+            $jsonResponse = Http::timeout(30)
+                ->withHeaders(array_merge($headers, [
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ]))
+                ->post('https://boardgamegeek.com/api/collectionitems', [
+                    'objecttype' => 'thing',
+                    'objectid' => $bggId,
+                    'status' => [
+                        'own' => true,
+                    ],
+                ]);
+
+            if ($this->isBggAuthFailure($jsonResponse)) {
+                return [
+                    'success' => false,
+                    'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
+                    'session_expired' => true,
+                ];
+            }
+
+            if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
+                return ['success' => true];
+            }
+
+            // Si el item ya existe, algunos endpoints responden 409/422.
+            if (in_array($jsonResponse->status(), [409, 422], true)) {
+                $this->setBggCollectionStatus(
+                    $headers,
+                    $bggId,
+                    $this->extractCollId($jsonResponse->body()),
+                    true,
+                    false,
+                );
+
+                return ['success' => true];
+            }
+
+            Log::info('BGG api/collectionitems soft-fail, trying geekcollection', [
+                'bgg_id' => $bggId,
+                'status' => $jsonResponse->status(),
+                'body' => substr($jsonResponse->body(), 0, 300),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('BGG api/collectionitems request failed', [
+                'bgg_id' => $bggId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // 2) Fallback clásico: geekcollection.php (additem + own).
+        try {
+            $addResponse = Http::timeout(30)
+                ->asForm()
+                ->withHeaders($headers)
+                ->post('https://boardgamegeek.com/geekcollection.php', [
+                    'action' => 'additem',
+                    'objecttype' => 'thing',
+                    'objectid' => $bggId,
+                    'ajax' => 1,
+                    'instanceid' => 0,
+                ]);
+
+            if ($this->isBggAuthFailure($addResponse)) {
+                return [
+                    'success' => false,
+                    'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
+                    'session_expired' => true,
+                ];
+            }
+
+            if ($addResponse->failed() && $addResponse->status() !== 200) {
+                Log::warning('BGG geekcollection additem failed', [
+                    'bgg_id' => $bggId,
+                    'status' => $addResponse->status(),
+                    'body' => substr($addResponse->body(), 0, 400),
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => 'BGG rechazó la alta del juego (HTTP '.$addResponse->status().').',
+                ];
+            }
+
+            $collId = $this->extractCollId($addResponse->body());
+            $ownResult = $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
+            if (!$ownResult['success']) {
+                if ($collId) {
+                    return ['success' => true];
+                }
+
+                return $ownResult;
+            }
+
+            return ['success' => true];
+        } catch (\Throwable $e) {
+            Log::warning('BGG geekcollection add failed', [
+                'bgg_id' => $bggId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'No se pudo contactar con BoardGameGeek para exportar.',
+            ];
+        }
+    }
+
+    private function bggWriteHeaders(User $user, int $bggId): array
+    {
+        $apiKey = config('services.bgg.api_key');
+        $headers = [
+            'User-Agent' => self::IMAGE_USER_AGENT,
+            'Cookie' => (string) $user->bgg_session,
+            'Accept' => 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With' => 'XMLHttpRequest',
+            'Referer' => 'https://boardgamegeek.com/boardgame/'.$bggId,
+        ];
+        if (!empty($apiKey)) {
+            $headers['Authorization'] = 'Bearer '.$apiKey;
+        }
+
+        return $headers;
+    }
+
+    private function findCollectionCollId(string $username, int $bggId): ?int
+    {
+        $apiKey = config('services.bgg.api_key');
+        if (empty($apiKey) || $bggId <= 0) {
+            return null;
+        }
+
+        $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', [
+            'username' => $username,
+            'id' => $bggId,
+        ], $apiKey);
+
+        if (!$response || $response->failed()) {
+            return null;
+        }
+
+        $data = @simplexml_load_string($response->body());
+        if ($data === false || !isset($data->item)) {
+            return null;
+        }
+
+        foreach ($data->item as $item) {
+            if ((int) $item['objectid'] === $bggId) {
+                $collId = (int) ($item['collid'] ?? 0);
+
+                return $collId > 0 ? $collId : null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{success: bool, message?: string}
+     */
+    private function setBggCollectionStatus(
+        array $headers,
+        int $bggId,
+        ?int $collId,
+        bool $own,
+        bool $prevOwned,
+    ): array {
+        if (!$collId) {
+            return [
+                'success' => false,
+                'message' => 'No se pudo obtener el collid de BGG.',
+            ];
+        }
+
+        try {
+            $saveResponse = Http::timeout(30)
+                ->asForm()
+                ->withHeaders($headers)
+                ->post('https://boardgamegeek.com/geekcollection.php', [
+                    'action' => 'savedata',
+                    'ajax' => 1,
+                    'collid' => $collId,
+                    'fieldname' => 'status',
+                    'own' => $own ? 1 : 0,
+                    'prevowned' => $prevOwned ? 1 : 0,
+                    'objecttype' => 'thing',
+                    'objectid' => $bggId,
+                ]);
+
+            if ($saveResponse->successful() || $saveResponse->status() === 200) {
+                return ['success' => true];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'No se pudo actualizar el estado en BGG.',
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'message' => 'Error al actualizar el estado en BGG.',
+            ];
+        }
+    }
+
+    /**
+     * @deprecated Use setBggCollectionStatus()
+     * @return array{success: bool, message?: string}
+     */
+    private function markBggItemAsOwned(array $headers, int $bggId, string $body, ?int $collId = null): array
+    {
+        return $this->setBggCollectionStatus(
+            $headers,
+            $bggId,
+            $collId ?? $this->extractCollId($body),
+            true,
+            false,
+        );
+    }
+
+    private function extractCollId(string $body): ?int
+    {
+        if (preg_match('/\bcollid["\'\s:=]+(\d+)/i', $body, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('/\bcollectionid["\'\s:=]+(\d+)/i', $body, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('/editownership_(\d+)/', $body, $m)) {
+            return (int) $m[1];
+        }
+
+        $json = json_decode($body, true);
+        if (is_array($json)) {
+            foreach (['collid', 'collectionid', 'id'] as $key) {
+                if (isset($json[$key]) && is_numeric($json[$key])) {
+                    return (int) $json[$key];
+                }
+            }
+            if (isset($json['item']) && is_array($json['item'])) {
+                foreach (['collid', 'collectionid', 'id'] as $key) {
+                    if (isset($json['item'][$key]) && is_numeric($json['item'][$key])) {
+                        return (int) $json['item'][$key];
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function isBggAuthFailure(\Illuminate\Http\Client\Response $response): bool
+    {
+        $status = $response->status();
+        if (in_array($status, [401, 403], true)) {
+            return true;
+        }
+
+        $body = strtolower($response->body());
+        if (str_contains($body, 'not logged') || str_contains($body, 'login required')) {
+            return true;
+        }
+
+        // Cloudflare interstitial without session often looks like a challenge page.
+        if ($status === 403 && str_contains($body, 'just a moment')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function extractSessionCookie(\Illuminate\Http\Client\Response $response): ?string
+    {
+        $parts = [];
+
+        foreach ($response->cookies() as $cookie) {
+            $name = $cookie->getName();
+            $value = $cookie->getValue();
+            if ($name === '' || $value === '') {
+                continue;
+            }
+            $parts[] = $name.'='.$value;
+        }
+
+        if ($parts === []) {
+            $rawHeaders = $response->headers()['Set-Cookie'] ?? [];
+            foreach ((array) $rawHeaders as $header) {
+                if (!is_string($header) || $header === '') {
+                    continue;
+                }
+                $pair = explode(';', $header, 2)[0] ?? '';
+                if (str_contains($pair, '=')) {
+                    $parts[] = trim($pair);
+                }
+            }
+        }
+
+        if ($parts === []) {
+            return null;
+        }
+
+        $joined = implode('; ', array_unique($parts));
+        $hasUsername = str_contains($joined, 'bggusername=');
+        $hasSession = str_contains($joined, 'SessionID=') || str_contains($joined, 'bggpassword=');
+
+        return ($hasUsername || $hasSession) ? $joined : null;
     }
 
     private function findBaseGamesBggIds(array $expansionBggIds, ?string $apiKey): array

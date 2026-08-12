@@ -99,12 +99,35 @@ class AuthService {
       }
       if (user['bgg_username'] != null) {
         await prefs.setString('bgg_username', user['bgg_username']);
+      } else {
+        await prefs.remove('bgg_username');
       }
       if (user['no_enfundo'] != null) {
         await prefs.setBool('no_enfundo', user['no_enfundo'] == true);
       }
     }
     return user;
+  }
+
+  Future<Map<String, dynamic>> connectBgg({
+    required String username,
+    required String password,
+  }) async {
+    final response = await _api.post('/bgg/connect', data: {
+      'username': username,
+      'password': password,
+    });
+    final user = response.data['user'] as Map<String, dynamic>;
+    final prefs = await SharedPreferences.getInstance();
+    if (user['bgg_username'] != null) {
+      await prefs.setString('bgg_username', user['bgg_username']);
+    }
+    return user;
+  }
+
+  Future<Map<String, dynamic>> disconnectBgg() async {
+    final response = await _api.post('/bgg/disconnect');
+    return response.data['user'] as Map<String, dynamic>;
   }
 
   Future<bool> isLoggedIn() async {

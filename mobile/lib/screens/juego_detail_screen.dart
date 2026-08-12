@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../data/sync_service.dart';
 import '../models/juego.dart';
+import '../providers/bgg_collection_provider.dart';
 import '../providers/juegos_provider.dart';
 import '../widgets/game_image.dart';
 
@@ -416,6 +417,11 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
 
   List<Widget> _buildHeaderBadges(Juego juego) {
     final badges = <Widget>[];
+    final inBgg =
+        context.watch<BggCollectionProvider>().isInBggCollection(juego.bggId);
+    if (inBgg) {
+      badges.add(_detailBadge('✓ En BGG', Colors.green[50], Colors.green[700]));
+    }
     if (juego.esExpansion) {
       badges.add(_detailBadge('Expansi\u00f3n', Colors.blue[50], Colors.blue[700]));
     }
