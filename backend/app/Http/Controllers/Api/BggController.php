@@ -36,13 +36,25 @@ class BggController extends Controller
 
         try {
             $cookieJar = new \GuzzleHttp\Cookie\CookieJar();
+            $browserHeaders = [
+                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept' => 'application/json, text/plain, */*',
+                'Accept-Language' => 'en-US,en;q=0.9,es;q=0.8',
+                'Origin' => 'https://boardgamegeek.com',
+                'Referer' => 'https://boardgamegeek.com/login',
+            ];
+
+            // Visita previa para obtener cookies base (Cloudflare/sesión).
+            Http::withOptions(['cookies' => $cookieJar])
+                ->withHeaders(array_merge($browserHeaders, [
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                ]))
+                ->get('https://boardgamegeek.com/');
 
             $response = Http::withOptions(['cookies' => $cookieJar])
-                ->withHeaders([
+                ->withHeaders(array_merge($browserHeaders, [
                     'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => self::IMAGE_USER_AGENT,
-                ])->post(self::BGG_LOGIN_URL, [
+                ]))->post(self::BGG_LOGIN_URL, [
                     'credentials' => [
                         'username' => $username,
                         'password' => $password,
@@ -149,14 +161,22 @@ class BggController extends Controller
             ], 422);
         }
 
-        $owned = $this->fetchOwnedBggIds($user->bgg_username);
+        $owned = $this->fetchCollectionBggIds($user->bgg_username, ['own' => 1]);
         if ($owned['error'] !== null) {
             return response()->json([
                 'message' => $owned['error'],
             ], $owned['status'] ?? 502);
         }
 
+        $prevOwned = $this->fetchCollectionBggIds($user->bgg_username, ['prevowned' => 1]);
+        if ($prevOwned['error'] !== null) {
+            return response()->json([
+                'message' => $prevOwned['error'],
+            ], $prevOwned['status'] ?? 502);
+        }
+
         $ownedSet = array_fill_keys($owned['ids'], true);
+        $prevOwnedSet = array_fill_keys($prevOwned['ids'], true);
         $juegos = Juego::query()
             ->whereHas('propietarios', function ($q) use ($propietario) {
                 $q->where('propietarios.id', $propietario->id);
@@ -182,6 +202,11 @@ class BggController extends Controller
 
             if (($juego->estado ?? '') === 'vendido') {
                 $payload['action'] = 'prevowned';
+                // Ya está Previously Owned en BGG: no reescribir.
+                if ($juego->bgg_id && isset($prevOwnedSet[(int) $juego->bgg_id])) {
+                    $already[] = $payload;
+                    continue;
+                }
                 if (!$juego->bgg_id) {
                     $byNameCount++;
                 }
@@ -300,6 +325,20 @@ class BggController extends Controller
         }
 
         if ($markPrevOwned) {
+            if ($this->isBggIdPrevOwnedByUser((string) $user->bgg_username, $bggId)) {
+                return response()->json([
+                    'success' => true,
+                    'skipped' => true,
+                    'juego_id' => $juego->id,
+                    'nombre' => $juego->nombre,
+                    'bgg_id' => $bggId,
+                    'bgg_id_saved' => $resolvedByName,
+                    'matched_name' => $matchedName,
+                    'action' => 'prevowned',
+                    'message' => 'Ya estaba como Previously Owned en BGG',
+                ]);
+            }
+
             $result = $this->markGameAsPreviouslyOwnedOnBgg($user, $bggId);
             if (!$result['success']) {
                 // Nunca invalidar bgg_session aquí: un 403/WAF/rate-limit
@@ -314,6 +353,7 @@ class BggController extends Controller
                     'action' => 'prevowned',
                     'message' => $result['message'] ?? 'No se pudo marcar como Previously Owned',
                     'session_expired' => false,
+                    'rate_limited' => (bool) ($result['rate_limited'] ?? false),
                 ], 502);
             }
 
@@ -359,6 +399,7 @@ class BggController extends Controller
                 'action' => 'own',
                 'message' => $result['message'] ?? 'No se pudo añadir a BGG',
                 'session_expired' => false,
+                'rate_limited' => (bool) ($result['rate_limited'] ?? false),
             ], 502);
         }
 
@@ -1011,16 +1052,28 @@ class BggController extends Controller
 
     private function isBggIdOwnedByUser(string $username, int $bggId): bool
     {
+        return $this->collectionContainsBggId($username, $bggId, ['own' => 1]);
+    }
+
+    private function isBggIdPrevOwnedByUser(string $username, int $bggId): bool
+    {
+        return $this->collectionContainsBggId($username, $bggId, ['prevowned' => 1]);
+    }
+
+    /**
+     * @param  array<string, int|string>  $statusFilters
+     */
+    private function collectionContainsBggId(string $username, int $bggId, array $statusFilters): bool
+    {
         $apiKey = config('services.bgg.api_key');
         if (empty($apiKey) || $bggId <= 0) {
             return false;
         }
 
-        $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', [
+        $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', array_merge([
             'username' => $username,
             'id' => $bggId,
-            'own' => 1,
-        ], $apiKey);
+        ], $statusFilters), $apiKey);
 
         if (!$response || $response->failed()) {
             return false;
@@ -1045,6 +1098,15 @@ class BggController extends Controller
      */
     private function fetchOwnedBggIds(string $username): array
     {
+        return $this->fetchCollectionBggIds($username, ['own' => 1]);
+    }
+
+    /**
+     * @param  array<string, int|string>  $statusFilters  p.ej. ['own' => 1] o ['prevowned' => 1]
+     * @return array{ids: list<int>, error: ?string, status?: int}
+     */
+    private function fetchCollectionBggIds(string $username, array $statusFilters): array
+    {
         $apiKey = config('services.bgg.api_key');
         if (empty($apiKey)) {
             return ['ids' => [], 'error' => 'BGG_API_KEY no configurada.', 'status' => 500];
@@ -1057,9 +1119,8 @@ class BggController extends Controller
         ] as $filters) {
             $params = array_merge([
                 'username' => $username,
-                'own' => 1,
                 'stats' => 0,
-            ], $filters);
+            ], $statusFilters, $filters);
 
             $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', $params, $apiKey);
             if (!$response) {
@@ -1156,7 +1217,7 @@ class BggController extends Controller
                         $status = 403;
                     }
                     $message = in_array($status, [403, 429], true)
-                        ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Reintenta más tarde.'
+                        ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Espera 1-2 minutos y reintenta solo los fallidos.'
                         : 'BGG rechazó Previously Owned (HTTP '.$status.').';
 
                     Log::warning('BGG prevowned additem failed', [
@@ -1168,6 +1229,7 @@ class BggController extends Controller
                     return [
                         'success' => false,
                         'message' => $message,
+                        'rate_limited' => in_array($status, [403, 429], true),
                     ];
                 }
             } elseif ($addResponse) {
@@ -1297,7 +1359,7 @@ class BggController extends Controller
         }
 
         $message = in_array($status, [403, 429], true)
-            ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Reintenta más tarde o con menos juegos seguidos.'
+            ? 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Espera 1-2 minutos y reintenta solo los fallidos.'
             : ($status > 0
                 ? 'BGG rechazó la alta del juego (HTTP '.$status.').'
                 : 'No se pudo contactar con BoardGameGeek para exportar.');
@@ -1311,6 +1373,7 @@ class BggController extends Controller
         return [
             'success' => false,
             'message' => $message,
+            'rate_limited' => in_array($status, [403, 429], true),
         ];
     }
 
@@ -1422,18 +1485,25 @@ class BggController extends Controller
     private function postBggCollectionItem(array $headers, int $bggId, array $status): ?\Illuminate\Http\Client\Response
     {
         $last = null;
+        $apiKey = config('services.bgg.api_key');
+        $requestHeaders = array_merge($headers, [
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ]);
+        // En /api/* el Bearer ayuda; en geekcollection.php no.
+        if (!empty($apiKey)) {
+            $requestHeaders['Authorization'] = 'Bearer '.$apiKey;
+        }
 
-        for ($attempt = 0; $attempt < 3; $attempt++) {
+        // Pocas pasadas: martillear con 403 empeora el bloqueo de Cloudflare.
+        for ($attempt = 0; $attempt < 2; $attempt++) {
             if ($attempt > 0) {
-                sleep($attempt * 2);
+                sleep(12);
             }
 
             try {
                 $last = Http::timeout(30)
-                    ->withHeaders(array_merge($headers, [
-                        'Content-Type' => 'application/json',
-                        'Accept' => 'application/json',
-                    ]))
+                    ->withHeaders($requestHeaders)
                     ->post('https://boardgamegeek.com/api/collectionitems', [
                         'objecttype' => 'thing',
                         'objectid' => $bggId,
@@ -1480,23 +1550,16 @@ class BggController extends Controller
             'instanceid' => 0,
         ];
 
-        for ($attempt = 0; $attempt < 4; $attempt++) {
+        for ($attempt = 0; $attempt < 2; $attempt++) {
             if ($attempt > 0) {
-                sleep($attempt * 2);
+                sleep(15);
             }
 
             try {
-                if ($attempt % 2 === 0) {
-                    $last = Http::timeout(30)
-                        ->asForm()
-                        ->withHeaders($headers)
-                        ->post('https://boardgamegeek.com/geekcollection.php', $payload);
-                } else {
-                    // Alternativa GET: a veces el WAF deja pasar una y bloquea la otra.
-                    $last = Http::timeout(30)
-                        ->withHeaders($headers)
-                        ->get('https://boardgamegeek.com/geekcollection.php', $payload);
-                }
+                $last = Http::timeout(30)
+                    ->asForm()
+                    ->withHeaders($headers)
+                    ->post('https://boardgamegeek.com/geekcollection.php', $payload);
             } catch (\Throwable $e) {
                 Log::warning('BGG geekcollection additem request failed', [
                     'bgg_id' => $bggId,
@@ -1507,7 +1570,6 @@ class BggController extends Controller
             }
 
             if ($last->successful() || $last->status() === 200) {
-                // 200 con página de login/WAF no cuenta como alta real.
                 if (!$this->looksLikeBggBlockedOrLogin($last->body())) {
                     return $last;
                 }
