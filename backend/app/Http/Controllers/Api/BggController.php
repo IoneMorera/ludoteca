@@ -302,12 +302,8 @@ class BggController extends Controller
         if ($markPrevOwned) {
             $result = $this->markGameAsPreviouslyOwnedOnBgg($user, $bggId);
             if (!$result['success']) {
-                if (!empty($result['session_expired'])) {
-                    $user->bgg_session = null;
-                    $user->bgg_connected_at = null;
-                    $user->save();
-                }
-
+                // Nunca invalidar bgg_session aquí: un 403/WAF/rate-limit
+                // de BGG no implica sesión caducada y desconectaba al usuario.
                 return response()->json([
                     'success' => false,
                     'juego_id' => $juego->id,
@@ -317,8 +313,8 @@ class BggController extends Controller
                     'matched_name' => $matchedName,
                     'action' => 'prevowned',
                     'message' => $result['message'] ?? 'No se pudo marcar como Previously Owned',
-                    'session_expired' => (bool) ($result['session_expired'] ?? false),
-                ], !empty($result['session_expired']) ? 401 : 502);
+                    'session_expired' => false,
+                ], 502);
             }
 
             return response()->json([
@@ -351,12 +347,8 @@ class BggController extends Controller
         $result = $this->addGameToBggCollection($user, $bggId);
 
         if (!$result['success']) {
-            if (!empty($result['session_expired'])) {
-                $user->bgg_session = null;
-                $user->bgg_connected_at = null;
-                $user->save();
-            }
-
+            // Nunca invalidar bgg_session aquí: fallos ambiguos de BGG
+            // (WAF/rate-limit) no deben desconectar la cuenta.
             return response()->json([
                 'success' => false,
                 'juego_id' => $juego->id,
@@ -366,8 +358,8 @@ class BggController extends Controller
                 'matched_name' => $matchedName,
                 'action' => 'own',
                 'message' => $result['message'] ?? 'No se pudo añadir a BGG',
-                'session_expired' => (bool) ($result['session_expired'] ?? false),
-            ], !empty($result['session_expired']) ? 401 : 502);
+                'session_expired' => false,
+            ], 502);
         }
 
         return response()->json([
@@ -1133,17 +1125,15 @@ class BggController extends Controller
                     ],
                 ]);
 
-            if ($this->isBggAuthFailure($jsonResponse)) {
-                return [
-                    'success' => false,
-                    'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-                    'session_expired' => true,
-                ];
-            }
-
             if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
                 return ['success' => true];
             }
+
+            Log::info('BGG prevowned JSON soft-fail', [
+                'bgg_id' => $bggId,
+                'status' => $jsonResponse->status(),
+                'body' => substr($jsonResponse->body(), 0, 300),
+            ]);
 
             if (in_array($jsonResponse->status(), [409, 422], true)) {
                 $collId = $this->extractCollId($jsonResponse->body())
@@ -1175,11 +1165,16 @@ class BggController extends Controller
                         'instanceid' => 0,
                     ]);
 
-                if ($this->isBggAuthFailure($addResponse)) {
+                if ($addResponse->failed() && $addResponse->status() !== 200) {
+                    Log::warning('BGG prevowned additem failed', [
+                        'bgg_id' => $bggId,
+                        'status' => $addResponse->status(),
+                        'body' => substr($addResponse->body(), 0, 400),
+                    ]);
+
                     return [
                         'success' => false,
-                        'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-                        'session_expired' => true,
+                        'message' => 'BGG rechazó Previously Owned (HTTP '.$addResponse->status().').',
                     ];
                 }
 
@@ -1227,14 +1222,6 @@ class BggController extends Controller
                     ],
                 ]);
 
-            if ($this->isBggAuthFailure($jsonResponse)) {
-                return [
-                    'success' => false,
-                    'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-                    'session_expired' => true,
-                ];
-            }
-
             if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
                 return ['success' => true];
             }
@@ -1276,14 +1263,6 @@ class BggController extends Controller
                     'ajax' => 1,
                     'instanceid' => 0,
                 ]);
-
-            if ($this->isBggAuthFailure($addResponse)) {
-                return [
-                    'success' => false,
-                    'message' => 'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-                    'session_expired' => true,
-                ];
-            }
 
             if ($addResponse->failed() && $addResponse->status() !== 200) {
                 Log::warning('BGG geekcollection additem failed', [
@@ -1463,26 +1442,6 @@ class BggController extends Controller
         }
 
         return null;
-    }
-
-    private function isBggAuthFailure(\Illuminate\Http\Client\Response $response): bool
-    {
-        $status = $response->status();
-        if (in_array($status, [401, 403], true)) {
-            return true;
-        }
-
-        $body = strtolower($response->body());
-        if (str_contains($body, 'not logged') || str_contains($body, 'login required')) {
-            return true;
-        }
-
-        // Cloudflare interstitial without session often looks like a challenge page.
-        if ($status === 403 && str_contains($body, 'just a moment')) {
-            return true;
-        }
-
-        return false;
     }
 
     private function extractSessionCookie(\Illuminate\Http\Client\Response $response): ?string

@@ -243,22 +243,37 @@ class _BggScreenState extends State<BggScreen> {
       return;
     }
 
-    final accepted = await showDialog<bool>(
+    final result = await showDialog<_ExportPreviewResult>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => _ExportPreviewDialog(preview: preview!),
     );
 
-    if (accepted != true || !mounted) return;
+    if (result == null || !result.accepted || !mounted) return;
+
+    final ignored = result.ignoredIds;
+    int? asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return null;
+    }
 
     final toUpload = (preview['to_upload'] as List?)
             ?.cast<Map>()
             .map((e) => Map<String, dynamic>.from(e))
+            .where((e) {
+              final id = asInt(e['id']);
+              return id == null || !ignored.contains(id);
+            })
             .toList() ??
         [];
     final toPrevOwned = (preview['to_prev_owned'] as List?)
             ?.cast<Map>()
             .map((e) => Map<String, dynamic>.from(e))
+            .where((e) {
+              final id = asInt(e['id']);
+              return id == null || !ignored.contains(id);
+            })
             .toList() ??
         [];
     final queue = [...toUpload, ...toPrevOwned];
@@ -353,14 +368,8 @@ class _BggScreenState extends State<BggScreen> {
               _ExportLogLine(nombre: nombre, ok: false, message: msg),
             ],
           );
-          if (data['session_expired'] == true) {
-            progress.value = progress.value.copyWith(
-              aborted: true,
-              abortReason:
-                  'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-            );
-            break;
-          }
+          // No abortar ni refrescar auth: un fallo de un juego (WAF/rate-limit)
+          // no debe desconectar BGG ni parar el resto del export.
         }
       } catch (e) {
         fail++;
@@ -369,18 +378,6 @@ class _BggScreenState extends State<BggScreen> {
           final data = (e as dynamic).response?.data;
           if (data is Map && data['message'] is String) {
             msg = data['message'] as String;
-            if (data['session_expired'] == true) {
-              progress.value = progress.value.copyWith(
-                aborted: true,
-                abortReason:
-                    'La sesión de BGG ha caducado. Vuelve a conectar en el perfil.',
-                log: [
-                  ...progress.value.log,
-                  _ExportLogLine(nombre: nombre, ok: false, message: msg),
-                ],
-              );
-              break;
-            }
           }
         } catch (_) {}
         progress.value = progress.value.copyWith(
@@ -391,9 +388,9 @@ class _BggScreenState extends State<BggScreen> {
         );
       }
 
-      // Ritmo suave para no saturar BGG.
+      // Ritmo más lento para reducir bloqueos WAF/rate-limit de BGG.
       if (i < toUpload.length - 1) {
-        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
       }
     }
 
@@ -591,42 +588,71 @@ class _BggScreenState extends State<BggScreen> {
   }
 }
 
-class _ExportPreviewDialog extends StatelessWidget {
+class _ExportPreviewResult {
+  const _ExportPreviewResult({
+    required this.accepted,
+    required this.ignoredIds,
+  });
+
+  final bool accepted;
+  final Set<int> ignoredIds;
+}
+
+class _ExportPreviewDialog extends StatefulWidget {
   const _ExportPreviewDialog({required this.preview});
 
   final Map<String, dynamic> preview;
 
+  @override
+  State<_ExportPreviewDialog> createState() => _ExportPreviewDialogState();
+}
+
+class _ExportPreviewDialogState extends State<_ExportPreviewDialog> {
+  final Set<int> _ignoredIds = {};
+
   List<Map<String, dynamic>> _maps(String key) {
-    return (preview[key] as List?)
+    return (widget.preview[key] as List?)
             ?.cast<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList() ??
         [];
   }
 
+  int? _itemId(Map<String, dynamic> item) {
+    final id = item['id'];
+    if (id is int) return id;
+    if (id is num) return id.toInt();
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final preview = widget.preview;
     final counts = Map<String, dynamic>.from(preview['counts'] as Map? ?? {});
-    final toUpload = _maps('to_upload');
-    final toPrevOwned = _maps('to_prev_owned');
+    final toUploadAll = _maps('to_upload');
+    final toPrevOwnedAll = _maps('to_prev_owned');
     final omitted = _maps('omitted');
 
-    final uploadCount =
-        (counts['to_upload'] as num?)?.toInt() ?? toUpload.length;
-    final prevOwnedCount =
-        (counts['to_prev_owned'] as num?)?.toInt() ?? toPrevOwned.length;
+    final toUpload =
+        toUploadAll.where((e) => !_ignoredIds.contains(_itemId(e))).toList();
+    final toPrevOwned =
+        toPrevOwnedAll.where((e) => !_ignoredIds.contains(_itemId(e))).toList();
+
+    final uploadCount = toUpload.length;
+    final prevOwnedCount = toPrevOwned.length;
     final already = (counts['already_in_bgg'] as num?)?.toInt() ?? 0;
     final uploadByName =
         toUpload.where((e) => e['match_by_name'] == true).length;
     final prevByName =
         toPrevOwned.where((e) => e['match_by_name'] == true).length;
     final totalChanges = uploadCount + prevOwnedCount;
+    final ignoredCount = _ignoredIds.length;
     final propietario = preview['propietario'] is Map
         ? Map<String, dynamic>.from(preview['propietario'] as Map)
         : null;
     final propietarioNombre = propietario?['nombre']?.toString();
-    final bggUsername =
-        preview['username']?.toString() ?? propietario?['bgg_username']?.toString();
+    final bggUsername = preview['username']?.toString() ??
+        propietario?['bgg_username']?.toString();
     final coleccionLocal = (counts['coleccion_local'] as num?)?.toInt();
 
     return AlertDialog(
@@ -652,6 +678,13 @@ class _ExportPreviewDialog extends StatelessWidget {
                 'Cambios previstos: $totalChanges',
                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
+              if (ignoredCount > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '$ignoredCount ignorados (no se exportarán)',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                ),
+              ],
               const SizedBox(height: 12),
               _PreviewStatRow(
                 icon: Icons.upload,
@@ -687,36 +720,27 @@ class _ExportPreviewDialog extends StatelessWidget {
                   title: 'Omitidos',
                   value: omitted.length,
                 ),
-                const SizedBox(height: 8),
-                ...omitted.take(20).map((item) {
-                  final nombre = item['nombre']?.toString() ?? 'Juego';
-                  final reason =
-                      item['reason']?.toString() ?? 'Motivo desconocido';
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4, left: 4),
-                    child: Text(
-                      '• $nombre — $reason',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  );
-                }),
-                if (omitted.length > 20)
-                  Text(
-                    '... y ${omitted.length - 20} más',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
               ],
-              if (totalChanges > 0) ...[
+              if (toUploadAll.isNotEmpty || toPrevOwnedAll.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: () {
-                    showDialog<void>(
+                  onPressed: () async {
+                    await showDialog<void>(
                       context: context,
                       builder: (ctx) => _ExportChangesListDialog(
-                        toUpload: toUpload,
-                        toPrevOwned: toPrevOwned,
+                        toUpload: toUploadAll,
+                        toPrevOwned: toPrevOwnedAll,
+                        ignoredIds: _ignoredIds,
+                        onIgnoredChanged: (ids) {
+                          setState(() {
+                            _ignoredIds
+                              ..clear()
+                              ..addAll(ids);
+                          });
+                        },
                       ),
                     );
+                    if (mounted) setState(() {});
                   },
                   icon: const Icon(Icons.list_alt),
                   label: const Text('Ver listado completo de cambios'),
@@ -728,12 +752,18 @@ class _ExportPreviewDialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed:
-              totalChanges == 0 ? null : () => Navigator.of(context).pop(true),
+          onPressed: totalChanges == 0
+              ? null
+              : () => Navigator.of(context).pop(
+                    _ExportPreviewResult(
+                      accepted: true,
+                      ignoredIds: Set<int>.from(_ignoredIds),
+                    ),
+                  ),
           child: const Text('Aceptar'),
         ),
       ],
@@ -787,17 +817,59 @@ class _PreviewStatRow extends StatelessWidget {
   }
 }
 
-class _ExportChangesListDialog extends StatelessWidget {
+class _ExportChangesListDialog extends StatefulWidget {
   const _ExportChangesListDialog({
     required this.toUpload,
     required this.toPrevOwned,
+    required this.ignoredIds,
+    required this.onIgnoredChanged,
   });
 
   final List<Map<String, dynamic>> toUpload;
   final List<Map<String, dynamic>> toPrevOwned;
+  final Set<int> ignoredIds;
+  final ValueChanged<Set<int>> onIgnoredChanged;
+
+  @override
+  State<_ExportChangesListDialog> createState() =>
+      _ExportChangesListDialogState();
+}
+
+class _ExportChangesListDialogState extends State<_ExportChangesListDialog> {
+  late Set<int> _ignored;
+
+  @override
+  void initState() {
+    super.initState();
+    _ignored = Set<int>.from(widget.ignoredIds);
+  }
+
+  void _toggle(int? id) {
+    if (id == null) return;
+    setState(() {
+      if (_ignored.contains(id)) {
+        _ignored.remove(id);
+      } else {
+        _ignored.add(id);
+      }
+    });
+    widget.onIgnoredChanged(Set<int>.from(_ignored));
+  }
+
+  int? _itemId(Map<String, dynamic> item) {
+    final id = item['id'];
+    if (id is int) return id;
+    if (id is num) return id.toInt();
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final activeUpload =
+        widget.toUpload.where((e) => !_ignored.contains(_itemId(e))).length;
+    final activePrev =
+        widget.toPrevOwned.where((e) => !_ignored.contains(_itemId(e))).length;
+
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
       child: SizedBox(
@@ -827,18 +899,33 @@ class _ExportChangesListDialog extends StatelessWidget {
                   ],
                 ),
               ),
+              if (_ignored.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${_ignored.length} ignorados',
+                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                    ),
+                  ),
+                ),
               TabBar(
                 tabs: [
-                  Tab(text: 'Altas (${toUpload.length})'),
-                  Tab(text: 'Vendidos (${toPrevOwned.length})'),
+                  Tab(text: 'Altas ($activeUpload/${widget.toUpload.length})'),
+                  Tab(
+                      text:
+                          'Vendidos ($activePrev/${widget.toPrevOwned.length})'),
                 ],
               ),
               Expanded(
                 child: TabBarView(
                   children: [
                     _ChangesList(
-                      items: toUpload,
+                      items: widget.toUpload,
                       emptyLabel: 'No hay altas nuevas',
+                      ignoredIds: _ignored,
+                      onToggleIgnore: _toggle,
                       subtitleFor: (item) {
                         final byName = item['match_by_name'] == true;
                         final bggId = item['bgg_id'];
@@ -849,8 +936,10 @@ class _ExportChangesListDialog extends StatelessWidget {
                       },
                     ),
                     _ChangesList(
-                      items: toPrevOwned,
+                      items: widget.toPrevOwned,
                       emptyLabel: 'No hay cambios de vendidos',
+                      ignoredIds: _ignored,
+                      onToggleIgnore: _toggle,
                       subtitleFor: (item) {
                         final byName = item['match_by_name'] == true;
                         final bggId = item['bgg_id'];
@@ -886,11 +975,22 @@ class _ChangesList extends StatelessWidget {
     required this.items,
     required this.emptyLabel,
     required this.subtitleFor,
+    required this.ignoredIds,
+    required this.onToggleIgnore,
   });
 
   final List<Map<String, dynamic>> items;
   final String emptyLabel;
   final String Function(Map<String, dynamic> item) subtitleFor;
+  final Set<int> ignoredIds;
+  final ValueChanged<int?> onToggleIgnore;
+
+  int? _itemId(Map<String, dynamic> item) {
+    final id = item['id'];
+    if (id is int) return id;
+    if (id is num) return id.toInt();
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -913,13 +1013,29 @@ class _ChangesList extends StatelessWidget {
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final item = sorted[index];
+        final id = _itemId(item);
+        final ignored = id != null && ignoredIds.contains(id);
         final nombre = item['nombre']?.toString() ?? 'Juego';
         return ListTile(
           dense: true,
-          title: Text(nombre, style: const TextStyle(fontSize: 14)),
+          title: Text(
+            nombre,
+            style: TextStyle(
+              fontSize: 14,
+              decoration: ignored ? TextDecoration.lineThrough : null,
+              color: ignored ? Colors.grey : null,
+            ),
+          ),
           subtitle: Text(
-            subtitleFor(item),
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ignored ? 'Ignorado — no se exportará' : subtitleFor(item),
+            style: TextStyle(
+              fontSize: 12,
+              color: ignored ? Colors.orange[800] : Colors.grey[600],
+            ),
+          ),
+          trailing: TextButton(
+            onPressed: () => onToggleIgnore(id),
+            child: Text(ignored ? 'Incluir' : 'Ignorar'),
           ),
         );
       },
