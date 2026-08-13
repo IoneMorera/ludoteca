@@ -226,6 +226,18 @@ class BggController extends Controller
 
         $ownedSet = array_fill_keys($collection['owned'], true);
         $prevOwnedSet = array_fill_keys($collection['prevowned'], true);
+        foreach ($request->input('known_owned_ids', []) as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $ownedSet[$id] = true;
+            }
+        }
+        foreach ($request->input('known_prevowned_ids', []) as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $prevOwnedSet[$id] = true;
+            }
+        }
         $juegos = Juego::query()
             ->whereHas('propietarios', function ($q) use ($propietario) {
                 $q->where('propietarios.id', $propietario->id);

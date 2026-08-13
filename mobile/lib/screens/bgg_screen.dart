@@ -223,8 +223,15 @@ class _BggScreenState extends State<BggScreen> {
     Map<String, dynamic>? preview;
     String? error;
     try {
-      final response = await _api.post('/bgg/export/preview');
-      preview = Map<String, dynamic>.from(response.data as Map);
+      final bgg = context.read<BggCollectionProvider>();
+      final response = await _api.post('/bgg/export/preview', data: {
+        'known_owned_ids': bgg.ownedIds.toList(),
+        'known_prevowned_ids': bgg.prevOwnedIds.toList(),
+      });
+      preview = _reconcilePreviewWithLocalBgg(
+        Map<String, dynamic>.from(response.data as Map),
+        bgg,
+      );
     } catch (e) {
       error = 'No se pudo preparar la exportación';
       try {
@@ -287,6 +294,76 @@ class _BggScreenState extends State<BggScreen> {
     }
 
     await _runExport(queue);
+  }
+
+  /// La XML API de BGG no refleja altas inmediatas; el preview del servidor
+  /// puede devolver otra vez juegos que acabamos de exportar.
+  Map<String, dynamic> _reconcilePreviewWithLocalBgg(
+    Map<String, dynamic> preview,
+    BggCollectionProvider bgg,
+  ) {
+    int? asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '');
+    }
+
+    List<Map<String, dynamic>> asMaps(dynamic raw) {
+      if (raw is! List) return [];
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+
+    final owned = bgg.ownedIds;
+    final prev = bgg.prevOwnedIds;
+    final toUpload = asMaps(preview['to_upload']);
+    final toPrev = asMaps(preview['to_prev_owned']);
+    final already = asMaps(preview['already_in_bgg']);
+
+    final stillUpload = <Map<String, dynamic>>[];
+    for (final item in toUpload) {
+      final id = asInt(item['bgg_id']);
+      if (id != null && id > 0 && owned.contains(id)) {
+        already.add(item);
+      } else {
+        stillUpload.add(item);
+      }
+    }
+
+    final stillPrev = <Map<String, dynamic>>[];
+    for (final item in toPrev) {
+      final id = asInt(item['bgg_id']);
+      if (id != null && id > 0 && prev.contains(id)) {
+        already.add(item);
+      } else {
+        stillPrev.add(item);
+      }
+    }
+
+    var byName = 0;
+    for (final item in [...stillUpload, ...stillPrev]) {
+      if (item['match_by_name'] == true || asInt(item['bgg_id']) == null) {
+        byName++;
+      }
+    }
+
+    final counts = preview['counts'] is Map
+        ? Map<String, dynamic>.from(preview['counts'] as Map)
+        : <String, dynamic>{};
+    preview['to_upload'] = stillUpload;
+    preview['to_prev_owned'] = stillPrev;
+    preview['already_in_bgg'] = already;
+    preview['counts'] = {
+      ...counts,
+      'to_upload': stillUpload.length,
+      'to_prev_owned': stillPrev.length,
+      'already_in_bgg': already.length,
+      'match_by_name': byName,
+      'total_changes': stillUpload.length + stillPrev.length,
+    };
+    return preview;
   }
 
   Future<void> _runExport(List<Map<String, dynamic>> toUpload) async {
@@ -467,8 +544,10 @@ class _BggScreenState extends State<BggScreen> {
       if (returnedBggId != null) {
         if (result.data['action']?.toString() == 'prevowned' || isPrevOwned) {
           prevOwnedIds.add(returnedBggId);
+          bggProvider.unmarkOwnedMany([returnedBggId]);
         } else {
           uploadedIds.add(returnedBggId);
+          bggProvider.markOwned(returnedBggId);
         }
       }
       if (bggIdSaved && returnedBggId != null && juegoId is int) {

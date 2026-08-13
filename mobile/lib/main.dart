@@ -31,7 +31,6 @@ import 'services/api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  EditableText.defaultStylusHandwritingEnabled = false;
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
