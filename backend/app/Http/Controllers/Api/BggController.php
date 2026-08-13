@@ -166,22 +166,15 @@ class BggController extends Controller
             ], 422);
         }
 
-        $owned = $this->fetchCollectionBggIds($user->bgg_username, ['own' => 1]);
-        if ($owned['error'] !== null) {
+        $collection = $this->fetchCollectionStatusSets($user);
+        if ($collection['error'] !== null) {
             return response()->json([
-                'message' => $owned['error'],
-            ], $owned['status'] ?? 502);
+                'message' => $collection['error'],
+            ], $collection['status'] ?? 502);
         }
 
-        $prevOwned = $this->fetchCollectionBggIds($user->bgg_username, ['prevowned' => 1]);
-        if ($prevOwned['error'] !== null) {
-            return response()->json([
-                'message' => $prevOwned['error'],
-            ], $prevOwned['status'] ?? 502);
-        }
-
-        $ownedSet = array_fill_keys($owned['ids'], true);
-        $prevOwnedSet = array_fill_keys($prevOwned['ids'], true);
+        $ownedSet = array_fill_keys($collection['owned'], true);
+        $prevOwnedSet = array_fill_keys($collection['prevowned'], true);
         $juegos = Juego::query()
             ->whereHas('propietarios', function ($q) use ($propietario) {
                 $q->where('propietarios.id', $propietario->id);
@@ -1096,6 +1089,98 @@ class BggController extends Controller
     }
 
     /**
+     * Una pasada de colección (bases + expansiones) y clasifica own / prevowned.
+     * Evita 4 llamadas seguidas al XML API, que BGG responde con 403/429.
+     *
+     * @return array{owned: list<int>, prevowned: list<int>, error: ?string, status?: int}
+     */
+    private function fetchCollectionStatusSets(User $user): array
+    {
+        $username = trim((string) $user->bgg_username);
+        $apiKey = config('services.bgg.api_key');
+        if ($username === '') {
+            return ['owned' => [], 'prevowned' => [], 'error' => 'No hay usuario BGG conectado.', 'status' => 422];
+        }
+        if (empty($apiKey)) {
+            return ['owned' => [], 'prevowned' => [], 'error' => 'BGG_API_KEY no configurada.', 'status' => 500];
+        }
+
+        $owned = [];
+        $prevOwned = [];
+        $cookie = $this->authCookieHeader((string) ($user->bgg_session ?? ''));
+
+        foreach ([
+            ['subtype' => 'boardgame', 'excludesubtype' => 'boardgameexpansion'],
+            ['subtype' => 'boardgameexpansion'],
+        ] as $filters) {
+            $params = array_merge([
+                'username' => $username,
+                'stats' => 0,
+            ], $filters);
+
+            $response = $this->fetchWithRetry(
+                self::BGG_API_URL.'/collection',
+                $params,
+                $apiKey,
+                $cookie !== '' ? $cookie : null,
+            );
+
+            if (!$response) {
+                return [
+                    'owned' => [],
+                    'prevowned' => [],
+                    'error' => 'BGG está procesando la colección, inténtalo de nuevo en unos segundos.',
+                    'status' => 202,
+                ];
+            }
+
+            if ($response->failed()) {
+                Log::warning('BGG collection status fetch failed', [
+                    'username' => $username,
+                    'status' => $response->status(),
+                    'filters' => $filters,
+                    'body' => substr($response->body(), 0, 300),
+                ]);
+
+                return [
+                    'owned' => [],
+                    'prevowned' => [],
+                    'error' => 'Error al obtener la colección de BGG (HTTP '.$response->status().'). Espera un minuto y vuelve a intentarlo.',
+                    'status' => $response->status() >= 400 ? $response->status() : 502,
+                ];
+            }
+
+            $data = @simplexml_load_string($response->body());
+            if ($data === false || !isset($data->item)) {
+                continue;
+            }
+
+            foreach ($data->item as $item) {
+                $bggId = (int) $item['objectid'];
+                if ($bggId <= 0) {
+                    continue;
+                }
+                $status = $item->status ?? null;
+                if ($status === null) {
+                    continue;
+                }
+                if ((string) ($status['own'] ?? '0') === '1') {
+                    $owned[$bggId] = $bggId;
+                }
+                if ((string) ($status['prevowned'] ?? '0') === '1') {
+                    $prevOwned[$bggId] = $bggId;
+                }
+            }
+        }
+
+        return [
+            'owned' => array_values($owned),
+            'prevowned' => array_values($prevOwned),
+            'error' => null,
+        ];
+    }
+
+    /**
      * @return array{ids: list<int>, error: ?string, status?: int}
      */
     private function fetchOwnedBggIds(string $username): array
@@ -1122,6 +1207,7 @@ class BggController extends Controller
             $params = array_merge([
                 'username' => $username,
                 'stats' => 0,
+                'brief' => 1,
             ], $statusFilters, $filters);
 
             $response = $this->fetchWithRetry(self::BGG_API_URL.'/collection', $params, $apiKey);
@@ -1133,9 +1219,16 @@ class BggController extends Controller
                 ];
             }
             if ($response->failed()) {
+                Log::warning('BGG collection fetch failed', [
+                    'username' => $username,
+                    'status' => $response->status(),
+                    'filters' => $filters,
+                    'body' => substr($response->body(), 0, 300),
+                ]);
+
                 return [
                     'ids' => [],
-                    'error' => 'Error al obtener la colección de BGG.',
+                    'error' => 'Error al obtener la colección de BGG (HTTP '.$response->status().').',
                     'status' => $response->status() >= 400 ? $response->status() : 502,
                 ];
             }
@@ -2108,25 +2201,34 @@ class BggController extends Controller
         return response()->json($this->parsePlaysXml($response->body(), $username));
     }
 
-    private function fetchWithRetry(string $url, array $params, string $apiKey)
+    private function fetchWithRetry(string $url, array $params, string $apiKey, ?string $cookie = null)
     {
         $response = null;
 
         for ($attempt = 0; $attempt < self::MAX_RETRIES; $attempt++) {
-            $response = Http::timeout(30)->withHeaders([
+            $headers = [
                 'Accept' => 'application/xml',
-                'Authorization' => 'Bearer ' . $apiKey,
+                'Authorization' => 'Bearer '.$apiKey,
                 'User-Agent' => self::IMAGE_USER_AGENT,
-            ])->get($url, $params);
-
-            if ($response->status() !== 202) {
-                return $response;
+            ];
+            if (is_string($cookie) && $cookie !== '') {
+                $headers['Cookie'] = $cookie;
             }
 
-            sleep(self::RETRY_DELAY_SECONDS);
+            $response = Http::timeout(45)->withHeaders($headers)->get($url, $params);
+            $status = $response->status();
+
+            if ($status === 202 || $status === 429 || $status === 503) {
+                sleep($status === 429 ? 5 : self::RETRY_DELAY_SECONDS);
+                continue;
+            }
+
+            return $response;
         }
 
-        return null;
+        return $response && in_array($response->status(), [202, 429, 503], true)
+            ? null
+            : $response;
     }
 
     private function normalizeImageUrl(?string $url): ?string
