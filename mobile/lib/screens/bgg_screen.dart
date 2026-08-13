@@ -224,9 +224,13 @@ class _BggScreenState extends State<BggScreen> {
     String? error;
     try {
       final bgg = context.read<BggCollectionProvider>();
+      await bgg.syncForExport(auth.bggUsername);
+      if (!mounted) return;
       final response = await _api.post('/bgg/export/preview', data: {
         'known_owned_ids': bgg.ownedIds.toList(),
         'known_prevowned_ids': bgg.prevOwnedIds.toList(),
+        'known_owned_names': bgg.ownedNames.toList(),
+        'known_prevowned_names': bgg.prevOwnedNames.toList(),
       });
       preview = _reconcilePreviewWithLocalBgg(
         Map<String, dynamic>.from(response.data as Map),
@@ -318,14 +322,29 @@ class _BggScreenState extends State<BggScreen> {
 
     final owned = bgg.ownedIds;
     final prev = bgg.prevOwnedIds;
+    final ownedNames = bgg.ownedNames;
+    final prevNames = bgg.prevOwnedNames;
     final toUpload = asMaps(preview['to_upload']);
     final toPrev = asMaps(preview['to_prev_owned']);
     final already = asMaps(preview['already_in_bgg']);
 
+    bool isOwned(Map<String, dynamic> item) {
+      final id = asInt(item['bgg_id']);
+      if (id != null && id > 0 && owned.contains(id)) return true;
+      final name = BggCollectionProvider.normalizeGameName(item['nombre']?.toString());
+      return name.isNotEmpty && ownedNames.contains(name);
+    }
+
+    bool isPrevOwned(Map<String, dynamic> item) {
+      final id = asInt(item['bgg_id']);
+      if (id != null && id > 0 && prev.contains(id)) return true;
+      final name = BggCollectionProvider.normalizeGameName(item['nombre']?.toString());
+      return name.isNotEmpty && prevNames.contains(name);
+    }
+
     final stillUpload = <Map<String, dynamic>>[];
     for (final item in toUpload) {
-      final id = asInt(item['bgg_id']);
-      if (id != null && id > 0 && owned.contains(id)) {
+      if (isOwned(item)) {
         already.add(item);
       } else {
         stillUpload.add(item);
@@ -334,8 +353,7 @@ class _BggScreenState extends State<BggScreen> {
 
     final stillPrev = <Map<String, dynamic>>[];
     for (final item in toPrev) {
-      final id = asInt(item['bgg_id']);
-      if (id != null && id > 0 && prev.contains(id)) {
+      if (isPrevOwned(item)) {
         already.add(item);
       } else {
         stillPrev.add(item);
@@ -547,7 +565,10 @@ class _BggScreenState extends State<BggScreen> {
           bggProvider.unmarkOwnedMany([returnedBggId]);
         } else {
           uploadedIds.add(returnedBggId);
-          bggProvider.markOwned(returnedBggId);
+          bggProvider.markOwned(
+            returnedBggId,
+            nombre: item['nombre']?.toString(),
+          );
         }
       }
       if (bggIdSaved && returnedBggId != null && juegoId is int) {
