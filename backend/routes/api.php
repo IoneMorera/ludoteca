@@ -81,6 +81,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('bgg/connect', [BggController::class, 'connect']);
         Route::post('bgg/disconnect', [BggController::class, 'disconnect']);
         Route::get('bgg/owned-ids', [BggController::class, 'ownedIds']);
+        Route::get('bgg/write-context', [BggController::class, 'writeContext']);
         Route::post('bgg/export/preview', [BggController::class, 'exportPreview']);
         Route::post('bgg/export/item', [BggController::class, 'exportItem']);
         Route::post('bgg/import', [BggController::class, 'import']);
