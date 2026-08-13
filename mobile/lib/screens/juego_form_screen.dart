@@ -2295,12 +2295,19 @@ class _JuegoBasePickerState extends State<_JuegoBasePicker> {
   int? _selectedLocalId;
   String? _selectedNombre;
   List<Juego> _suggestions = [];
+  final _searchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _selectedLocalId = widget.initialLocalId;
     _loadName();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadName() async {
@@ -2342,6 +2349,7 @@ class _JuegoBasePickerState extends State<_JuegoBasePicker> {
             ),
           ),
         TextField(
+          controller: _searchCtrl,
           decoration: const InputDecoration(
             isDense: true,
             hintText: 'Buscar juego base...',

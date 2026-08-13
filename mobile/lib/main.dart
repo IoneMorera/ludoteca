@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -30,7 +31,8 @@ import 'services/api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  EditableText.defaultStylusHandwritingEnabled = false;
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
   runApp(const LudotecaApp());
@@ -71,6 +73,15 @@ class LudotecaApp extends StatelessWidget {
           useMaterial3: true,
           brightness: Brightness.dark,
         ),
+        builder: (context, child) {
+          final media = MediaQuery.of(context);
+          return MediaQuery(
+            data: media.copyWith(
+              gestureSettings: const DeviceGestureSettings(touchSlop: 36),
+            ),
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
         home: const AuthGate(),
         onGenerateRoute: (settings) {
           switch (settings.name) {

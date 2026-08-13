@@ -67,7 +67,10 @@ class BggHttpCapture {
         bodyL.contains('cf-browser-verification') ||
         bodyL.contains('challenge-platform') ||
         bodyL.contains('ray id') ||
-        (cfRay.isNotEmpty && (status == 403 || server.contains('cloudflare')));
+        (status == 403 &&
+            (cfRay.isNotEmpty ||
+                server.contains('cloudflare') ||
+                bodyL.contains('cloudflare')));
     final bggApp = bodyL.contains('temporarily blocked') ||
         bodyL.contains('blocked from editing') ||
         bodyL.contains('blocked from updating') ||
@@ -80,6 +83,9 @@ class BggHttpCapture {
     if (cloudflare) {
       return 'A) Challenge de Cloudflare (corta antes de BGG)';
     }
+    if (isInvalidAction) {
+      return 'E) BGG respondió Invalid action (llegó a la app; el método/formato no vale)';
+    }
     if (bggApp) {
       return 'B) Bloqueo de la aplicación BGG (antiabuso cuenta/IP)';
     }
@@ -89,14 +95,25 @@ class BggHttpCapture {
     return 'HTTP $status (no parece bloqueo)';
   }
 
+  bool get isInvalidAction => body.toLowerCase().contains('invalid action');
+
   bool get looksBlocked {
     final kind = classify();
     return kind.startsWith('A)') ||
         kind.startsWith('B)') ||
         kind.startsWith('C)') ||
-        kind.startsWith('D)') ||
-        status == 403 ||
-        status == 429;
+        kind.startsWith('D)');
+  }
+
+  bool get isSuccessfulWrite {
+    if (status != 200 && status != 201) return false;
+    if (looksBlocked || isInvalidAction) return false;
+    final bodyL = body.toLowerCase();
+    if (bodyL.contains('must be logged') || bodyL.contains('not logged')) {
+      return false;
+    }
+    if (bodyL.contains('messagebox error')) return false;
+    return true;
   }
 
   String dump({required int attempt, required bool firstOfSession}) {
@@ -302,6 +319,10 @@ class _BggWebViewHostState extends State<BggWebViewHost> {
       try {
         final raw = await _controller.runJavaScriptReturningResult('''
           (function() {
+            var href = String(location.href || '');
+            if (href.indexOf('about:blank') !== -1 || href.indexOf('boardgamegeek.com') === -1) {
+              return 'loading';
+            }
             var t = (document.title || '') + ' ' + (document.body ? document.body.innerText : '');
             t = t.toLowerCase();
             if (t.indexOf('just a moment') !== -1 || t.indexOf('attention required') !== -1) {
@@ -324,17 +345,21 @@ class _BggWebViewHostState extends State<BggWebViewHost> {
 
   Future<BggHttpCapture> probeWriteEndpoint() async {
     await _ensureOnBgg();
-    return _runFetchCapture(
-      '''
-      fetch('/geekcollection.php', {
-        credentials: 'same-origin',
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'application/json, text/javascript, */*; q=0.01'
-        }
-      })
-      ''',
-      via: 'probe GET /geekcollection.php (sin alta)',
+    final href = _jsString(
+      await _controller.runJavaScriptReturningResult('window.location.href'),
+    );
+    final cookieNames = _jsString(
+      await _controller.runJavaScriptReturningResult('''
+        (document.cookie || '').split(';').map(function(c) {
+          return c.split('=')[0].trim();
+        }).filter(Boolean).join(', ')
+      '''),
+    );
+    return BggHttpCapture(
+      status: href.contains('boardgamegeek.com') ? 200 : 0,
+      url: href,
+      body: 'cookies visibles en el WebView: $cookieNames',
+      via: 'sonda de sesión (ubicación actual, sin geekcollection)',
     );
   }
 
@@ -373,93 +398,110 @@ class _BggWebViewHostState extends State<BggWebViewHost> {
   }
 
   Future<Map<String, String>> _addItemWithFallbacks(int bggId) async {
-    try {
-      return await _fetchAddItem(bggId);
-    } on BggWriteException catch (fetchError) {
-      if (!fetchError.rateLimited && fetchError.statusCode != 0) {
-        rethrow;
+    _writeAttempt++;
+    final dumps = <String>[];
+    BggHttpCapture? last;
+
+    Future<Map<String, String>?> tryCapture(BggHttpCapture capture) async {
+      last = capture;
+      dumps.add(
+        capture.dump(
+          attempt: _writeAttempt,
+          firstOfSession: _writeAttempt == 1,
+        ),
+      );
+      if (capture.isSuccessfulWrite) {
+        return {'status': '${capture.status}', 'body': capture.body};
       }
-      try {
-        return await _navigateAddItem(bggId);
-      } on BggWriteException {
-        await _clickAddOnGamePage(bggId);
-        return {'status': '200', 'body': 'clicked'};
-      }
+      return null;
     }
+
+    final form = await tryCapture(await _postAddItemForm(bggId));
+    if (form != null) return form;
+
+    final jsonFlat =
+        await tryCapture(await _postCollectionItemsJson(bggId, wrapped: false));
+    if (jsonFlat != null) return jsonFlat;
+
+    final jsonWrapped =
+        await tryCapture(await _postCollectionItemsJson(bggId, wrapped: true));
+    if (jsonWrapped != null) return jsonWrapped;
+
+    try {
+      await _clickAddOnGamePage(bggId);
+      return {'status': '200', 'body': 'clicked'};
+    } catch (e) {
+      dumps.add('clic en ficha: $e');
+    }
+
+    throw BggWriteException(
+      last?.status == 0 ? 502 : (last?.status ?? 502),
+      last?.classify() ?? 'No se pudo añadir el juego a BGG',
+      capture: BggHttpCapture(
+        status: last?.status ?? 502,
+        url: last?.url ?? '',
+        redirected: last?.redirected ?? false,
+        type: last?.type ?? '',
+        headers: last?.headers ?? const {},
+        body: dumps.join('\n\n-----\n\n'),
+        via: 'fallbacks de alta',
+      ),
+      attempt: _writeAttempt,
+    );
   }
 
   Future<void> _ensureOnBgg() async {
     final href = _jsString(
       await _controller.runJavaScriptReturningResult('window.location.href'),
     );
-    if (!href.contains('boardgamegeek.com')) {
+    if (!href.contains('boardgamegeek.com') || href.contains('about:blank')) {
       await _controller.loadRequest(Uri.parse(widget.referer));
       await _waitUntilBggReady();
     }
   }
 
-  Future<Map<String, String>> _fetchAddItem(int bggId) async {
-    _writeAttempt++;
-    final capture = await _runFetchCapture(
+  Future<BggHttpCapture> _postAddItemForm(int bggId) {
+    return _runFetchCapture(
       '''
-      fetch('/geekcollection.php?action=additem&objecttype=thing&objectid=$bggId&ajax=1&instanceid=0', {
+      fetch('https://boardgamegeek.com/geekcollection.php', {
+        method: 'POST',
         credentials: 'same-origin',
         headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
           'X-Requested-With': 'XMLHttpRequest',
           'Accept': 'application/json, text/javascript, */*; q=0.01'
-        }
+        },
+        body: 'action=additem&ajax=1&objecttype=thing&objectid=$bggId'
       })
       ''',
-      via: 'fetch GET additem',
+      via: 'POST form geekcollection.php action=additem',
     );
-    if (capture.looksBlocked || capture.status == 403 || capture.status == 429) {
-      throw BggWriteException(
-        capture.status == 0 ? 403 : capture.status,
-        capture.classify(),
-        capture: capture,
-        attempt: _writeAttempt,
-      );
-    }
-    if (capture.status != 0 && capture.status != 200) {
-      throw BggWriteException(
-        capture.status,
-        'BGG rechazó la alta del juego (HTTP ${capture.status}).',
-        capture: capture,
-        attempt: _writeAttempt,
-      );
-    }
-    return {'status': '${capture.status}', 'body': capture.body};
   }
 
-  Future<Map<String, String>> _navigateAddItem(int bggId) async {
-    final url =
-        'https://boardgamegeek.com/geekcollection.php?action=additem&objecttype=thing&objectid=$bggId&ajax=1&instanceid=0';
-    await _controller.loadRequest(Uri.parse(url));
-    await _waitUntilBggReady();
-    final body = _jsString(
-      await _controller.runJavaScriptReturningResult(
-        'document.body ? (document.body.innerText || document.body.textContent || "") : ""',
-      ),
+  Future<BggHttpCapture> _postCollectionItemsJson(
+    int bggId, {
+    required bool wrapped,
+  }) {
+    final payload = wrapped
+        ? '{item:{collid:0,objecttype:"thing",objectid:$bggId,status:{own:true,prevowned:false}}}'
+        : '{objecttype:"thing",objectid:$bggId,status:{own:true,prevowned:false}}';
+    return _runFetchCapture(
+      '''
+      fetch('https://boardgamegeek.com/api/collectionitems', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify($payload)
+      })
+      ''',
+      via: wrapped
+          ? 'POST JSON /api/collectionitems (item wrapper)'
+          : 'POST JSON /api/collectionitems',
     );
-    if (_looksBlocked(body) || body.toLowerCase().contains('error 403')) {
-      final capture = BggHttpCapture(
-        status: 403,
-        url: _jsString(
-          await _controller.runJavaScriptReturningResult('window.location.href'),
-        ),
-        body: body,
-        via: 'navegación top-level additem (sin cabeceras HTTP)',
-      );
-      throw BggWriteException(
-        403,
-        capture.classify(),
-        capture: capture,
-        attempt: _writeAttempt,
-      );
-    }
-    await _controller.loadRequest(Uri.parse(widget.referer));
-    await _waitUntilBggReady();
-    return {'status': '200', 'body': body};
   }
 
   Future<void> _clickAddOnGamePage(int bggId) async {
@@ -482,7 +524,7 @@ class _BggWebViewHostState extends State<BggWebViewHost> {
           });
           if (already) return 'already';
           var add = nodes.find(function(el) {
-            return visible(el) && /add to collection|añadir a la colección/i.test(el.textContent || '');
+            return /add to collection|añadir a la colección/i.test(el.textContent || '');
           });
           if (add) { add.click(); return 'clicked'; }
           return 'notfound';
@@ -550,7 +592,7 @@ class _BggWebViewHostState extends State<BggWebViewHost> {
   }) async {
     final capture = await _runFetchCapture(
       '''
-      fetch('/geekcollection.php', {
+      fetch('https://boardgamegeek.com/geekcollection.php', {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
