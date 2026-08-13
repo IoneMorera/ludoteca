@@ -79,6 +79,11 @@ class BggController extends Controller
         $session = $this->cookieJarToHeader($cookieJar)
             ?? $this->extractSessionCookie($response);
 
+        Log::info('BGG connect cookie names', [
+            'status' => $response->status(),
+            'names' => $this->cookieNames($session ?? ''),
+        ]);
+
         if ($session === null) {
             Log::warning('BGG connect succeeded without session cookies', [
                 'status' => $response->status(),
@@ -870,26 +875,23 @@ class BggController extends Controller
 
     private function cookieJarToHeader(\GuzzleHttp\Cookie\CookieJar $cookieJar): ?string
     {
-        $parts = [];
+        $byName = [];
         foreach ($cookieJar as $cookie) {
             $name = $cookie->getName();
-            $value = $cookie->getValue();
-            if ($name === '' || $value === '') {
+            $value = (string) $cookie->getValue();
+            if (!$this->isBggAuthCookieName($name) || $this->isDiscardableCookieValue($value)) {
                 continue;
             }
-            $parts[] = $name.'='.$value;
+            if (method_exists($cookie, 'getExpires')) {
+                $expires = $cookie->getExpires();
+                if (is_numeric($expires) && (int) $expires > 0 && (int) $expires < time()) {
+                    continue;
+                }
+            }
+            $byName[$name] = $value;
         }
 
-        if ($parts === []) {
-            return null;
-        }
-
-        $joined = implode('; ', array_unique($parts));
-        $hasAuth = str_contains($joined, 'bggusername=')
-            || str_contains($joined, 'SessionID=')
-            || str_contains($joined, 'bggpassword=');
-
-        return $hasAuth ? $joined : null;
+        return $this->joinAuthCookies($byName);
     }
 
     /**
@@ -1184,18 +1186,6 @@ class BggController extends Controller
                 return ['success' => true];
             }
 
-            if (in_array($jsonResponse->status(), [403, 429], true)) {
-                if ($this->isBggIdPrevOwnedByUser((string) $user->bgg_username, $bggId)) {
-                    return ['success' => true];
-                }
-
-                return [
-                    'success' => false,
-                    'message' => 'BGG bloqueó temporalmente la escritura (HTTP '.$jsonResponse->status().'). Espera y reintenta solo los fallidos.',
-                    'rate_limited' => true,
-                ];
-            }
-
             Log::info('BGG prevowned JSON soft-fail', [
                 'bgg_id' => $bggId,
                 'status' => $jsonResponse->status(),
@@ -1273,46 +1263,41 @@ class BggController extends Controller
         }
 
         $headers = $this->bggWriteHeaders($user, $bggId);
+        if (($headers['Cookie'] ?? '') === '') {
+            return [
+                'success' => false,
+                'message' => 'La sesión de BGG no tiene cookies válidas. Vuelve a conectar la cuenta en el perfil.',
+                'session_expired' => true,
+            ];
+        }
 
-        // 1) API JSON (un intento). Si Cloudflare responde 403, paramos aquí:
-        // reintentar additem en el mismo request empeora el bloqueo.
+        // 1) API JSON. Un 403 aquí NO aborta: ese endpoint suele estar detrás
+        // del WAF; el alta real va por geekcollection.php.
         $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
             'own' => true,
         ]);
-        if ($jsonResponse) {
+        if ($jsonResponse && in_array($jsonResponse->status(), [200, 201, 204], true)) {
             $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
+
+            return ['success' => true];
+        }
+
+        if ($jsonResponse && in_array($jsonResponse->status(), [409, 422], true)) {
+            $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
+            $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body(), $headers);
+            if ($collId) {
+                $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
+            }
+
+            return ['success' => true];
         }
 
         if ($jsonResponse) {
-            if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
-                return ['success' => true];
-            }
-
-            if (in_array($jsonResponse->status(), [403, 429], true)) {
-                if ($this->isBggIdOwnedByUser((string) $user->bgg_username, $bggId)) {
-                    return ['success' => true];
-                }
-
-                return [
-                    'success' => false,
-                    'message' => 'BGG bloqueó temporalmente la escritura (HTTP '.$jsonResponse->status().'). Espera y reintenta solo los fallidos.',
-                    'rate_limited' => true,
-                ];
-            }
-
-            if (in_array($jsonResponse->status(), [409, 422], true)) {
-                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body(), $headers);
-                if ($collId) {
-                    $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
-                }
-
-                return ['success' => true];
-            }
-
             Log::info('BGG api/collectionitems soft-fail, trying geekcollection', [
                 'bgg_id' => $bggId,
                 'status' => $jsonResponse->status(),
                 'body' => substr($jsonResponse->body(), 0, 300),
+                'cookie_names' => $this->cookieNames((string) ($headers['Cookie'] ?? '')),
             ]);
         }
 
@@ -1380,11 +1365,11 @@ class BggController extends Controller
 
     private function bggWriteHeaders(User $user, int $bggId): array
     {
-        // UA de navegador: el UA custom dispara WAF/Cloudflare (403) en writes.
-        // No enviar Bearer API key aquí: estos endpoints web van con cookie de sesión.
+        // Solo cookies de sesión BGG. Las de Cloudflare (cf_clearance, __cf_bm)
+        // caducan y, reenviadas, provocan 403 en todas las escrituras.
         return [
             'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Cookie' => (string) $user->bgg_session,
+            'Cookie' => $this->authCookieHeader((string) $user->bgg_session),
             'Accept' => 'application/json, text/javascript, */*; q=0.01',
             'Accept-Language' => 'en-US,en;q=0.9,es;q=0.8',
             'X-Requested-With' => 'XMLHttpRequest',
@@ -1427,43 +1412,105 @@ class BggController extends Controller
      */
     private function mergeSetCookiesIntoHeaders(array $headers, \Illuminate\Http\Client\Response $response): array
     {
+        if ($response->status() >= 400) {
+            return $headers;
+        }
+
         $extra = $this->extractSessionCookie($response);
         if ($extra === null || $extra === '') {
             return $headers;
         }
 
-        $jar = [];
-        foreach (explode(';', (string) ($headers['Cookie'] ?? '')) as $part) {
-            $part = trim($part);
-            if ($part === '' || !str_contains($part, '=')) {
-                continue;
-            }
-            [$name, $value] = explode('=', $part, 2);
-            $name = trim($name);
-            if ($name !== '') {
-                $jar[$name] = trim($value);
-            }
+        $jar = $this->parseCookieMap((string) ($headers['Cookie'] ?? ''));
+        foreach ($this->parseCookieMap($extra) as $name => $value) {
+            $jar[$name] = $value;
         }
 
-        foreach (explode(';', $extra) as $part) {
+        $joined = $this->joinAuthCookies($jar);
+        if ($joined !== null) {
+            $headers['Cookie'] = $joined;
+        }
+
+        return $headers;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function parseCookieMap(string $header): array
+    {
+        $byName = [];
+        foreach (explode(';', $header) as $part) {
             $part = trim($part);
             if ($part === '' || !str_contains($part, '=')) {
                 continue;
             }
             [$name, $value] = explode('=', $part, 2);
             $name = trim($name);
-            if ($name !== '') {
-                $jar[$name] = trim($value);
+            $value = trim($value);
+            if (!$this->isBggAuthCookieName($name) || $this->isDiscardableCookieValue($value)) {
+                continue;
             }
+            $byName[$name] = $value;
+        }
+
+        return $byName;
+    }
+
+    private function authCookieHeader(string $raw): string
+    {
+        return $this->joinAuthCookies($this->parseCookieMap($raw)) ?? '';
+    }
+
+    /**
+     * @param  array<string, string>  $byName
+     */
+    private function joinAuthCookies(array $byName): ?string
+    {
+        if ($byName === []) {
+            return null;
         }
 
         $parts = [];
-        foreach ($jar as $name => $value) {
+        foreach ($byName as $name => $value) {
             $parts[] = $name.'='.$value;
         }
-        $headers['Cookie'] = implode('; ', $parts);
+        $joined = implode('; ', $parts);
 
-        return $headers;
+        $lower = strtolower($joined);
+        $hasAuth = str_contains($lower, 'bggusername=')
+            || str_contains($lower, 'bgg_username=')
+            || str_contains($lower, 'sessionid=')
+            || str_contains($lower, 'bggpassword=')
+            || str_contains($lower, 'bgg_password=');
+
+        return $hasAuth ? $joined : null;
+    }
+
+    private function isBggAuthCookieName(string $name): bool
+    {
+        return in_array(strtolower($name), [
+            'sessionid',
+            'bggusername',
+            'bggpassword',
+            'bgg_username',
+            'bgg_password',
+        ], true);
+    }
+
+    private function isDiscardableCookieValue(string $value): bool
+    {
+        $value = trim($value);
+
+        return $value === '' || strtolower($value) === 'deleted';
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function cookieNames(string $header): array
+    {
+        return array_keys($this->parseCookieMap($header));
     }
 
     private function looksLikeBggBlockedOrLogin(string $body): bool
@@ -1485,14 +1532,12 @@ class BggController extends Controller
      */
     private function postBggCollectionItem(array $headers, int $bggId, array $status): ?\Illuminate\Http\Client\Response
     {
-        $apiKey = config('services.bgg.api_key');
+        // Sin Bearer: este endpoint es de sesión web, no de XML API.
         $requestHeaders = array_merge($headers, [
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
         ]);
-        if (!empty($apiKey)) {
-            $requestHeaders['Authorization'] = 'Bearer '.$apiKey;
-        }
+        unset($requestHeaders['Authorization']);
 
         try {
             return Http::timeout(30)
@@ -1601,7 +1646,7 @@ class BggController extends Controller
         }
         // Cookie de sesión: necesaria si la colección es privada o BGG exige auth.
         if (filled($user->bgg_session)) {
-            $headers['Cookie'] = (string) $user->bgg_session;
+            $headers['Cookie'] = $this->authCookieHeader((string) $user->bgg_session);
         }
 
         $response = null;
@@ -1855,8 +1900,8 @@ class BggController extends Controller
 
         foreach ($response->cookies() as $cookie) {
             $name = $cookie->getName();
-            $value = $cookie->getValue();
-            if ($name === '' || $value === '') {
+            $value = (string) $cookie->getValue();
+            if (!$this->isBggAuthCookieName($name) || $this->isDiscardableCookieValue($value)) {
                 continue;
             }
             $parts[] = $name.'='.$value;
@@ -1869,9 +1914,16 @@ class BggController extends Controller
                     continue;
                 }
                 $pair = explode(';', $header, 2)[0] ?? '';
-                if (str_contains($pair, '=')) {
-                    $parts[] = trim($pair);
+                if (!str_contains($pair, '=')) {
+                    continue;
                 }
+                [$name, $value] = explode('=', $pair, 2);
+                $name = trim($name);
+                $value = trim($value);
+                if (!$this->isBggAuthCookieName($name) || $this->isDiscardableCookieValue($value)) {
+                    continue;
+                }
+                $parts[] = $name.'='.$value;
             }
         }
 
@@ -1880,10 +1932,8 @@ class BggController extends Controller
         }
 
         $joined = implode('; ', array_unique($parts));
-        $hasUsername = str_contains($joined, 'bggusername=');
-        $hasSession = str_contains($joined, 'SessionID=') || str_contains($joined, 'bggpassword=');
 
-        return ($hasUsername || $hasSession) ? $joined : null;
+        return $this->joinAuthCookies($this->parseCookieMap($joined));
     }
 
     private function findBaseGamesBggIds(array $expansionBggIds, ?string $apiKey): array
