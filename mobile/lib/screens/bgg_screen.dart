@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../providers/bgg_collection_provider.dart';
 import '../providers/sync_provider.dart';
 import '../services/api_service.dart';
+import '../services/bgg_write_service.dart';
 import '../services/database_service.dart';
 import '../services/image_cache_manager.dart';
 
@@ -311,24 +312,86 @@ class _BggScreenState extends State<BggScreen> {
     final prevOwnedIds = <int>[];
     final rateLimitedRetry = <Map<String, dynamic>>[];
 
+    BggWriteService? writer;
+    try {
+      final ctx = await _api.get('/bgg/write-context');
+      final ctxData = ctx.data as Map;
+      writer = BggWriteService(
+        cookie: ctxData['cookie']?.toString() ?? '',
+        username: ctxData['username']?.toString() ?? '',
+        userAgent: ctxData['user_agent']?.toString() ??
+            'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+        referer: ctxData['referer']?.toString() ??
+            'https://boardgamegeek.com/collection/user/${ctxData['username']}',
+      );
+    } catch (e) {
+      progress.value = progress.value.copyWith(
+        done: true,
+        aborted: true,
+        failCount: toUpload.length,
+        abortReason:
+            'No se pudo preparar la sesión de BGG. Vuelve a conectar en el perfil.',
+      );
+      return;
+    }
+
     Future<_ExportItemResult> exportOne(Map<String, dynamic> item) async {
       final juegoId = item['id'];
       try {
         final response = await _api.post('/bgg/export/item', data: {
           'juego_id': juegoId,
+          'client_write': true,
         });
-        final data = response.data as Map;
-        final success = data['success'] == true;
-        final msg = data['message']?.toString() ??
-            (success ? 'OK' : 'Error desconocido');
-        final rateLimited = data['rate_limited'] == true ||
-            msg.contains('403') ||
-            msg.contains('bloqueó temporalmente');
+        final data = Map<String, dynamic>.from(response.data as Map);
+        if (data['success'] != true) {
+          final msg = data['message']?.toString() ?? 'Error desconocido';
+          return _ExportItemResult(
+            success: false,
+            message: msg,
+            rateLimited: data['rate_limited'] == true,
+            data: data,
+          );
+        }
+        if (data['needs_write'] != true) {
+          return _ExportItemResult(
+            success: true,
+            message: data['message']?.toString() ?? 'OK',
+            rateLimited: false,
+            data: data,
+          );
+        }
+
+        final bggId = (data['bgg_id'] as num?)?.toInt();
+        if (bggId == null || writer == null) {
+          return _ExportItemResult(
+            success: false,
+            message: 'Falta el ID de BGG para escribir',
+            rateLimited: false,
+            data: data,
+          );
+        }
+
+        final action = data['action']?.toString() ?? 'own';
+        if (action == 'prevowned') {
+          await writer.markPrevOwned(bggId);
+        } else {
+          await writer.addOwned(bggId);
+        }
+
         return _ExportItemResult(
-          success: success,
-          message: msg,
-          rateLimited: rateLimited,
+          success: true,
+          message: action == 'prevowned'
+              ? 'Marcado como Previously Owned en BGG'
+              : 'Añadido a la colección de BGG',
+          rateLimited: false,
           data: data,
+        );
+      } on BggWriteException catch (e) {
+        return _ExportItemResult(
+          success: false,
+          message: e.message,
+          rateLimited: e.rateLimited,
+          data: const {},
         );
       } catch (e) {
         var msg = 'Error de red';

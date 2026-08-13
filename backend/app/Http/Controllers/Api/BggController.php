@@ -76,8 +76,7 @@ class BggController extends Controller
             ], 422);
         }
 
-        $session = $this->cookieJarToHeader($cookieJar)
-            ?? $this->extractSessionCookie($response);
+        $session = $this->extractAuthCookiesFromLogin($response, $cookieJar);
 
         Log::info('BGG connect cookie names', [
             'status' => $response->status(),
@@ -122,6 +121,34 @@ class BggController extends Controller
         return response()->json([
             'message' => 'Desconectado de BoardGameGeek.',
             'user' => $user->toApiArray(),
+        ]);
+    }
+
+    public function writeContext(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        if (!$user->isBggConnected()) {
+            return response()->json([
+                'message' => 'Conecta tu cuenta de BGG en el perfil primero.',
+            ], 422);
+        }
+
+        $cookie = $this->authCookieHeader((string) $user->bgg_session);
+        if ($cookie === '') {
+            return response()->json([
+                'message' => 'La sesión de BGG no tiene cookies válidas. Vuelve a conectar la cuenta en el perfil.',
+            ], 422);
+        }
+
+        $username = trim((string) $user->bgg_username);
+
+        return response()->json([
+            'username' => $username,
+            'cookie' => $cookie,
+            'user_agent' => 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+            'origin' => 'https://boardgamegeek.com',
+            'referer' => 'https://boardgamegeek.com/collection/user/'.$username,
         ]);
     }
 
@@ -260,7 +287,9 @@ class BggController extends Controller
 
         $validated = $request->validate([
             'juego_id' => 'required|integer',
+            'client_write' => 'sometimes|boolean',
         ]);
+        $clientWrite = $request->boolean('client_write');
 
         $propietario = $this->resolveExportPropietario($user);
         if (!$propietario) {
@@ -327,6 +356,7 @@ class BggController extends Controller
                 return response()->json([
                     'success' => true,
                     'skipped' => true,
+                    'needs_write' => false,
                     'juego_id' => $juego->id,
                     'nombre' => $juego->nombre,
                     'bgg_id' => $bggId,
@@ -334,6 +364,21 @@ class BggController extends Controller
                     'matched_name' => $matchedName,
                     'action' => 'prevowned',
                     'message' => 'Ya estaba como Previously Owned en BGG',
+                ]);
+            }
+
+            if ($clientWrite) {
+                return response()->json([
+                    'success' => true,
+                    'skipped' => false,
+                    'needs_write' => true,
+                    'juego_id' => $juego->id,
+                    'nombre' => $juego->nombre,
+                    'bgg_id' => $bggId,
+                    'bgg_id_saved' => $resolvedByName,
+                    'matched_name' => $matchedName,
+                    'action' => 'prevowned',
+                    'message' => 'Listo para marcar Previously Owned desde el dispositivo',
                 ]);
             }
 
@@ -372,6 +417,7 @@ class BggController extends Controller
             return response()->json([
                 'success' => true,
                 'skipped' => true,
+                'needs_write' => false,
                 'juego_id' => $juego->id,
                 'nombre' => $juego->nombre,
                 'bgg_id' => $bggId,
@@ -379,6 +425,21 @@ class BggController extends Controller
                 'matched_name' => $matchedName,
                 'action' => 'own',
                 'message' => 'Encontrado por nombre; ya estaba en tu colección BGG',
+            ]);
+        }
+
+        if ($clientWrite) {
+            return response()->json([
+                'success' => true,
+                'skipped' => false,
+                'needs_write' => true,
+                'juego_id' => $juego->id,
+                'nombre' => $juego->nombre,
+                'bgg_id' => $bggId,
+                'bgg_id_saved' => $resolvedByName,
+                'matched_name' => $matchedName,
+                'action' => 'own',
+                'message' => 'Listo para añadir a BGG desde el dispositivo',
             ]);
         }
 
@@ -888,6 +949,74 @@ class BggController extends Controller
     }
 
     /**
+     * BGG envía cada cookie dos veces (valor real + "deleted"). El CookieJar
+     * se queda a veces con la borrada; leemos Set-Cookie a mano y ignoramos
+     * las caducadas.
+     */
+    private function extractAuthCookiesFromLogin(
+        \Illuminate\Http\Client\Response $response,
+        \GuzzleHttp\Cookie\CookieJar $cookieJar,
+    ): ?string {
+        $byName = [];
+
+        foreach ($cookieJar as $cookie) {
+            $name = $cookie->getName();
+            $value = (string) $cookie->getValue();
+            if (!$this->isBggAuthCookieName($name) || $this->isDiscardableCookieValue($value)) {
+                continue;
+            }
+            if (method_exists($cookie, 'getExpires')) {
+                $expires = $cookie->getExpires();
+                if (is_numeric($expires) && (int) $expires > 0 && (int) $expires < time()) {
+                    continue;
+                }
+            }
+            $byName[$name] = $value;
+        }
+
+        $rawHeaders = $response->headers()['Set-Cookie'] ?? [];
+        foreach ((array) $rawHeaders as $header) {
+            if (!is_string($header) || $header === '') {
+                continue;
+            }
+            $attrs = array_map('trim', explode(';', $header));
+            $pair = array_shift($attrs) ?? '';
+            if (!str_contains($pair, '=')) {
+                continue;
+            }
+            [$name, $value] = explode('=', $pair, 2);
+            $name = trim($name);
+            $value = trim($value);
+            if (!$this->isBggAuthCookieName($name) || $this->isDiscardableCookieValue($value)) {
+                continue;
+            }
+            $expired = false;
+            foreach ($attrs as $attr) {
+                if (str_starts_with(strtolower($attr), 'max-age=0')) {
+                    $expired = true;
+                }
+                if (str_starts_with(strtolower($attr), 'expires=') && str_contains($attr, '1970')) {
+                    $expired = true;
+                }
+            }
+            if ($expired) {
+                continue;
+            }
+            $byName[$name] = $value;
+        }
+
+        return $this->joinAuthCookies($byName);
+    }
+
+    private function sessionCookieJar(User $user): \GuzzleHttp\Cookie\CookieJar
+    {
+        return \GuzzleHttp\Cookie\CookieJar::fromArray(
+            $this->parseCookieMap((string) $user->bgg_session),
+            'boardgamegeek.com',
+        );
+    }
+
+    /**
      * Propietario local cuya colección se sincroniza con la cuenta BGG conectada.
      */
     private function resolveExportPropietario(User $user): ?Propietario
@@ -1264,78 +1393,39 @@ class BggController extends Controller
         }
 
         $headers = $this->bggWriteHeaders($user, $bggId);
-
-        // Intento JSON moderno (una sola escritura; si 403 no martilleamos más).
-        $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
-            'own' => false,
-            'prevowned' => true,
-        ]);
-        if ($jsonResponse) {
-            $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
+        $collId = $this->resolveCollId($user, $bggId, null, $headers);
+        if ($collId) {
+            return $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
         }
 
-        if ($jsonResponse) {
-            if ($jsonResponse->successful() || in_array($jsonResponse->status(), [200, 201, 204], true)) {
+        $addResponse = $this->requestBggAddItem($user, $bggId);
+        if ($addResponse) {
+            $headers = $this->mergeSetCookiesIntoHeaders($headers, $addResponse);
+        }
+
+        $blocked = $addResponse && (
+            in_array($addResponse->status(), [403, 429], true)
+            || $this->looksLikeBggBlockedOrLogin($addResponse->body())
+        );
+
+        if ($blocked) {
+            if ($this->isBggIdPrevOwnedByUser((string) $user->bgg_username, $bggId)) {
                 return ['success' => true];
             }
 
-            Log::info('BGG prevowned JSON soft-fail', [
-                'bgg_id' => $bggId,
-                'status' => $jsonResponse->status(),
-                'body' => substr($jsonResponse->body(), 0, 300),
-            ]);
-
-            if (in_array($jsonResponse->status(), [409, 422], true)) {
-                $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body(), $headers);
-                $status = $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
-                if ($status['success']) {
-                    return $status;
-                }
-            }
+            return [
+                'success' => false,
+                'message' => 'BGG bloqueó temporalmente la escritura (HTTP '.($addResponse->status() ?: 403).'). Espera y reintenta solo los fallidos.',
+                'rate_limited' => true,
+            ];
         }
 
-        $collId = $this->resolveCollId($user, $bggId, null, $headers);
-
+        $collId = $this->resolveCollId($user, $bggId, $addResponse?->body(), $headers);
         if (!$collId) {
-            $addResponse = $this->requestBggAddItem($headers, $bggId);
-            if ($addResponse) {
-                $headers = $this->mergeSetCookiesIntoHeaders($headers, $addResponse);
-            }
-
-            $blocked = $addResponse && (
-                in_array($addResponse->status(), [403, 429], true)
-                || $this->looksLikeBggBlockedOrLogin($addResponse->body())
-            );
-
-            if ($blocked) {
-                if ($this->isBggIdPrevOwnedByUser((string) $user->bgg_username, $bggId)) {
-                    return ['success' => true];
-                }
-                $collId = $this->resolveCollId($user, $bggId, $addResponse?->body(), $headers);
-                if (!$collId) {
-                    $status = $addResponse?->status() ?: 403;
-
-                    return [
-                        'success' => false,
-                        'message' => 'BGG bloqueó temporalmente la escritura (HTTP '.$status.'). Espera y reintenta solo los fallidos.',
-                        'rate_limited' => true,
-                    ];
-                }
-            } elseif ($addResponse && ($addResponse->failed() && $addResponse->status() !== 200)) {
-                return [
-                    'success' => false,
-                    'message' => 'BGG rechazó Previously Owned (HTTP '.$addResponse->status().').',
-                ];
-            } elseif ($addResponse) {
-                $collId = $this->resolveCollId($user, $bggId, $addResponse->body(), $headers);
-            }
-
-            if (!$collId) {
-                return [
-                    'success' => false,
-                    'message' => 'No se pudo crear/actualizar el ítem en BGG.',
-                ];
-            }
+            return [
+                'success' => false,
+                'message' => 'No se pudo crear/actualizar el ítem en BGG.',
+            ];
         }
 
         return $this->setBggCollectionStatus($headers, $bggId, $collId, false, true);
@@ -1364,38 +1454,9 @@ class BggController extends Controller
             ];
         }
 
-        // 1) API JSON. Un 403 aquí NO aborta: ese endpoint suele estar detrás
-        // del WAF; el alta real va por geekcollection.php.
-        $jsonResponse = $this->postBggCollectionItem($headers, $bggId, [
-            'own' => true,
-        ]);
-        if ($jsonResponse && in_array($jsonResponse->status(), [200, 201, 204], true)) {
-            $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
-
-            return ['success' => true];
-        }
-
-        if ($jsonResponse && in_array($jsonResponse->status(), [409, 422], true)) {
-            $headers = $this->mergeSetCookiesIntoHeaders($headers, $jsonResponse);
-            $collId = $this->resolveCollId($user, $bggId, $jsonResponse->body(), $headers);
-            if ($collId) {
-                $this->setBggCollectionStatus($headers, $bggId, $collId, true, false);
-            }
-
-            return ['success' => true];
-        }
-
-        if ($jsonResponse) {
-            Log::info('BGG api/collectionitems soft-fail, trying geekcollection', [
-                'bgg_id' => $bggId,
-                'status' => $jsonResponse->status(),
-                'body' => substr($jsonResponse->body(), 0, 300),
-                'cookie_names' => $this->cookieNames((string) ($headers['Cookie'] ?? '')),
-            ]);
-        }
-
-        // 2) Fallback additem (un intento).
-        $addResponse = $this->requestBggAddItem($headers, $bggId);
+        // Cloudflare bloquea POST /api/collectionitems. El alta va por
+        // geekcollection.php (GET primero, que el WAF suele dejar pasar).
+        $addResponse = $this->requestBggAddItem($user, $bggId);
         if ($addResponse) {
             $headers = $this->mergeSetCookiesIntoHeaders($headers, $addResponse);
         }
@@ -1432,7 +1493,7 @@ class BggController extends Controller
             return ['success' => true];
         }
 
-        $status = $addResponse?->status() ?? $jsonResponse?->status() ?? 0;
+        $status = $addResponse?->status() ?? 0;
         if ($addResponse && $this->looksLikeBggBlockedOrLogin($addResponse->body())) {
             $status = $status === 200 ? 403 : $status;
         }
@@ -1446,7 +1507,8 @@ class BggController extends Controller
         Log::warning('BGG add game failed', [
             'bgg_id' => $bggId,
             'status' => $status,
-            'body' => substr((string) ($addResponse?->body() ?? $jsonResponse?->body() ?? ''), 0, 400),
+            'cookie_names' => $this->cookieNames((string) ($headers['Cookie'] ?? '')),
+            'body' => substr((string) ($addResponse?->body() ?? ''), 0, 400),
         ]);
 
         return [
@@ -1467,7 +1529,7 @@ class BggController extends Controller
             'Accept-Language' => 'en-US,en;q=0.9,es;q=0.8',
             'X-Requested-With' => 'XMLHttpRequest',
             'Origin' => 'https://boardgamegeek.com',
-            'Referer' => 'https://boardgamegeek.com/boardgame/'.$bggId,
+            'Referer' => 'https://boardgamegeek.com/collection/user/'.trim((string) $user->bgg_username),
         ];
     }
 
@@ -1653,19 +1715,44 @@ class BggController extends Controller
     /**
      * @param  array<string, string>  $headers
      */
-    private function requestBggAddItem(array $headers, int $bggId): ?\Illuminate\Http\Client\Response
+    private function requestBggAddItem(User $user, int $bggId): ?\Illuminate\Http\Client\Response
     {
+        $jar = $this->sessionCookieJar($user);
+        $headers = $this->bggWriteHeaders($user, $bggId);
+        unset($headers['Cookie']);
+
+        $query = [
+            'action' => 'additem',
+            'objecttype' => 'thing',
+            'objectid' => $bggId,
+            'ajax' => 1,
+            'instanceid' => 0,
+        ];
+
         try {
+            $getHeaders = $headers;
+            unset($getHeaders['X-Requested-With'], $getHeaders['Origin']);
+
+            $get = Http::timeout(30)
+                ->withOptions(['cookies' => $jar])
+                ->withHeaders($getHeaders)
+                ->get('https://boardgamegeek.com/geekcollection.php', $query);
+
+            Log::info('BGG additem GET', [
+                'bgg_id' => $bggId,
+                'status' => $get->status(),
+                'body' => substr($get->body(), 0, 250),
+            ]);
+
+            if ($get->status() === 200 && !$this->looksLikeBggBlockedOrLogin($get->body())) {
+                return $get;
+            }
+
             return Http::timeout(30)
+                ->withOptions(['cookies' => $jar])
                 ->asForm()
                 ->withHeaders($headers)
-                ->post('https://boardgamegeek.com/geekcollection.php', [
-                    'action' => 'additem',
-                    'objecttype' => 'thing',
-                    'objectid' => $bggId,
-                    'ajax' => 1,
-                    'instanceid' => 0,
-                ]);
+                ->post('https://boardgamegeek.com/geekcollection.php', $query);
         } catch (\Throwable $e) {
             Log::warning('BGG geekcollection additem request failed', [
                 'bgg_id' => $bggId,
