@@ -152,6 +152,30 @@ class BggController extends Controller
         ]);
     }
 
+    public function writeDebug(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        Log::warning('BGG client write debug', [
+            'user_id' => $user->id,
+            'bgg_username' => $user->bgg_username,
+            'status' => $request->input('status'),
+            'url' => $request->input('url'),
+            'redirected' => $request->boolean('redirected'),
+            'type' => $request->input('type'),
+            'headers' => $request->input('headers'),
+            'body' => substr((string) $request->input('body', ''), 0, 8000),
+            'via' => $request->input('via'),
+            'diagnosis' => $request->input('diagnosis'),
+            'attempt' => $request->input('attempt'),
+            'phase' => $request->input('phase'),
+            'message' => $request->input('message'),
+        ]);
+
+        return response()->json(['ok' => true]);
+    }
+
     public function ownedIds(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -1508,7 +1532,8 @@ class BggController extends Controller
             'bgg_id' => $bggId,
             'status' => $status,
             'cookie_names' => $this->cookieNames((string) ($headers['Cookie'] ?? '')),
-            'body' => substr((string) ($addResponse?->body() ?? ''), 0, 400),
+            'headers' => $addResponse ? $this->bggResponseHeaderSnapshot($addResponse) : [],
+            'body' => substr((string) ($addResponse?->body() ?? ''), 0, 4000),
         ]);
 
         return [
@@ -1668,6 +1693,21 @@ class BggController extends Controller
         return array_keys($this->parseCookieMap($header));
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function bggResponseHeaderSnapshot(\Illuminate\Http\Client\Response $response): array
+    {
+        $keys = ['server', 'cf-ray', 'cf-mitigated', 'content-type', 'cf-cache-status', 'refresh', 'location'];
+        $snapshot = [];
+        foreach ($keys as $key) {
+            $snapshot[$key] = $response->header($key);
+        }
+        $snapshot['all_header_keys'] = array_keys($response->headers());
+
+        return $snapshot;
+    }
+
     private function looksLikeBggBlockedOrLogin(string $body): bool
     {
         $lower = strtolower($body);
@@ -1741,7 +1781,8 @@ class BggController extends Controller
             Log::info('BGG additem GET', [
                 'bgg_id' => $bggId,
                 'status' => $get->status(),
-                'body' => substr($get->body(), 0, 250),
+                'headers' => $this->bggResponseHeaderSnapshot($get),
+                'body' => substr($get->body(), 0, 4000),
             ]);
 
             if ($get->status() === 200 && !$this->looksLikeBggBlockedOrLogin($get->body())) {

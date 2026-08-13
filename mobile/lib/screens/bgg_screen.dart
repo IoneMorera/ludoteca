@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 
@@ -299,41 +300,118 @@ class _BggScreenState extends State<BggScreen> {
       ),
     );
 
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => _ExportProgressDialog(progress: progress),
-    );
-
-    var ok = 0;
-    var fail = 0;
-    final bggProvider = context.read<BggCollectionProvider>();
-    final uploadedIds = <int>[];
-    final prevOwnedIds = <int>[];
-    final rateLimitedRetry = <Map<String, dynamic>>[];
-
-    BggWriteService? writer;
+    String cookie = '';
+    String username = '';
+    String userAgent =
+        'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36';
+    String referer = 'https://boardgamegeek.com/';
     try {
       final ctx = await _api.get('/bgg/write-context');
       final ctxData = ctx.data as Map;
-      writer = BggWriteService(
-        cookie: ctxData['cookie']?.toString() ?? '',
-        username: ctxData['username']?.toString() ?? '',
-        userAgent: ctxData['user_agent']?.toString() ??
-            'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
-        referer: ctxData['referer']?.toString() ??
-            'https://boardgamegeek.com/collection/user/${ctxData['username']}',
+      cookie = ctxData['cookie']?.toString() ?? '';
+      username = ctxData['username']?.toString() ?? '';
+      userAgent = ctxData['user_agent']?.toString() ?? userAgent;
+      referer = ctxData['referer']?.toString() ??
+          'https://boardgamegeek.com/collection/user/$username';
+      if (cookie.isEmpty) {
+        throw StateError('cookie vacía');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Exportación interrumpida'),
+          content: const Text(
+            'No se pudo preparar la sesión de BGG. Vuelve a conectar la cuenta en el perfil.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
       );
+      return;
+    }
+
+    final bridge = BggWebViewBridge();
+    final webView = BggWebViewHost(
+      bridge: bridge,
+      cookie: cookie,
+      username: username,
+      userAgent: userAgent,
+      referer: referer,
+    );
+
+    if (!mounted) return;
+    final bggProvider = context.read<BggCollectionProvider>();
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _ExportProgressDialog(
+        progress: progress,
+        webView: webView,
+      ),
+    );
+
+    progress.value = progress.value.copyWith(
+      currentName: 'Abriendo BGG y superando Cloudflare…',
+    );
+    try {
+      await bridge.ready.future.timeout(const Duration(seconds: 55));
     } catch (e) {
       progress.value = progress.value.copyWith(
         done: true,
         aborted: true,
         failCount: toUpload.length,
-        abortReason:
-            'No se pudo preparar la sesión de BGG. Vuelve a conectar en el perfil.',
+        abortReason: e is BggWriteException
+            ? e.message
+            : 'No se pudo abrir BGG en el dispositivo. Si aparece un captcha, complétalo en el recuadro y vuelve a exportar.',
       );
       return;
     }
+
+    try {
+      final probe = await bridge.probeWriteEndpoint();
+      final probeDump =
+          '=== SONDA previa (GET /geekcollection.php, sin dar de alta) ===\n${probe.dump(attempt: 0, firstOfSession: true)}';
+      progress.value = progress.value.copyWith(
+        diagnosticDump: probeDump,
+        log: [
+          ...progress.value.log,
+          _ExportLogLine(
+            nombre: 'Sonda BGG',
+            ok: !probe.looksBlocked,
+            message: '${probe.classify()} · HTTP ${probe.status}',
+          ),
+        ],
+      );
+      // ignore: unawaited_futures
+      _api.post('/bgg/export/write-debug', data: {
+        ...probe.toJson(),
+        'attempt': 0,
+        'phase': 'probe',
+      }).then((_) {}, onError: (_) {});
+    } catch (e) {
+      progress.value = progress.value.copyWith(
+        log: [
+          ...progress.value.log,
+          _ExportLogLine(
+            nombre: 'Sonda BGG',
+            ok: false,
+            message: e.toString(),
+          ),
+        ],
+      );
+    }
+
+    var ok = 0;
+    var fail = 0;
+    final uploadedIds = <int>[];
+    final prevOwnedIds = <int>[];
+    final rateLimitedRetry = <Map<String, dynamic>>[];
 
     Future<_ExportItemResult> exportOne(Map<String, dynamic> item) async {
       final juegoId = item['id'];
@@ -362,7 +440,7 @@ class _BggScreenState extends State<BggScreen> {
         }
 
         final bggId = (data['bgg_id'] as num?)?.toInt();
-        if (bggId == null || writer == null) {
+        if (bggId == null) {
           return _ExportItemResult(
             success: false,
             message: 'Falta el ID de BGG para escribir',
@@ -373,9 +451,9 @@ class _BggScreenState extends State<BggScreen> {
 
         final action = data['action']?.toString() ?? 'own';
         if (action == 'prevowned') {
-          await writer.markPrevOwned(bggId);
+          await bridge.markPrevOwned(bggId);
         } else {
-          await writer.addOwned(bggId);
+          await bridge.addOwned(bggId);
         }
 
         return _ExportItemResult(
@@ -387,6 +465,25 @@ class _BggScreenState extends State<BggScreen> {
           data: data,
         );
       } on BggWriteException catch (e) {
+        final existing = progress.value.diagnosticDump ?? '';
+        if (!existing.contains('=== ALTA')) {
+          final dump = StringBuffer();
+          if (existing.isNotEmpty) {
+            dump.writeln(existing);
+            dump.writeln('');
+          }
+          dump.writeln('=== ALTA #${e.attempt} ===');
+          dump.writeln(e.diagnosticDump);
+          progress.value = progress.value.copyWith(
+            diagnosticDump: dump.toString(),
+          );
+        }
+        // ignore: unawaited_futures
+        _api.post('/bgg/export/write-debug', data: {
+          ...(e.capture?.toJson() ?? {'message': e.message}),
+          'attempt': e.attempt,
+          'phase': 'write',
+        }).then((_) {}, onError: (_) {});
         return _ExportItemResult(
           success: false,
           message: e.message,
@@ -1224,6 +1321,7 @@ class _ExportProgress {
     this.abortReason,
     this.successCount = 0,
     this.failCount = 0,
+    this.diagnosticDump,
   });
 
   final int total;
@@ -1235,6 +1333,7 @@ class _ExportProgress {
   final String? abortReason;
   final int successCount;
   final int failCount;
+  final String? diagnosticDump;
 
   _ExportProgress copyWith({
     int? total,
@@ -1246,6 +1345,7 @@ class _ExportProgress {
     String? abortReason,
     int? successCount,
     int? failCount,
+    String? diagnosticDump,
   }) {
     return _ExportProgress(
       total: total ?? this.total,
@@ -1257,6 +1357,7 @@ class _ExportProgress {
       abortReason: abortReason ?? this.abortReason,
       successCount: successCount ?? this.successCount,
       failCount: failCount ?? this.failCount,
+      diagnosticDump: diagnosticDump ?? this.diagnosticDump,
     );
   }
 }
@@ -1274,15 +1375,17 @@ class _ExportLogLine {
 }
 
 class _ExportProgressDialog extends StatelessWidget {
-  const _ExportProgressDialog({required this.progress});
+  const _ExportProgressDialog({required this.progress, this.webView});
 
   final ValueNotifier<_ExportProgress> progress;
+  final Widget? webView;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<_ExportProgress>(
       valueListenable: progress,
-      builder: (context, value, _) {
+      child: webView,
+      builder: (context, value, child) {
         final ratio = value.total == 0 ? 0.0 : value.current / value.total;
         return AlertDialog(
           title: Text(value.done
@@ -1294,6 +1397,27 @@ class _ExportProgressDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (child != null && !value.done) ...[
+                  const Text(
+                    'Si BGG pide verificación o captcha, complétala en este recuadro.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 180,
+                    width: double.maxFinite,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.black26),
+                        ),
+                        child: child,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (!value.done) ...[
                   const Center(child: CircularProgressIndicator()),
                   const SizedBox(height: 16),
@@ -1318,7 +1442,7 @@ class _ExportProgressDialog extends StatelessWidget {
                 ],
                 const SizedBox(height: 12),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
+                  constraints: BoxConstraints(maxHeight: value.done ? 220 : 110),
                   child: ListView.builder(
                     shrinkWrap: true,
                     itemCount: value.log.length,
@@ -1338,10 +1462,39 @@ class _ExportProgressDialog extends StatelessWidget {
                     },
                   ),
                 ),
+                if (value.diagnosticDump != null) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Diagnóstico HTTP (cópialo y pégalo)',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 180),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        value.diagnosticDump!,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           actions: [
+            if (value.diagnosticDump != null)
+              TextButton(
+                onPressed: () {
+                  Clipboard.setData(
+                    ClipboardData(text: value.diagnosticDump!),
+                  );
+                },
+                child: const Text('Copiar diagnóstico'),
+              ),
             if (value.done)
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(),
