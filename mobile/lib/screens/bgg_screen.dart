@@ -306,24 +306,13 @@ class _BggScreenState extends State<BggScreen> {
 
     var ok = 0;
     var fail = 0;
-    var consecutiveRateLimits = 0;
     final bggProvider = context.read<BggCollectionProvider>();
     final uploadedIds = <int>[];
     final prevOwnedIds = <int>[];
+    final rateLimitedRetry = <Map<String, dynamic>>[];
 
-    for (var i = 0; i < toUpload.length; i++) {
-      final item = toUpload[i];
-      final nombre = item['nombre']?.toString() ?? 'Juego';
+    Future<_ExportItemResult> exportOne(Map<String, dynamic> item) async {
       final juegoId = item['id'];
-      final bggId = (item['bgg_id'] as num?)?.toInt();
-      final isPrevOwned = item['action']?.toString() == 'prevowned';
-
-      progress.value = progress.value.copyWith(
-        current: i + 1,
-        currentName: isPrevOwned ? '$nombre (Previously Owned)' : nombre,
-      );
-
-      var rateLimited = false;
       try {
         final response = await _api.post('/bgg/export/item', data: {
           'juego_id': juegoId,
@@ -332,57 +321,18 @@ class _BggScreenState extends State<BggScreen> {
         final success = data['success'] == true;
         final msg = data['message']?.toString() ??
             (success ? 'OK' : 'Error desconocido');
-        final returnedBggId = (data['bgg_id'] as num?)?.toInt() ?? bggId;
-        final bggIdSaved = data['bgg_id_saved'] == true;
-        rateLimited = data['rate_limited'] == true ||
+        final rateLimited = data['rate_limited'] == true ||
             msg.contains('403') ||
             msg.contains('bloqueó temporalmente');
-
-        if (success) {
-          ok++;
-          consecutiveRateLimits = 0;
-          if (returnedBggId != null) {
-            if (data['action']?.toString() == 'prevowned' || isPrevOwned) {
-              prevOwnedIds.add(returnedBggId);
-            } else {
-              uploadedIds.add(returnedBggId);
-            }
-          }
-          if (bggIdSaved && returnedBggId != null && juegoId is int) {
-            try {
-              await _juegos.applyServerBggId(
-                serverId: juegoId,
-                bggId: returnedBggId,
-              );
-            } catch (_) {}
-          }
-          final matched = data['matched_name']?.toString();
-          final detail = matched != null && matched.isNotEmpty
-              ? '$msg ($matched)'
-              : msg;
-          progress.value = progress.value.copyWith(
-            log: [
-              ...progress.value.log,
-              _ExportLogLine(nombre: nombre, ok: true, message: detail),
-            ],
-          );
-        } else {
-          fail++;
-          if (rateLimited) {
-            consecutiveRateLimits++;
-          } else {
-            consecutiveRateLimits = 0;
-          }
-          progress.value = progress.value.copyWith(
-            log: [
-              ...progress.value.log,
-              _ExportLogLine(nombre: nombre, ok: false, message: msg),
-            ],
-          );
-        }
+        return _ExportItemResult(
+          success: success,
+          message: msg,
+          rateLimited: rateLimited,
+          data: data,
+        );
       } catch (e) {
-        fail++;
         var msg = 'Error de red';
+        var rateLimited = false;
         try {
           final data = (e as dynamic).response?.data;
           if (data is Map && data['message'] is String) {
@@ -392,31 +342,149 @@ class _BggScreenState extends State<BggScreen> {
                 msg.contains('bloqueó temporalmente');
           }
         } catch (_) {}
-        if (rateLimited) {
-          consecutiveRateLimits++;
+        return _ExportItemResult(
+          success: false,
+          message: msg,
+          rateLimited: rateLimited,
+          data: const {},
+        );
+      }
+    }
+
+    void applySuccess(Map<String, dynamic> item, _ExportItemResult result) {
+      ok++;
+      final isPrevOwned = item['action']?.toString() == 'prevowned';
+      final bggId = (item['bgg_id'] as num?)?.toInt();
+      final juegoId = item['id'];
+      final returnedBggId =
+          (result.data['bgg_id'] as num?)?.toInt() ?? bggId;
+      final bggIdSaved = result.data['bgg_id_saved'] == true;
+      if (returnedBggId != null) {
+        if (result.data['action']?.toString() == 'prevowned' || isPrevOwned) {
+          prevOwnedIds.add(returnedBggId);
         } else {
-          consecutiveRateLimits = 0;
+          uploadedIds.add(returnedBggId);
         }
+      }
+      if (bggIdSaved && returnedBggId != null && juegoId is int) {
+        // ignore: unawaited_futures
+        _juegos.applyServerBggId(serverId: juegoId, bggId: returnedBggId);
+      }
+    }
+
+    // Pasada 1
+    for (var i = 0; i < toUpload.length; i++) {
+      final item = toUpload[i];
+      final nombre = item['nombre']?.toString() ?? 'Juego';
+      final isPrevOwned = item['action']?.toString() == 'prevowned';
+
+      progress.value = progress.value.copyWith(
+        current: i + 1,
+        currentName: isPrevOwned ? '$nombre (Previously Owned)' : nombre,
+      );
+
+      var result = await exportOne(item);
+
+      // Un reintento inmediato del mismo juego tras 403.
+      if (!result.success && result.rateLimited) {
+        progress.value = progress.value.copyWith(
+          currentName: '403 en $nombre — reintento en 25s…',
+        );
+        await Future<void>.delayed(const Duration(seconds: 25));
+        progress.value = progress.value.copyWith(
+          currentName: 'Reintentando $nombre…',
+        );
+        result = await exportOne(item);
+      }
+
+      if (result.success) {
+        applySuccess(item, result);
+        final matched = result.data['matched_name']?.toString();
+        final detail = matched != null && matched.isNotEmpty
+            ? '${result.message} ($matched)'
+            : result.message;
         progress.value = progress.value.copyWith(
           log: [
             ...progress.value.log,
-            _ExportLogLine(nombre: nombre, ok: false, message: msg),
+            _ExportLogLine(nombre: nombre, ok: true, message: detail),
+          ],
+        );
+      } else if (result.rateLimited) {
+        rateLimitedRetry.add(item);
+        progress.value = progress.value.copyWith(
+          log: [
+            ...progress.value.log,
+            _ExportLogLine(
+              nombre: nombre,
+              ok: false,
+              message: '${result.message} (se reintentará al final)',
+            ),
+          ],
+        );
+      } else {
+        fail++;
+        progress.value = progress.value.copyWith(
+          log: [
+            ...progress.value.log,
+            _ExportLogLine(nombre: nombre, ok: false, message: result.message),
           ],
         );
       }
 
       if (i < toUpload.length - 1) {
-        // Tras 403, pausa larga para que Cloudflare baje el bloqueo.
-        final waitMs = rateLimited
-            ? (consecutiveRateLimits >= 3 ? 45000 : 20000)
-            : 6000;
-        if (rateLimited) {
+        await Future<void>.delayed(
+          Duration(seconds: result.rateLimited ? 12 : 8),
+        );
+      }
+    }
+
+    // Pasada 2: solo los 403, tras una pausa larga.
+    if (rateLimitedRetry.isNotEmpty) {
+      progress.value = progress.value.copyWith(
+        currentName:
+            'Pausa 60s antes de reintentar ${rateLimitedRetry.length} con 403…',
+      );
+      await Future<void>.delayed(const Duration(seconds: 60));
+
+      for (var i = 0; i < rateLimitedRetry.length; i++) {
+        final item = rateLimitedRetry[i];
+        final nombre = item['nombre']?.toString() ?? 'Juego';
+        progress.value = progress.value.copyWith(
+          current: toUpload.length,
+          currentName:
+              'Reintento 403 ${i + 1}/${rateLimitedRetry.length}: $nombre',
+        );
+
+        final result = await exportOne(item);
+        if (result.success) {
+          applySuccess(item, result);
           progress.value = progress.value.copyWith(
-            currentName:
-                'BGG limitó escrituras — esperando ${(waitMs / 1000).round()}s…',
+            log: [
+              ...progress.value.log,
+              _ExportLogLine(
+                nombre: nombre,
+                ok: true,
+                message: 'OK en reintento final',
+              ),
+            ],
+          );
+        } else {
+          fail++;
+          progress.value = progress.value.copyWith(
+            log: [
+              ...progress.value.log,
+              _ExportLogLine(
+                nombre: nombre,
+                ok: false,
+                message: result.message,
+              ),
+            ],
           );
         }
-        await Future<void>.delayed(Duration(milliseconds: waitMs));
+
+        if (i < rateLimitedRetry.length - 1) {
+          await Future<void>.delayed(const Duration(seconds: 20));
+        }
       }
     }
 
@@ -430,8 +498,6 @@ class _BggScreenState extends State<BggScreen> {
       successCount: ok,
       failCount: fail,
     );
-
-    // El diálogo de progreso se cierra con el botón al terminar.
   }
 
   @override
@@ -1068,6 +1134,20 @@ class _ChangesList extends StatelessWidget {
       },
     );
   }
+}
+
+class _ExportItemResult {
+  const _ExportItemResult({
+    required this.success,
+    required this.message,
+    required this.rateLimited,
+    required this.data,
+  });
+
+  final bool success;
+  final String message;
+  final bool rateLimited;
+  final Map data;
 }
 
 class _ExportProgress {
