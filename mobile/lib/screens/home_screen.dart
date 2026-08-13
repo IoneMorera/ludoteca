@@ -53,7 +53,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      body: RefreshIndicator(
+      body: SafeArea(
+        child: RefreshIndicator(
         onRefresh: () async {
           await syncProvider.syncNow();
           await juegosProvider.fetchStats();
@@ -136,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 12),
             _buildQuickActions(context, theme),
           ],
+        ),
         ),
       ),
     );

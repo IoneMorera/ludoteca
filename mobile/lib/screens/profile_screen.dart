@@ -13,6 +13,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late TextEditingController _nombreCtrl;
+  late TextEditingController _emailCtrl;
   bool _noEnfundo = false;
   bool _ocultarPorEstrenar = false;
   bool _ocultarFaltanTraduccion = false;
@@ -27,6 +28,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     final auth = context.read<AuthProvider>();
     _nombreCtrl = TextEditingController(text: auth.userName);
+    _emailCtrl = TextEditingController(text: auth.userEmail);
     _noEnfundo = auth.noEnfundo;
     _ocultarPorEstrenar = auth.ocultarPorEstrenar;
     _ocultarFaltanTraduccion = auth.ocultarFaltanTraduccion;
@@ -37,6 +39,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _nombreCtrl.dispose();
+    _emailCtrl.dispose();
     super.dispose();
   }
 
@@ -341,7 +344,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: TextEditingController(text: auth.userEmail),
+            controller: _emailCtrl,
             readOnly: true,
             decoration: const InputDecoration(
               labelText: 'Email',
