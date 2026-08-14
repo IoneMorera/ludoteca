@@ -236,21 +236,27 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   InkWell(
-                    onTap: () => setState(() => _showServerField = !_showServerField),
+                    onTap: () =>
+                        setState(() => _showServerField = !_showServerField),
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 8),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.dns_outlined, size: 16, color: Colors.grey[500]),
+                          Icon(Icons.dns_outlined,
+                              size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 6),
                           Text(
                             'Configurar servidor',
-                            style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.grey[500]),
                           ),
                           Icon(
-                            _showServerField ? Icons.expand_less : Icons.expand_more,
+                            _showServerField
+                                ? Icons.expand_less
+                                : Icons.expand_more,
                             size: 18,
                             color: Colors.grey[500],
                           ),
@@ -269,7 +275,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         border: const OutlineInputBorder(),
                         hintText: ApiConfig.defaultServerUrl,
                         helperText: 'Ej: http://192.168.1.100:8000',
-                        helperStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        helperStyle:
+                            TextStyle(fontSize: 11, color: Colors.grey[500]),
                       ),
                       style: const TextStyle(fontSize: 14),
                     ),
