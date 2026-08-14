@@ -26,6 +26,11 @@ class DatabaseService {
     return _db!;
   }
 
+  Future<void> close() async {
+    await _db?.close();
+    _db = null;
+  }
+
   Future<Database> _initDB() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'ludoteca.db');

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart' show SyncStatus;
@@ -7,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../providers/sync_provider.dart';
 import '../config/api_config.dart';
 import '../services/api_service.dart';
+import '../services/database_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,6 +21,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   String _appVersion = '';
+  String _packageName = '';
+  bool get _isDev => _packageName.endsWith('.dev');
 
   @override
   void initState() {
@@ -28,7 +34,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final info = await PackageInfo.fromPlatform();
       if (mounted) {
-        setState(() => _appVersion = '${info.version}+${info.buildNumber}');
+        setState(() {
+          _appVersion = info.version;
+          _packageName = info.packageName;
+        });
       }
     } catch (_) {
       if (mounted) setState(() => _appVersion = '?');
@@ -321,6 +330,101 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _cloneProdDatabase() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clonar BBDD de producción'),
+        content: const Text(
+          'Se sustituirán todos los datos locales de esta app Dev por una copia de la BBDD local de Ludoteca (prod).\n\n'
+          'La sesión y la URL del servidor no cambian. La app se cerrará al terminar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clonar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Clonando BBDD de producción...')),
+          ],
+        ),
+      ),
+    );
+
+    String? error;
+    try {
+      await DatabaseService().close();
+      const channel = MethodChannel('com.ludoteca.ludoteca_mobile/db_clone');
+      await channel.invokeMethod('cloneFromProd');
+    } on PlatformException catch (e) {
+      error = switch (e.code) {
+        'prod_not_installed' =>
+          'No está instalada la app de producción (Ludoteca).',
+        'no_database' =>
+          'La app de producción no tiene BBDD local todavía.',
+        'permission_denied' =>
+          'No se pudo acceder a la BBDD de producción. Reinstala ambas apps firmadas con la misma clave.',
+        _ => e.message ?? 'No se pudo clonar la BBDD.',
+      };
+    } catch (e) {
+      error = e.toString();
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+
+    if (error != null) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No se pudo clonar'),
+          content: Text(error!),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('BBDD clonada'),
+        content: const Text(
+          'Los datos locales de Dev ya son una copia de Prod. La app se cerrará; ábrela de nuevo.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar app'),
+          ),
+        ],
+      ),
+    );
+    exit(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -483,6 +587,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.edit_outlined, size: 20),
             onTap: _editServerUrl,
           ),
+          if (_isDev) ...[
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.copy_all_outlined),
+              title: const Text('Clonar BBDD de producción'),
+              subtitle: const Text(
+                'Sustituye los datos locales de Dev por los de Prod',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _cloneProdDatabase,
+            ),
+          ],
           const Divider(),
           ListTile(
             leading: const Icon(Icons.info_outline),

@@ -1,5 +1,9 @@
-    <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission
+        android:name="com.ludoteca.ludoteca_mobile.permission.CLONE_LOCAL_DB"
+        android:protectionLevel="signature" />
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="com.ludoteca.ludoteca_mobile.permission.CLONE_LOCAL_DB" />
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
@@ -35,6 +39,11 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
+        <provider
+            android:name=".LocalDbCloneProvider"
+            android:authorities="${applicationId}.localdb"
+            android:exported="true"
+            android:permission="com.ludoteca.ludoteca_mobile.permission.CLONE_LOCAL_DB" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -42,6 +51,7 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <package android:name="com.ludoteca.ludoteca_mobile" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
