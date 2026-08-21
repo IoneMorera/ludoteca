@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart' show SyncStatus;
+import '../config/app_environment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
@@ -128,6 +129,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: Icons.inventory_2_outlined,
                 color: Colors.brown,
                 route: '/juegos-por-colocar',
+              ),
+            ],
+            if (!auth.ocultarNuevasExpansiones &&
+                _asInt(stats['expansionesNuevas']) > 0) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Nuevas expansiones',
+                subtitulo:
+                    '${_asInt(stats['expansionesNuevas'])} expansiones BGG recientes',
+                icon: Icons.new_releases_outlined,
+                color: Colors.red,
+                route: '/nuevas-expansiones',
               ),
             ],
             const SizedBox(height: 28),
@@ -320,14 +333,16 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           },
         ),
-        const SizedBox(height: 8),
-        _ActionTile(
-          icon: Icons.casino,
-          title: 'Planificar partida',
-          subtitle: 'Busca el juego perfecto para hoy',
-          color: Colors.deepPurple,
-          onTap: () => Navigator.of(context).pushNamed('/game-night'),
-        ),
+        if (AppEnvironment.isDev) ...[
+          const SizedBox(height: 8),
+          _ActionTile(
+            icon: Icons.casino,
+            title: 'Planificar partida',
+            subtitle: 'Busca el juego perfecto para hoy',
+            color: Colors.deepPurple,
+            onTap: () => Navigator.of(context).pushNamed('/game-night'),
+          ),
+        ],
       ],
     );
   }

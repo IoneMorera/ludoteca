@@ -5,10 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart' show SyncStatus;
+import '../data/bgg_expansion_scan_service.dart';
 import '../data/sync_verify_service.dart';
 import '../providers/auth_provider.dart';
+import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
 import '../config/api_config.dart';
+import '../config/app_environment.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
 
@@ -21,8 +24,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   String _appVersion = '';
-  String _packageName = '';
-  bool get _isDev => _packageName.endsWith('.dev');
+  bool get _isDev => AppEnvironment.isDev;
 
   @override
   void initState() {
@@ -36,11 +38,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() {
           _appVersion = info.version;
-          _packageName = info.packageName;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _appVersion = '?');
+    }
+  }
+
+  Future<void> _showExpansionScanMenu() async {
+    final modo = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.speed),
+              title: const Text('Escaneo rápido'),
+              subtitle: const Text(
+                'Revisa juegos nuevos y los que llevan más tiempo sin comprobar',
+              ),
+              onTap: () => Navigator.pop(ctx, 'incremental'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.sync),
+              title: const Text('Escaneo completo'),
+              subtitle: const Text(
+                'Revisa todo el catálogo; puede tardar varios minutos',
+              ),
+              onTap: () => Navigator.pop(ctx, 'completo'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || modo == null) return;
+    await _scanBggExpansions(modo: modo);
+  }
+
+  Future<void> _scanBggExpansions({required String modo}) async {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Comprobando expansiones BGG...')),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      await BggExpansionScanService().runScan(modo: modo);
+      if (mounted) {
+        Navigator.of(context).pop();
+        await context.read<JuegosProvider>().fetchStats();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Comprobación de expansiones completada'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al comprobar expansiones: $e')),
+        );
+      }
     }
   }
 
@@ -516,14 +587,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => Navigator.of(context).pushNamed('/tipos-funda'),
           ),
           const Divider(),
-          ListTile(
-            leading: const Icon(Icons.sports_esports),
-            title: const Text('Planificar partida'),
-            subtitle: const Text('Busca juegos por jugadores y edad'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).pushNamed('/game-night'),
-          ),
-          const Divider(),
+          if (AppEnvironment.isDev) ...[
+            ListTile(
+              leading: const Icon(Icons.sports_esports),
+              title: const Text('Planificar partida'),
+              subtitle: const Text('Busca juegos por jugadores y edad'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).pushNamed('/game-night'),
+            ),
+            const Divider(),
+          ],
           ListTile(
             leading: const Icon(Icons.cloud_download),
             title: const Text('BGG'),
@@ -572,21 +645,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(),
           ListTile(
-            leading: const Icon(Icons.fact_check_outlined),
-            title: const Text('Verificar integridad'),
-            subtitle: const Text('Compara datos locales con el servidor'),
+            leading: const Icon(Icons.extension_outlined),
+            title: const Text('Comprobar expansiones en BGG'),
+            subtitle: const Text(
+              'Busca expansiones de BGG que no están en tu ludoteca',
+            ),
             trailing: const Icon(Icons.chevron_right),
-            onTap: _verifySyncIntegrity,
+            onTap: _showExpansionScanMenu,
           ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.dns_outlined),
-            title: const Text('Servidor API'),
-            subtitle: Text(ApiConfig.serverUrl,
-                style: const TextStyle(fontSize: 12)),
-            trailing: const Icon(Icons.edit_outlined, size: 20),
-            onTap: _editServerUrl,
-          ),
+          if (AppEnvironment.isDev) ...[
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.fact_check_outlined),
+              title: const Text('Verificar integridad'),
+              subtitle: const Text('Compara datos locales con el servidor'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _verifySyncIntegrity,
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: const Text('Servidor API'),
+              subtitle: Text(ApiConfig.serverUrl,
+                  style: const TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.edit_outlined, size: 20),
+              onTap: _editServerUrl,
+            ),
+          ],
           if (_isDev) ...[
             const Divider(),
             ListTile(

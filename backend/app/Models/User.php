@@ -25,6 +25,7 @@ class User extends Authenticatable
         'ocultar_faltan_traduccion',
         'ocultar_expansion_otro_idioma',
         'ocultar_por_colocar',
+        'ocultar_nuevas_expansiones',
     ];
 
     protected $hidden = [
@@ -43,6 +44,7 @@ class User extends Authenticatable
         'ocultar_faltan_traduccion' => 'boolean',
         'ocultar_expansion_otro_idioma' => 'boolean',
         'ocultar_por_colocar' => 'boolean',
+        'ocultar_nuevas_expansiones' => 'boolean',
     ];
 
     public function tenant()
@@ -68,6 +70,7 @@ class User extends Authenticatable
                 'ocultar_faltan_traduccion',
                 'ocultar_expansion_otro_idioma',
                 'ocultar_por_colocar',
+                'ocultar_nuevas_expansiones',
             ),
             [
                 'bgg_connected' => $this->isBggConnected(),

@@ -88,6 +88,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('bgg/import', [BggController::class, 'import']);
         Route::post('bgg/import-expansions', [BggController::class, 'importExpansions']);
         Route::post('bgg/import-images', [BggController::class, 'importImages']);
+        Route::post('bgg/expansions/scan', [BggController::class, 'scanExpansions']);
+        Route::patch('bgg/expansiones/{bggExpansion}', [BggController::class, 'updateExpansion']);
 
         Route::apiResource('categorias', CategoriaController::class);
         Route::apiResource('tipos-funda', TipoFundaController::class)

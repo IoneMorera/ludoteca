@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
+import '../data/bgg_expansion_repository.dart';
 import '../data/sync_service.dart';
 import '../models/juego.dart';
 import '../providers/bgg_collection_provider.dart';
 import '../providers/juegos_provider.dart';
+import '../widgets/expansion_faltante_actions.dart';
 import '../widgets/game_image.dart';
 
 /// Detalle de un juego.
@@ -22,17 +24,32 @@ class JuegoDetailScreen extends StatefulWidget {
 }
 
 class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
+  List<BggExpansionRow> _faltantes = [];
+
   @override
   void initState() {
     super.initState();
-    SchedulerBinding.instance.addPostFrameCallback((_) {
+    SchedulerBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<JuegosProvider>();
       if (widget.juegoLocalId != null) {
-        provider.fetchJuego(widget.juegoLocalId!);
+        await provider.fetchJuego(widget.juegoLocalId!);
       } else if (widget.juegoServerId != null) {
-        provider.fetchJuego(widget.juegoServerId!, isServerId: true);
+        await provider.fetchJuego(widget.juegoServerId!, isServerId: true);
       }
+      await _loadFaltantes();
     });
+  }
+
+  Future<void> _loadFaltantes() async {
+    final juego = context.read<JuegosProvider>().juegoDetalle;
+    if (juego?.bggId == null || juego!.esExpansion) {
+      if (mounted) setState(() => _faltantes = []);
+      return;
+    }
+    final faltantes = await context
+        .read<JuegosProvider>()
+        .faltantesExpansiones(juego.bggId!);
+    if (mounted) setState(() => _faltantes = faltantes);
   }
 
   Future<void> _openEditor(BuildContext context, Juego juego) async {
@@ -356,7 +373,10 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
           : juego == null
               ? const Center(child: Text('Juego no encontrado'))
               : RefreshIndicator(
-                  onRefresh: () => provider.refreshDetail(),
+                  onRefresh: () async {
+                    await provider.refreshDetail();
+                    await _loadFaltantes();
+                  },
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
                     children: [
@@ -367,34 +387,89 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                         const SizedBox(height: 20),
                         _buildPropietariosSection(juego, theme),
                       ],
-                      if (juego.expansiones.isNotEmpty) ...[
+                      if (juego.expansiones.isNotEmpty || _faltantes.isNotEmpty) ...[
                         const SizedBox(height: 20),
-                        _buildSection(
-                          'Expansiones (${juego.expansiones.length})',
-                          theme,
-                          child: Column(
-                            children: juego.expansiones
-                                .map((exp) => ListTile(
-                                      dense: true,
-                                      contentPadding: EdgeInsets.zero,
-                                      leading: const Icon(Icons.extension,
-                                          size: 20),
-                                      title: Text(exp.nombre,
-                                          style:
-                                              const TextStyle(fontSize: 14)),
-                                      trailing: const Icon(Icons.chevron_right,
-                                          size: 18),
-                                      onTap: () => Navigator.of(context)
-                                          .pushNamed('/juego',
-                                              arguments: exp.localId),
-                                    ))
-                                .toList(),
-                          ),
-                        ),
+                        _buildExpansionesSection(juego, theme),
                       ],
                     ],
                   ),
                 ),
+    );
+  }
+
+  Widget _buildExpansionesSection(Juego juego, ThemeData theme) {
+    final errorColor = theme.colorScheme.error;
+    final total = juego.expansiones.length + _faltantes.length;
+    final baseLocalId = juego.localId;
+
+    return _buildSection(
+      'Expansiones ($total)',
+      theme,
+      child: Column(
+        children: [
+          ...juego.expansiones.map(
+            (exp) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.extension, size: 20),
+              title: Text(exp.nombre, style: const TextStyle(fontSize: 14)),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => Navigator.of(context)
+                  .pushNamed('/juego', arguments: exp.localId),
+            ),
+          ),
+          ..._faltantes.map(
+            (exp) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.extension, size: 20, color: errorColor),
+              title: Text(
+                exp.nombre,
+                style: TextStyle(fontSize: 14, color: errorColor),
+              ),
+              subtitle: Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: errorColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'Faltante',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: errorColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (exp.anio != null) ...[
+                    const SizedBox(width: 8),
+                    Text('${exp.anio}', style: const TextStyle(fontSize: 12)),
+                  ],
+                ],
+              ),
+              trailing: baseLocalId == null
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.more_vert),
+                      onPressed: () {
+                        final id = baseLocalId;
+                        if (id == null) return;
+                        ExpansionFaltanteActions.showMenu(
+                          context,
+                          expansion: exp,
+                          juegoBaseLocalId: id,
+                          onChanged: _loadFaltantes,
+                        );
+                      },
+                    ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

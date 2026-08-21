@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 
+import '../data/bgg_expansion_scan_service.dart';
 import '../data/juego_repository.dart';
 import '../data/outbox_dao.dart';
 import '../data/sync_service.dart';
@@ -132,6 +135,7 @@ class _BggScreenState extends State<BggScreen> {
       // Sincroniza DESPU\u00c9S de descargar im\u00e1genes para traer el campo `imagen`.
       if (mounted) {
         context.read<SyncProvider>().syncNow(fullPull: false);
+        unawaited(BggExpansionScanService().runScan(modo: 'nuevos'));
       } else {
         SyncService().syncAll();
       }

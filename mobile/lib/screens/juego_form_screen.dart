@@ -15,6 +15,7 @@ import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../services/api_service.dart';
+import '../widgets/juego_picker_sheet.dart';
 import 'bgg_search_picker.dart';
 
 /// Pantalla \u00fanica para crear y editar juegos.
@@ -301,6 +302,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       _imagenPath = game['image'];
     } else if (game['thumbnail'] != null) {
       _imagenPath = game['thumbnail'];
+    }
+    if (game['es_expansion'] == true) {
+      _esExpansion = true;
+    }
+    final baseLocalId = game['juego_base_local_id'];
+    if (baseLocalId is int) {
+      _juegoBaseLocalId = baseLocalId;
     }
   }
 
@@ -1068,7 +1076,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                       fontWeight: FontWeight.w600,
                       color: Colors.grey[700])),
               const SizedBox(height: 8),
-              _JuegoBasePicker(
+              JuegoBasePicker(
                 initialLocalId: _juegoBaseLocalId,
                 onChanged: (id) async {
                   setState(() {
@@ -2279,112 +2287,4 @@ class _FundaDraft {
     required this.cantidadCartas,
     required this.enfundadas,
   });
-}
-
-class _JuegoBasePicker extends StatefulWidget {
-  final int? initialLocalId;
-  final ValueChanged<int?> onChanged;
-
-  const _JuegoBasePicker({this.initialLocalId, required this.onChanged});
-
-  @override
-  State<_JuegoBasePicker> createState() => _JuegoBasePickerState();
-}
-
-class _JuegoBasePickerState extends State<_JuegoBasePicker> {
-  int? _selectedLocalId;
-  String? _selectedNombre;
-  List<Juego> _suggestions = [];
-  final _searchCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedLocalId = widget.initialLocalId;
-    _loadName();
-  }
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadName() async {
-    if (_selectedLocalId == null) return;
-    final provider = context.read<JuegosProvider>();
-    final j = await provider.juegoRepository.getByLocalId(_selectedLocalId!);
-    if (mounted) setState(() => _selectedNombre = j?.nombre);
-  }
-
-  Future<void> _search(String q) async {
-    final provider = context.read<JuegosProvider>();
-    if (q.length < 2) {
-      setState(() => _suggestions = []);
-      return;
-    }
-    final results =
-        await provider.juegoRepository.search(buscar: q, perPage: 20, soloBase: true);
-    if (mounted) setState(() => _suggestions = results);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_selectedLocalId != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Chip(
-              label: Text(_selectedNombre ?? 'Juego base seleccionado'),
-              avatar: const Icon(Icons.casino, size: 16),
-              onDeleted: () {
-                setState(() {
-                  _selectedLocalId = null;
-                  _selectedNombre = null;
-                });
-                widget.onChanged(null);
-              },
-            ),
-          ),
-        TextField(
-          controller: _searchCtrl,
-          decoration: const InputDecoration(
-            isDense: true,
-            hintText: 'Buscar juego base...',
-            prefixIcon: Icon(Icons.search),
-            border: OutlineInputBorder(),
-          ),
-          onChanged: _search,
-        ),
-        if (_suggestions.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(top: 6),
-            constraints: const BoxConstraints(maxHeight: 200),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: ListView(
-              shrinkWrap: true,
-              children: _suggestions
-                  .map((j) => ListTile(
-                        dense: true,
-                        title: Text(j.nombre),
-                        onTap: () {
-                          setState(() {
-                            _selectedLocalId = j.localId;
-                            _selectedNombre = j.nombre;
-                            _suggestions = [];
-                          });
-                          widget.onChanged(j.localId);
-                        },
-                      ))
-                  .toList(),
-            ),
-          ),
-      ],
-    );
-  }
 }

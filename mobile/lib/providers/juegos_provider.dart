@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../data/bgg_expansion_repository.dart';
 import '../data/categoria_repository.dart';
 import '../data/juego_repository.dart';
 import '../data/outbox_dao.dart';
@@ -28,6 +29,8 @@ class JuegosProvider extends ChangeNotifier {
       UbicacionRepository(_dbService, _outbox);
   late final TipoFundaRepository _tiposFunda =
       TipoFundaRepository(_dbService, _outbox);
+  late final BggExpansionRepository _bggExpansiones =
+      BggExpansionRepository(_dbService, _outbox);
 
   List<Juego> _items = [];
   Juego? _juegoDetalle;
@@ -51,6 +54,7 @@ class JuegosProvider extends ChangeNotifier {
   static const int _perPage = 30;
 
   JuegoRepository get juegoRepository => _juegos;
+  BggExpansionRepository get bggExpansionRepository => _bggExpansiones;
   CategoriaRepository get categoriaRepository => _categorias;
   PropietarioRepository get propietarioRepository => _propietarios;
   UbicacionRepository get ubicacionRepository => _ubicaciones;
@@ -165,6 +169,8 @@ class JuegosProvider extends ChangeNotifier {
   Future<void> fetchStats() async {
     try {
       _stats = await _juegos.stats();
+      _stats['expansionesNuevas'] =
+          await _bggExpansiones.countNuevasDelAnio();
       _fundasFaltantes = await _juegos.fundasFaltantesAgrupadas();
       _stats['fundasFaltantes'] = _fundasFaltantes;
     } catch (e) {
@@ -172,6 +178,9 @@ class JuegosProvider extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  Future<List<BggExpansionRow>> faltantesExpansiones(int baseBggId) =>
+      _bggExpansiones.faltantesDe(baseBggId);
 
   Future<int> saveJuego(
     Juego juego, {
