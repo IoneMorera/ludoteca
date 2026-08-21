@@ -50,10 +50,27 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _loading = false;
-      _error = 'Credenciales incorrectas';
+      _error = _parseLoginError(e);
       notifyListeners();
       return false;
     }
+  }
+
+  String _parseLoginError(Object e) {
+    if (e is DioException) {
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.response == null) {
+        return 'No se pudo conectar con el servidor. Comprueba tu conexión.';
+      }
+      final data = e.response?.data;
+      if (data is Map && data['message'] is String) {
+        return data['message'] as String;
+      }
+    }
+    return 'Credenciales incorrectas';
   }
 
   Future<bool> register({

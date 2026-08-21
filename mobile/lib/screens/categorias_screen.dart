@@ -148,6 +148,7 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       try {
         final repo = context.read<JuegosProvider>().categoriaRepository;
         await repo.delete(categoria.localId);

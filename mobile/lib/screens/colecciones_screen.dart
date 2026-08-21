@@ -169,7 +169,7 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
           padding: const EdgeInsets.all(12),
           child: DropdownButtonFormField<int>(
             key: ValueKey('dropdown_$_propietarioSeleccionadoId'),
-            value: _propietarioSeleccionadoId,
+            initialValue: _propietarioSeleccionadoId,
             decoration: const InputDecoration(
               labelText: 'Propietario',
               border: OutlineInputBorder(),

@@ -411,7 +411,7 @@ class UbicacionRepository {
         serverId: serverId,
         payload: {
           'nombre': nombre,
-          if (habServerId != null) 'habitacion_id': habServerId,
+          'habitacion_id': ?habServerId,
         },
         baseUpdatedAt: baseUpdatedAt,
       );
@@ -446,7 +446,7 @@ class UbicacionRepository {
         serverId: serverId,
         payload: {
           'nombre': nombre,
-          if (muebleServerId != null) 'mueble_id': muebleServerId,
+          'mueble_id': ?muebleServerId,
         },
         baseUpdatedAt: baseUpdatedAt,
       );

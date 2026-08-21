@@ -527,14 +527,16 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
 
   Future<void> _addUbicacionFromForm({ValueChanged<int?>? onSelected}) async {
     final created = await _showCreateUbicacionFlow();
-    if (created == true) {
-      final repo = context.read<JuegosProvider>().ubicacionRepository;
-      final updated = await repo.getAll();
-      final newest = updated.isNotEmpty ? updated.last.localId : null;
-      setState(() => _ubicaciones = updated);
-      if (newest != null) {
-        onSelected?.call(newest);
-      }
+    if (created != true || !mounted) return;
+
+    final repo = context.read<JuegosProvider>().ubicacionRepository;
+    final updated = await repo.getAll();
+    if (!mounted) return;
+
+    final newest = updated.isNotEmpty ? updated.last.localId : null;
+    setState(() => _ubicaciones = updated);
+    if (newest != null) {
+      onSelected?.call(newest);
     }
   }
 
@@ -1214,11 +1216,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       ),
     );
 
-    if (result == true) {
-      final repo = context.read<JuegosProvider>().categoriaRepository;
-      final updated = await repo.getAll();
-      setState(() => _categorias = updated);
-    }
+    if (result != true || !mounted) return;
+
+    final repo = context.read<JuegosProvider>().categoriaRepository;
+    final updated = await repo.getAll();
+    if (!mounted) return;
+
+    setState(() => _categorias = updated);
   }
 
   Widget _buildCategoriasSection() {
@@ -2040,11 +2044,13 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       ),
     );
 
-    if (result == true) {
-      final repo = context.read<JuegosProvider>().tipoFundaRepository;
-      final updated = _sortTiposFunda(await repo.getAll());
-      setState(() => _tiposFunda = updated);
-    }
+    if (result != true || !mounted) return;
+
+    final repo = context.read<JuegosProvider>().tipoFundaRepository;
+    final updated = _sortTiposFunda(await repo.getAll());
+    if (!mounted) return;
+
+    setState(() => _tiposFunda = updated);
   }
 
   List<TipoFundaRow> _sortTiposFunda(List<TipoFundaRow> tipos) {

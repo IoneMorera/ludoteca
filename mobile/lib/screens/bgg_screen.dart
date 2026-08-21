@@ -436,6 +436,7 @@ class _BggScreenState extends State<BggScreen> {
       }
 
       final bridge = BggWebViewBridge();
+      if (!mounted) return;
       overlay = OverlayEntry(
         builder: (_) => Positioned(
           left: -400,

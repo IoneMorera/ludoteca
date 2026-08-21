@@ -688,14 +688,6 @@ class _BggWebViewHostState extends State<BggWebViewHost> {
     return text;
   }
 
-  bool _looksBlocked(String body) {
-    final lower = body.toLowerCase();
-    return lower.contains('just a moment') ||
-        lower.contains('cf-browser-verification') ||
-        lower.contains('attention required') ||
-        lower.contains('challenge-platform');
-  }
-
   int? _extractCollId(String body) {
     final trimmed = body.trim();
     if (trimmed.isEmpty) return null;

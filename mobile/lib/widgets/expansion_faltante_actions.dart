@@ -42,8 +42,9 @@ class ExpansionFaltanteActions {
           );
       await SyncService().syncAll();
       if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(context);
         await context.read<JuegosProvider>().fetchStats();
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(content: Text('${juego.nombre} vinculado a BGG')),
         );
       }
