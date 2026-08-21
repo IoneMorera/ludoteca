@@ -13,6 +13,7 @@ import '../config/api_config.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../services/phash_service.dart';
+import 'bgg_expansion_repository.dart';
 import 'categoria_repository.dart';
 import 'juego_repository.dart';
 import 'outbox_dao.dart';
@@ -72,6 +73,8 @@ class SyncService {
   late final TipoFundaRepository _tiposFunda =
       TipoFundaRepository(_dbService, _outbox);
   late final JuegoRepository _juegos = JuegoRepository(_dbService, _outbox);
+  late final BggExpansionRepository _bggExpansiones =
+      BggExpansionRepository(_dbService, _outbox);
 
   final StreamController<SyncSnapshot> _controller =
       StreamController<SyncSnapshot>.broadcast();
@@ -524,6 +527,12 @@ class SyncService {
     for (final r in jc) {
       await _juegos.upsertJuegoCategoriaFromServer(r);
     }
+    final bggExp = (tables['bgg_expansiones'] as List?)
+            ?.cast<Map<String, dynamic>>() ??
+        [];
+    for (final row in bggExp) {
+      await _bggExpansiones.upsertFromServer(row);
+    }
 
     // tombstones (borrados): aplicar después del upsert.
     for (final entry in deleted.entries) {
@@ -551,6 +560,9 @@ class SyncService {
         case 'juego_propietario_fundas':
         case 'juego_categoria':
           await _juegos.deleteByServerIds(table, ids);
+          break;
+        case 'bgg_expansiones':
+          await _bggExpansiones.deleteByServerIds(ids);
           break;
       }
     }

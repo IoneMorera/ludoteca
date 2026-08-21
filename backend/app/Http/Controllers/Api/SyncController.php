@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\BggExpansion;
 use App\Models\Categoria;
 use App\Models\Habitacion;
 use App\Models\Juego;
@@ -41,6 +42,7 @@ class SyncController extends Controller
             'juego_propietario' => $this->fetchJuegoPropietario(null),
             'juego_propietario_fundas' => $this->fetchJuegoPropietarioFundas(null),
             'juego_categoria' => $this->fetchJuegoCategoria(null),
+            'bgg_expansiones' => $this->fetchBggExpansiones(null),
         ];
 
         return response()->json([
@@ -70,6 +72,7 @@ class SyncController extends Controller
             'juego_propietario' => $this->fetchJuegoPropietario($since),
             'juego_propietario_fundas' => $this->fetchJuegoPropietarioFundas($since),
             'juego_categoria' => $this->fetchJuegoCategoria($since),
+            'bgg_expansiones' => $this->fetchBggExpansiones($since),
         ];
 
         $deleted = $this->fetchTombstones($since);
@@ -273,6 +276,7 @@ class SyncController extends Controller
                 'juego_propietario_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas',
             ],
             'juego_categoria' => ['juego_id', 'categoria_id'],
+            'bgg_expansiones' => ['ignorada'],
             default => [],
         };
 
@@ -293,6 +297,7 @@ class SyncController extends Controller
             'juego_propietario' => JuegoPropietarioPivot::class,
             'juego_propietario_fundas' => JuegoPropietarioFunda::class,
             'juego_categoria' => JuegoCategoriaPivot::class,
+            'bgg_expansiones' => BggExpansion::class,
             default => throw new \InvalidArgumentException("Unknown table: {$table}"),
         };
     }
@@ -513,6 +518,26 @@ class SyncController extends Controller
                 'categoria_id' => $row->categoria_id,
                 'created_at' => $row->created_at,
                 'updated_at' => $row->updated_at,
+            ])->all();
+    }
+
+    private function fetchBggExpansiones(?Carbon $since): array
+    {
+        return BggExpansion::query()
+            ->when($since, fn ($q) => $q->where('updated_at', '>', $since))
+            ->get()
+            ->map(fn (BggExpansion $row) => [
+                'id' => $row->id,
+                'base_bgg_id' => (int) $row->base_bgg_id,
+                'expansion_bgg_id' => (int) $row->expansion_bgg_id,
+                'nombre' => $row->nombre,
+                'anio' => $row->anio !== null ? (int) $row->anio : null,
+                'imagen' => $row->imagen,
+                'min_jugadores' => $row->min_jugadores !== null ? (int) $row->min_jugadores : null,
+                'max_jugadores' => $row->max_jugadores !== null ? (int) $row->max_jugadores : null,
+                'ignorada' => (bool) $row->ignorada,
+                'created_at' => $row->created_at?->toIso8601String(),
+                'updated_at' => $row->updated_at?->toIso8601String(),
             ])->all();
     }
 

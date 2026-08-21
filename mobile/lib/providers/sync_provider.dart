@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/bgg_expansion_scan_service.dart';
 import '../data/sync_service.dart';
 
 /// Provider que expone el estado de sincronizaci\u00f3n a la UI.
@@ -31,8 +33,29 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _service.syncAll();
+      unawaited(_service.syncAll());
+      unawaited(_maybeRunIncrementalExpansionScan());
     }
+  }
+
+  Future<void> _maybeRunIncrementalExpansionScan() async {
+    try {
+      if (!await _service.isOnline()) return;
+      final prefs = await SharedPreferences.getInstance();
+      final last = prefs.getString('last_expansion_scan_at');
+      if (last != null) {
+        final lastDate = DateTime.tryParse(last);
+        if (lastDate != null &&
+            DateTime.now().difference(lastDate).inHours < 24) {
+          return;
+        }
+      }
+      await BggExpansionScanService().runScan(modo: 'incremental');
+      await prefs.setString(
+        'last_expansion_scan_at',
+        DateTime.now().toIso8601String(),
+      );
+    } catch (_) {}
   }
 
   @override

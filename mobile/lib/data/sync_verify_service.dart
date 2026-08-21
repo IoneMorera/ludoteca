@@ -97,6 +97,10 @@ class SyncVerifyService {
       'juego_propietario_id', 'tipo_funda_id', 'cantidad_cartas', 'enfundadas',
     ],
     'juego_categoria': ['juego_id', 'categoria_id'],
+    'bgg_expansiones': [
+      'base_bgg_id', 'expansion_bgg_id', 'nombre', 'anio', 'imagen',
+      'min_jugadores', 'max_jugadores', 'ignorada',
+    ],
   };
 
   /// Campos que en local se almacenan como `campo_server_id` en lugar de `campo_id`.
@@ -140,6 +144,7 @@ class SyncVerifyService {
       'tradumaquetado', 'tradumaquetado_parcial', 'sin_abrir', 'print_and_play',
     ],
     'juego_propietario_fundas': ['enfundadas'],
+    'bgg_expansiones': ['ignorada'],
   };
 
   Future<SyncVerifyResult> verify() async {

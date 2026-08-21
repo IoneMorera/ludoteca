@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\BggExpansion;
 use App\Models\Categoria;
 use App\Models\Juego;
 use App\Models\Propietario;
@@ -23,6 +24,9 @@ class BggController extends Controller
     private const RETRY_DELAY_SECONDS = 2;
     private const IMAGE_USER_AGENT = 'Ludoteca/1.0 (BoardGameGeek Integration)';
     private const IMAGE_TIMEOUT = 20;
+    private const THING_BATCH_SIZE = 20;
+    private const THING_POOL_CONCURRENCY = 3;
+    private const SCAN_INCREMENTAL_BUDGET = 60;
 
     public function connect(Request $request): JsonResponse
     {
@@ -2730,5 +2734,394 @@ class BggController extends Controller
         usort($games, fn ($a, $b) => $b['rating'] <=> $a['rating']);
 
         return $games;
+    }
+
+    /**
+     * Escaneo por lotes de expansiones BGG faltantes en la ludoteca.
+     *
+     * Body: { modo: nuevos|incremental|completo, fase: links|detalles, cursor: int, limite: int }
+     */
+    public function scanExpansions(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'modo' => 'required|in:nuevos,incremental,completo',
+            'fase' => 'required|in:links,detalles',
+            'cursor' => 'sometimes|integer|min:0',
+            'limite' => 'sometimes|integer|min:1|max:100',
+        ]);
+
+        $modo = $validated['modo'];
+        $fase = $validated['fase'];
+        $cursor = (int) ($validated['cursor'] ?? 0);
+        $limite = (int) ($validated['limite'] ?? self::THING_BATCH_SIZE);
+
+        $apiKey = config('services.bgg.api_key');
+        if (empty($apiKey)) {
+            return response()->json([
+                'message' => 'BGG_API_KEY no configurada.',
+            ], 500);
+        }
+
+        if ($fase === 'links') {
+            return response()->json($this->scanExpansionLinksPhase($modo, $cursor, $limite, $apiKey));
+        }
+
+        $result = $this->scanExpansionDetallesPhase($cursor, $limite, $apiKey);
+        if ($result['terminado'] && $modo === 'completo') {
+            $this->cleanupOrphanBggExpansionRows();
+        }
+
+        return response()->json($result);
+    }
+
+    public function updateExpansion(Request $request, BggExpansion $bggExpansion): JsonResponse
+    {
+        $validated = $request->validate([
+            'ignorada' => 'sometimes|boolean',
+        ]);
+
+        $bggExpansion->fill($validated);
+        $bggExpansion->save();
+
+        return response()->json($bggExpansion);
+    }
+
+    private function scanExpansionLinksPhase(string $modo, int $cursor, int $limite, string $apiKey): array
+    {
+        $allBaseIds = $this->allBaseBggIdsOrdered();
+        $total = count($allBaseIds);
+
+        if ($modo === 'incremental') {
+            $eligible = $this->filterBaseBggIdsForIncrementalScan($allBaseIds);
+            $batch = array_slice($eligible, 0, min($limite, self::SCAN_INCREMENTAL_BUDGET));
+            $total = count($eligible);
+            $terminado = true;
+        } elseif ($modo === 'nuevos') {
+            $eligible = $this->filterBaseBggIdsNeverChecked($allBaseIds);
+            $batch = array_slice($eligible, 0, $limite);
+            $total = count($eligible);
+            $terminado = true;
+        } else {
+            $batch = array_slice($allBaseIds, $cursor, $limite);
+            $terminado = ($cursor + count($batch)) >= $total;
+        }
+
+        if (empty($batch)) {
+            return [
+                'fase' => 'links',
+                'cursor' => $cursor,
+                'total' => $total,
+                'procesados' => 0,
+                'terminado' => true,
+            ];
+        }
+
+        $chunks = array_chunk($batch, self::THING_BATCH_SIZE);
+        $itemsById = $this->fetchThingItemsForChunks($chunks, $apiKey);
+
+        foreach ($batch as $baseBggId) {
+            if (isset($itemsById[$baseBggId])) {
+                $links = $this->parseBaseGameExpansionLinks($itemsById[$baseBggId]);
+                $this->upsertExpansionLinksForBase($baseBggId, $links);
+            }
+
+            $linksCount = BggExpansion::query()
+                ->where('base_bgg_id', $baseBggId)
+                ->count();
+            $now = now();
+            DB::table('bgg_expansion_checks')->upsert(
+                [[
+                    'base_bgg_id' => $baseBggId,
+                    'checked_at' => $now,
+                    'links_count' => $linksCount,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]],
+                ['base_bgg_id'],
+                ['checked_at', 'links_count', 'updated_at']
+            );
+        }
+
+        return [
+            'fase' => 'links',
+            'cursor' => $modo === 'completo' ? $cursor + count($batch) : count($batch),
+            'total' => $total,
+            'procesados' => count($batch),
+            'terminado' => $terminado,
+        ];
+    }
+
+    private function scanExpansionDetallesPhase(int $cursor, int $limite, string $apiKey): array
+    {
+        $ownedBggIds = Juego::query()
+            ->whereNotNull('bgg_id')
+            ->pluck('bgg_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $query = BggExpansion::query()
+            ->whereNull('anio')
+            ->when(!empty($ownedBggIds), fn ($q) => $q->whereNotIn('expansion_bgg_id', $ownedBggIds))
+            ->orderBy('id');
+
+        $total = (clone $query)->count();
+        $rows = $query->offset($cursor)->limit($limite)->get();
+
+        if ($rows->isEmpty()) {
+            return [
+                'fase' => 'detalles',
+                'cursor' => $cursor,
+                'total' => $total,
+                'procesados' => 0,
+                'terminado' => true,
+            ];
+        }
+
+        $expansionIds = $rows->pluck('expansion_bgg_id')->map(fn ($id) => (int) $id)->all();
+        $details = $this->fetchThingDetails($expansionIds, $apiKey);
+
+        foreach ($rows as $row) {
+            $detail = $details[$row->expansion_bgg_id] ?? null;
+            if (!$detail) {
+                continue;
+            }
+            $row->anio = ($detail['year'] ?? 0) > 0 ? (int) $detail['year'] : null;
+            if (!empty($detail['image'])) {
+                $row->imagen = $detail['image'];
+            } elseif (!empty($detail['thumbnail'])) {
+                $row->imagen = $detail['thumbnail'];
+            }
+            if (!empty($detail['min_players'])) {
+                $row->min_jugadores = (int) $detail['min_players'];
+            }
+            if (!empty($detail['max_players'])) {
+                $row->max_jugadores = (int) $detail['max_players'];
+            }
+            $row->save();
+        }
+
+        $newCursor = $cursor + $rows->count();
+
+        return [
+            'fase' => 'detalles',
+            'cursor' => $newCursor,
+            'total' => $total,
+            'procesados' => $rows->count(),
+            'terminado' => $newCursor >= $total,
+        ];
+    }
+
+    private function allBaseBggIdsOrdered(): array
+    {
+        return Juego::query()
+            ->whereNotNull('bgg_id')
+            ->whereNull('juego_base_id')
+            ->orderBy('nombre')
+            ->pluck('bgg_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function filterBaseBggIdsNeverChecked(array $allBaseIds): array
+    {
+        if (empty($allBaseIds)) {
+            return [];
+        }
+
+        $checked = DB::table('bgg_expansion_checks')
+            ->whereIn('base_bgg_id', $allBaseIds)
+            ->whereNotNull('checked_at')
+            ->pluck('base_bgg_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $checkedSet = array_flip($checked);
+
+        return array_values(array_filter(
+            $allBaseIds,
+            fn ($id) => !isset($checkedSet[$id])
+        ));
+    }
+
+    private function filterBaseBggIdsForIncrementalScan(array $allBaseIds): array
+    {
+        if (empty($allBaseIds)) {
+            return [];
+        }
+
+        $checks = DB::table('bgg_expansion_checks')
+            ->whereIn('base_bgg_id', $allBaseIds)
+            ->get()
+            ->keyBy('base_bgg_id');
+
+        $maxYears = BggExpansion::query()
+            ->whereIn('base_bgg_id', $allBaseIds)
+            ->whereNotNull('anio')
+            ->where('anio', '>', 0)
+            ->selectRaw('base_bgg_id, MAX(anio) as max_anio')
+            ->groupBy('base_bgg_id')
+            ->pluck('max_anio', 'base_bgg_id');
+
+        $now = now();
+        $currentYear = (int) $now->format('Y');
+        $eligible = [];
+
+        foreach ($allBaseIds as $baseBggId) {
+            $check = $checks->get($baseBggId);
+            if (!$check || !$check->checked_at) {
+                $eligible[] = $baseBggId;
+                continue;
+            }
+
+            $checkedAt = \Illuminate\Support\Carbon::parse($check->checked_at);
+            $maxAnio = (int) ($maxYears[$baseBggId] ?? 0);
+            $linksCount = (int) ($check->links_count ?? 0);
+
+            if ($maxAnio >= $currentYear - 1) {
+                $thresholdDays = 7;
+            } elseif ($linksCount > 0) {
+                $thresholdDays = 90;
+            } else {
+                $thresholdDays = 180;
+            }
+
+            if ($checkedAt->lt($now->copy()->subDays($thresholdDays))) {
+                $eligible[] = $baseBggId;
+            }
+        }
+
+        usort($eligible, function ($a, $b) use ($checks) {
+            $aCheck = $checks->get($a);
+            $bCheck = $checks->get($b);
+            $aTime = $aCheck?->checked_at ? strtotime((string) $aCheck->checked_at) : 0;
+            $bTime = $bCheck?->checked_at ? strtotime((string) $bCheck->checked_at) : 0;
+
+            return $aTime <=> $bTime;
+        });
+
+        return array_slice($eligible, 0, self::SCAN_INCREMENTAL_BUDGET);
+    }
+
+    /**
+     * @param  array<int, array<int>>  $chunks
+     * @return array<int, \SimpleXMLElement>
+     */
+    private function fetchThingItemsForChunks(array $chunks, string $apiKey): array
+    {
+        $itemsById = [];
+
+        foreach (array_chunk($chunks, self::THING_POOL_CONCURRENCY) as $parallelGroup) {
+            $responses = Http::pool(function (Pool $pool) use ($parallelGroup, $apiKey) {
+                $requests = [];
+                foreach ($parallelGroup as $index => $ids) {
+                    if (empty($ids)) {
+                        continue;
+                    }
+                    $requests[] = $pool
+                        ->as('chunk_' . $index)
+                        ->timeout(45)
+                        ->withHeaders([
+                            'Accept' => 'application/xml',
+                            'Authorization' => 'Bearer ' . $apiKey,
+                            'User-Agent' => self::IMAGE_USER_AGENT,
+                        ])
+                        ->get(self::BGG_API_URL . '/thing', [
+                            'id' => implode(',', $ids),
+                        ]);
+                }
+
+                return $requests;
+            });
+
+            foreach ($responses as $response) {
+                if (!$response->successful()) {
+                    continue;
+                }
+                $data = @simplexml_load_string($response->body());
+                if ($data === false || !isset($data->item)) {
+                    continue;
+                }
+                foreach ($data->item as $item) {
+                    $id = (int) ($item['id'] ?? 0);
+                    if ($id) {
+                        $itemsById[$id] = $item;
+                    }
+                }
+            }
+        }
+
+        return $itemsById;
+    }
+
+    private function parseBaseGameExpansionLinks(\SimpleXMLElement $item): array
+    {
+        $links = [];
+        if (!isset($item->link)) {
+            return $links;
+        }
+
+        foreach ($item->link as $link) {
+            if ((string) $link['type'] !== 'boardgameexpansion') {
+                continue;
+            }
+            if ((string) $link['inbound'] === 'true') {
+                continue;
+            }
+            $expansionId = (int) ($link['id'] ?? 0);
+            if (!$expansionId) {
+                continue;
+            }
+            $links[] = [
+                'expansion_bgg_id' => $expansionId,
+                'nombre' => (string) ($link['value'] ?? ''),
+            ];
+        }
+
+        return $links;
+    }
+
+    private function upsertExpansionLinksForBase(int $baseBggId, array $links): void
+    {
+        foreach ($links as $link) {
+            if ($link['nombre'] === '') {
+                continue;
+            }
+            BggExpansion::query()->updateOrCreate(
+                [
+                    'base_bgg_id' => $baseBggId,
+                    'expansion_bgg_id' => $link['expansion_bgg_id'],
+                ],
+                [
+                    'nombre' => $link['nombre'],
+                ]
+            );
+        }
+    }
+
+    private function cleanupOrphanBggExpansionRows(): void
+    {
+        $validBaseIds = Juego::query()
+            ->whereNotNull('bgg_id')
+            ->whereNull('juego_base_id')
+            ->pluck('bgg_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (empty($validBaseIds)) {
+            BggExpansion::query()->each(fn (BggExpansion $row) => $row->delete());
+            DB::table('bgg_expansion_checks')->truncate();
+
+            return;
+        }
+
+        BggExpansion::query()
+            ->whereNotIn('base_bgg_id', $validBaseIds)
+            ->each(fn (BggExpansion $row) => $row->delete());
+
+        DB::table('bgg_expansion_checks')
+            ->whereNotIn('base_bgg_id', $validBaseIds)
+            ->delete();
     }
 }

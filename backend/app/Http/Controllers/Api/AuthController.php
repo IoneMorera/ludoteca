@@ -142,6 +142,7 @@ class AuthController extends Controller
             'ocultar_faltan_traduccion' => 'sometimes|boolean',
             'ocultar_expansion_otro_idioma' => 'sometimes|boolean',
             'ocultar_por_colocar' => 'sometimes|boolean',
+            'ocultar_nuevas_expansiones' => 'sometimes|boolean',
         ]);
 
         /** @var \App\Models\User $user */

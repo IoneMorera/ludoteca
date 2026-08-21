@@ -19,6 +19,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _ocultarFaltanTraduccion = false;
   bool _ocultarExpansionOtroIdioma = false;
   bool _ocultarPorColocar = false;
+  bool _ocultarNuevasExpansiones = false;
   bool _saving = false;
   bool _bggBusy = false;
   String? _error;
@@ -34,6 +35,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _ocultarFaltanTraduccion = auth.ocultarFaltanTraduccion;
     _ocultarExpansionOtroIdioma = auth.ocultarExpansionOtroIdioma;
     _ocultarPorColocar = auth.ocultarPorColocar;
+    _ocultarNuevasExpansiones = auth.ocultarNuevasExpansiones;
   }
 
   @override
@@ -56,6 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ocultarFaltanTraduccion: _ocultarFaltanTraduccion,
       ocultarExpansionOtroIdioma: _ocultarExpansionOtroIdioma,
       ocultarPorColocar: _ocultarPorColocar,
+      ocultarNuevasExpansiones: _ocultarNuevasExpansiones,
     );
     if (!mounted) return;
     setState(() {
@@ -470,6 +473,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   value: _ocultarPorColocar,
                   onChanged: (v) => setState(() => _ocultarPorColocar = v),
                   secondary: const Icon(Icons.inventory_2_outlined),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: const Text('Ocultar "Nuevas expansiones"'),
+                  subtitle: const Text(
+                    'Oculta el aviso de expansiones BGG recientes que faltan',
+                  ),
+                  value: _ocultarNuevasExpansiones,
+                  onChanged: (v) =>
+                      setState(() => _ocultarNuevasExpansiones = v),
+                  secondary: const Icon(Icons.new_releases_outlined),
                 ),
               ],
             ),

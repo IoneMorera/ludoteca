@@ -69,6 +69,7 @@ class JuegoRepository {
     int page = 1,
     int perPage = 50,
     bool soloBase = false,
+    bool soloSinBggId = false,
     String? estado,
     bool? esExpansion,
     int? categoriaLocalId,
@@ -82,6 +83,9 @@ class JuegoRepository {
     final args = <dynamic>[];
     if (soloBase) {
       where.add('(j.es_expansion = 0 OR j.autojugable = 1)');
+    }
+    if (soloSinBggId) {
+      where.add('j.bgg_id IS NULL');
     }
     _applyCommonFilters(
       where,
@@ -645,6 +649,60 @@ class JuegoRepository {
       where: 'server_id = ?',
       whereArgs: [serverId],
     );
+  }
+
+  /// Vincula un juego existente con una expansión BGG faltante.
+  Future<void> vincularExpansionBgg({
+    required int juegoLocalId,
+    required int expansionBggId,
+    required int juegoBaseLocalId,
+  }) async {
+    final db = await _dbService.database;
+    final existing = await db.query('juegos',
+        where: 'local_id = ?', whereArgs: [juegoLocalId], limit: 1);
+    if (existing.isEmpty) return;
+
+    final dup = await db.query(
+      'juegos',
+      where: 'bgg_id = ? AND local_id != ?',
+      whereArgs: [expansionBggId, juegoLocalId],
+      limit: 1,
+    );
+    if (dup.isNotEmpty) {
+      throw StateError('Ya existe un juego con este ID de BGG en la ludoteca.');
+    }
+
+    final serverId = existing.first['server_id'] as int?;
+    final baseUpdatedAt = existing.first['updated_at'] as String?;
+
+    final baseRow = await db.query('juegos',
+        where: 'local_id = ?', whereArgs: [juegoBaseLocalId], limit: 1);
+    final juegoBaseServerId =
+        baseRow.isEmpty ? null : baseRow.first['server_id'] as int?;
+
+    await db.update('juegos', {
+      'bgg_id': expansionBggId,
+      'es_expansion': 1,
+      'juego_base_local_id': juegoBaseLocalId,
+      'juego_base_server_id': juegoBaseServerId,
+      'dirty': 1,
+      'pending_action': 'update',
+    }, where: 'local_id = ?', whereArgs: [juegoLocalId]);
+
+    if (serverId != null) {
+      await _outbox.enqueue(
+        table: 'juegos',
+        action: SyncAction.update,
+        localId: juegoLocalId,
+        serverId: serverId,
+        payload: {
+          'bgg_id': expansionBggId,
+          'es_expansion': true,
+          'juego_base_id': juegoBaseServerId,
+        },
+        baseUpdatedAt: baseUpdatedAt,
+      );
+    }
   }
 
   /// Updates only the ubicacion (quick update from detail screen).

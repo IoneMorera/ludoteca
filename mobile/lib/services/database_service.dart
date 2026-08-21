@@ -19,7 +19,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 11;
+  static const int _schemaVersion = 12;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -86,6 +86,9 @@ class DatabaseService {
         }
         if (oldVersion < 11) {
           await _migrateToV11(db);
+        }
+        if (oldVersion < 12) {
+          await _migrateToV12(db);
         }
       },
     );
@@ -322,6 +325,30 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX idx_jc_juego ON juego_categoria(juego_local_id)');
 
+    await db.execute('''
+      CREATE TABLE bgg_expansiones (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        base_bgg_id INTEGER NOT NULL,
+        expansion_bgg_id INTEGER NOT NULL,
+        nombre TEXT NOT NULL,
+        anio INTEGER,
+        imagen TEXT,
+        min_jugadores INTEGER,
+        max_jugadores INTEGER,
+        ignorada INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX idx_bgg_exp_base ON bgg_expansiones(base_bgg_id)');
+    await db.execute(
+        'CREATE INDEX idx_bgg_exp_expansion ON bgg_expansiones(expansion_bgg_id)');
+    await db.execute(
+        'CREATE UNIQUE INDEX idx_bgg_exp_pair ON bgg_expansiones(base_bgg_id, expansion_bgg_id)');
+
     // tabla partidas (heredada de v2)
     await db.execute('''
       CREATE TABLE partidas (
@@ -532,6 +559,34 @@ class DatabaseService {
 
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_juegos_nombre_norm ON juegos(nombre_norm)');
+  }
+
+  Future<void> _migrateToV12(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS bgg_expansiones (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        base_bgg_id INTEGER NOT NULL,
+        expansion_bgg_id INTEGER NOT NULL,
+        nombre TEXT NOT NULL,
+        anio INTEGER,
+        imagen TEXT,
+        min_jugadores INTEGER,
+        max_jugadores INTEGER,
+        ignorada INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_bgg_exp_base ON bgg_expansiones(base_bgg_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_bgg_exp_expansion ON bgg_expansiones(expansion_bgg_id)');
+    await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_bgg_exp_pair ON bgg_expansiones(base_bgg_id, expansion_bgg_id)');
+
+    await db.delete('sync_state', where: "key = 'last_pull_at'");
   }
 
   // ---------- sync_state helpers ----------

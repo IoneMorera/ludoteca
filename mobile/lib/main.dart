@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'config/api_config.dart';
+import 'config/app_environment.dart';
 import 'data/sync_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/bgg_collection_provider.dart';
@@ -21,6 +22,7 @@ import 'screens/juego_form_screen.dart';
 import 'screens/juegos_aviso_screen.dart';
 import 'screens/juegos_list_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/nuevas_expansiones_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/propietarios_screen.dart';
 import 'screens/recognize_screen.dart';
@@ -33,6 +35,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   await ApiConfig.init();
+  await AppEnvironment.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
   runApp(const LudotecaApp());
 }
@@ -148,6 +151,9 @@ class LudotecaApp extends StatelessWidget {
               return MaterialPageRoute(
                   builder: (_) => const JuegosAvisoScreen(
                       tipo: JuegoAvisoTipo.porColocar));
+            case '/nuevas-expansiones':
+              return MaterialPageRoute(
+                  builder: (_) => const NuevasExpansionesScreen());
             case '/tipos-funda':
               return MaterialPageRoute(
                   builder: (_) => const TiposFundaScreen());
