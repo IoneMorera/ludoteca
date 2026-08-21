@@ -2791,19 +2791,25 @@ class BggController extends Controller
         $allBaseIds = $this->allBaseBggIdsOrdered();
         $total = count($allBaseIds);
 
-        if ($modo === 'incremental') {
-            $eligible = $this->filterBaseBggIdsForIncrementalScan($allBaseIds);
-            $batch = array_slice($eligible, 0, min($limite, self::SCAN_INCREMENTAL_BUDGET));
-            $total = count($eligible);
-            $terminado = true;
-        } elseif ($modo === 'nuevos') {
-            $eligible = $this->filterBaseBggIdsNeverChecked($allBaseIds);
-            $batch = array_slice($eligible, 0, $limite);
-            $total = count($eligible);
-            $terminado = true;
-        } else {
+        if ($modo === 'completo') {
             $batch = array_slice($allBaseIds, $cursor, $limite);
             $terminado = ($cursor + count($batch)) >= $total;
+        } else {
+            $eligible = $modo === 'incremental'
+                ? $this->filterBaseBggIdsForIncrementalScan($allBaseIds)
+                : $this->filterBaseBggIdsNeverChecked($allBaseIds);
+
+            // Los candidatos salen de la lista en cuanto se marcan como
+            // comprobados, así que cada petición coge siempre los primeros y el
+            // cursor solo cuenta lo ya procesado: sirve para mostrar progreso y
+            // para no pasarse del presupuesto del escaneo rápido.
+            $restante = $modo === 'incremental'
+                ? max(0, self::SCAN_INCREMENTAL_BUDGET - $cursor)
+                : count($eligible);
+
+            $batch = array_slice($eligible, 0, min($limite, $restante));
+            $total = $cursor + min(count($eligible), $restante);
+            $terminado = count($batch) >= $restante || count($batch) < $limite;
         }
 
         if (empty($batch)) {
@@ -2819,32 +2825,19 @@ class BggController extends Controller
         $chunks = array_chunk($batch, self::THING_BATCH_SIZE);
         $itemsById = $this->fetchThingItemsForChunks($chunks, $apiKey);
 
+        $linksByBase = [];
         foreach ($batch as $baseBggId) {
             if (isset($itemsById[$baseBggId])) {
-                $links = $this->parseBaseGameExpansionLinks($itemsById[$baseBggId]);
-                $this->upsertExpansionLinksForBase($baseBggId, $links);
+                $linksByBase[$baseBggId] = $this->parseBaseGameExpansionLinks($itemsById[$baseBggId]);
             }
-
-            $linksCount = BggExpansion::query()
-                ->where('base_bgg_id', $baseBggId)
-                ->count();
-            $now = now();
-            DB::table('bgg_expansion_checks')->upsert(
-                [[
-                    'base_bgg_id' => $baseBggId,
-                    'checked_at' => $now,
-                    'links_count' => $linksCount,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ]],
-                ['base_bgg_id'],
-                ['checked_at', 'links_count', 'updated_at']
-            );
         }
+
+        $this->upsertExpansionLinksForBatch($linksByBase);
+        $this->markBaseBggIdsChecked($batch);
 
         return [
             'fase' => 'links',
-            'cursor' => $modo === 'completo' ? $cursor + count($batch) : count($batch),
+            'cursor' => $cursor + count($batch),
             'total' => $total,
             'procesados' => count($batch),
             'terminado' => $terminado,
@@ -2859,13 +2852,20 @@ class BggController extends Controller
             ->map(fn ($id) => (int) $id)
             ->all();
 
-        $query = BggExpansion::query()
+        $pendientes = fn () => BggExpansion::query()
             ->whereNull('anio')
-            ->when(!empty($ownedBggIds), fn ($q) => $q->whereNotIn('expansion_bgg_id', $ownedBggIds))
-            ->orderBy('id');
+            ->when(!empty($ownedBggIds), fn ($q) => $q->whereNotIn('expansion_bgg_id', $ownedBggIds));
 
-        $total = (clone $query)->count();
-        $rows = $query->offset($cursor)->limit($limite)->get();
+        $total = $pendientes()->count();
+
+        // El cursor es el último id procesado, no un desplazamiento: al rellenar
+        // `anio` las filas salen del filtro, así que un offset se saltaría las
+        // siguientes sin procesarlas.
+        $rows = $pendientes()
+            ->where('id', '>', $cursor)
+            ->orderBy('id')
+            ->limit($limite)
+            ->get();
 
         if ($rows->isEmpty()) {
             return [
@@ -2900,14 +2900,12 @@ class BggController extends Controller
             $row->save();
         }
 
-        $newCursor = $cursor + $rows->count();
-
         return [
             'fase' => 'detalles',
-            'cursor' => $newCursor,
+            'cursor' => (int) $rows->last()->id,
             'total' => $total,
             'procesados' => $rows->count(),
-            'terminado' => $newCursor >= $total,
+            'terminado' => $rows->count() < $limite,
         ];
     }
 
@@ -3082,22 +3080,107 @@ class BggController extends Controller
         return $links;
     }
 
-    private function upsertExpansionLinksForBase(int $baseBggId, array $links): void
+    /**
+     * Guarda los enlaces de todo el lote en bloque.
+     *
+     * Solo toca las filas cuyo nombre haya cambiado: `updated_at` es lo que usa
+     * la sincronización del móvil para decidir qué reenviar, así que reescribirlo
+     * en cada escaneo obligaría a redescargar todo el catálogo de expansiones.
+     *
+     * @param  array<int, array<int, array{expansion_bgg_id: int, nombre: string}>>  $linksByBase
+     */
+    private function upsertExpansionLinksForBatch(array $linksByBase): void
     {
-        foreach ($links as $link) {
-            if ($link['nombre'] === '') {
-                continue;
-            }
-            BggExpansion::query()->updateOrCreate(
-                [
-                    'base_bgg_id' => $baseBggId,
-                    'expansion_bgg_id' => $link['expansion_bgg_id'],
-                ],
-                [
-                    'nombre' => $link['nombre'],
-                ]
-            );
+        if (empty($linksByBase)) {
+            return;
         }
+
+        $existing = [];
+        BggExpansion::query()
+            ->whereIn('base_bgg_id', array_keys($linksByBase))
+            ->get(['id', 'base_bgg_id', 'expansion_bgg_id', 'nombre'])
+            ->each(function (BggExpansion $row) use (&$existing) {
+                $existing[(int) $row->base_bgg_id][(int) $row->expansion_bgg_id] = $row;
+            });
+
+        $now = now();
+        $insert = [];
+        $seen = [];
+
+        foreach ($linksByBase as $baseBggId => $links) {
+            foreach ($links as $link) {
+                $expansionBggId = (int) $link['expansion_bgg_id'];
+                $nombre = $link['nombre'];
+
+                if ($nombre === '' || $expansionBggId === 0) {
+                    continue;
+                }
+
+                // BGG puede repetir el mismo enlace dentro de un item.
+                $key = $baseBggId . ':' . $expansionBggId;
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+
+                $current = $existing[$baseBggId][$expansionBggId] ?? null;
+
+                if ($current === null) {
+                    $insert[] = [
+                        'base_bgg_id' => $baseBggId,
+                        'expansion_bgg_id' => $expansionBggId,
+                        'nombre' => $nombre,
+                        'ignorada' => false,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                } elseif ($current->nombre !== $nombre) {
+                    BggExpansion::query()
+                        ->whereKey($current->id)
+                        ->update(['nombre' => $nombre, 'updated_at' => $now]);
+                }
+            }
+        }
+
+        foreach (array_chunk($insert, 500) as $chunk) {
+            BggExpansion::query()->insertOrIgnore($chunk);
+        }
+    }
+
+    /**
+     * Marca el lote como comprobado con dos consultas, en lugar de una por juego.
+     *
+     * @param  array<int, int>  $baseBggIds
+     */
+    private function markBaseBggIdsChecked(array $baseBggIds): void
+    {
+        if (empty($baseBggIds)) {
+            return;
+        }
+
+        $linksCount = BggExpansion::query()
+            ->whereIn('base_bgg_id', $baseBggIds)
+            ->groupBy('base_bgg_id')
+            ->selectRaw('base_bgg_id, count(*) as total')
+            ->pluck('total', 'base_bgg_id');
+
+        $now = now();
+        $checks = [];
+        foreach ($baseBggIds as $baseBggId) {
+            $checks[] = [
+                'base_bgg_id' => $baseBggId,
+                'checked_at' => $now,
+                'links_count' => (int) ($linksCount[$baseBggId] ?? 0),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        DB::table('bgg_expansion_checks')->upsert(
+            $checks,
+            ['base_bgg_id'],
+            ['checked_at', 'links_count', 'updated_at']
+        );
     }
 
     private function cleanupOrphanBggExpansionRows(): void

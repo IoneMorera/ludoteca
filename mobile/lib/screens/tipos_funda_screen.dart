@@ -187,6 +187,7 @@ class _TiposFundaScreenState extends State<TiposFundaScreen> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       try {
         final repo = context.read<JuegosProvider>().tipoFundaRepository;
         await repo.delete(tipo.localId);

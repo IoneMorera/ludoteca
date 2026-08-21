@@ -47,6 +47,14 @@ android {
         }
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // v1 mejora compatibilidad al instalar APK fuera de Play Store.
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")

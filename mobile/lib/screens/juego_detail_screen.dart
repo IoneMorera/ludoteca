@@ -74,30 +74,36 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           title: const Text('Cambiar estado'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...['disponible', 'en_venta', 'vendido'].map((estado) {
-                return RadioListTile<String>(
-                  title: Text(_formatEstado(estado)),
-                  value: estado,
-                  groupValue: selectedEstado,
-                  onChanged: (v) => setDialogState(() => selectedEstado = v!),
-                );
-              }),
-              if (selectedEstado == 'en_venta') ...[
-                const SizedBox(height: 8),
-                TextField(
-                  controller: precioCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Precio',
-                    prefixText: '€ ',
-                    border: OutlineInputBorder(),
+          content: RadioGroup<String>(
+            groupValue: selectedEstado,
+            onChanged: (v) {
+              if (v == null) return;
+              setDialogState(() => selectedEstado = v);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...['disponible', 'en_venta', 'vendido'].map((estado) {
+                  return RadioListTile<String>(
+                    title: Text(_formatEstado(estado)),
+                    value: estado,
+                  );
+                }),
+                if (selectedEstado == 'en_venta') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: precioCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Precio',
+                      prefixText: '€ ',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
           actions: [
             TextButton(
@@ -168,30 +174,31 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
           ),
           content: SizedBox(
             width: double.maxFinite,
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                if (canUseCajaBase)
-                  RadioListTile<String>(
-                    title: const Text('En la caja del base'),
-                    value: 'en_caja_base',
-                    groupValue: selectedKey,
-                    onChanged: (v) => setDialogState(() => selectedKey = v!),
+            child: RadioGroup<String>(
+              groupValue: selectedKey,
+              onChanged: (v) {
+                if (v == null) return;
+                setDialogState(() => selectedKey = v);
+              },
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  if (canUseCajaBase)
+                    const RadioListTile<String>(
+                      title: Text('En la caja del base'),
+                      value: 'en_caja_base',
+                    ),
+                  const RadioListTile<String>(
+                    title: Text('Sin asignar',
+                        style: TextStyle(color: Colors.grey)),
+                    value: 'sin_asignar',
                   ),
-                RadioListTile<String>(
-                  title: const Text('Sin asignar',
-                      style: TextStyle(color: Colors.grey)),
-                  value: 'sin_asignar',
-                  groupValue: selectedKey,
-                  onChanged: (v) => setDialogState(() => selectedKey = v!),
-                ),
-                ...ubicaciones.map((u) => RadioListTile<String>(
-                      title: Text(u.rutaCompleta),
-                      value: 'ubicacion:${u.localId}',
-                      groupValue: selectedKey,
-                      onChanged: (v) => setDialogState(() => selectedKey = v!),
-                    )),
-              ],
+                  ...ubicaciones.map((u) => RadioListTile<String>(
+                        title: Text(u.rutaCompleta),
+                        value: 'ubicacion:${u.localId}',
+                      )),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -279,7 +286,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
-                value: muebleLocalId,
+                initialValue: muebleLocalId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Mueble *',
@@ -455,16 +462,12 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                   ? null
                   : IconButton(
                       icon: const Icon(Icons.more_vert),
-                      onPressed: () {
-                        final id = baseLocalId;
-                        if (id == null) return;
-                        ExpansionFaltanteActions.showMenu(
-                          context,
-                          expansion: exp,
-                          juegoBaseLocalId: id,
-                          onChanged: _loadFaltantes,
-                        );
-                      },
+                      onPressed: () => ExpansionFaltanteActions.showMenu(
+                        context,
+                        expansion: exp,
+                        juegoBaseLocalId: baseLocalId,
+                        onChanged: _loadFaltantes,
+                      ),
                     ),
             ),
           ),

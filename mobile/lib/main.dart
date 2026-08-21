@@ -34,8 +34,8 @@ import 'services/api_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  await ApiConfig.init();
   await AppEnvironment.init();
+  await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
   runApp(const LudotecaApp());
 }
@@ -198,6 +198,7 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _checkAuth() async {
     final auth = context.read<AuthProvider>();
     final loggedIn = await auth.checkAuth();
+    if (!mounted) return;
 
     if (loggedIn) {
       // Sincronizaci\u00f3n inicial: full pull si nunca se ha sincronizado.

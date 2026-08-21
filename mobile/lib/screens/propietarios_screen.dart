@@ -158,6 +158,7 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       try {
         final repo = context.read<JuegosProvider>().propietarioRepository;
         await repo.delete(propietario.localId);

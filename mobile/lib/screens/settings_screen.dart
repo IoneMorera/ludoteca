@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -80,26 +81,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _scanBggExpansions({required String modo}) async {
     if (!mounted) return;
+
+    final progreso = ValueNotifier<String>('Comprobando expansiones BGG...');
+
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const AlertDialog(
+      builder: (ctx) => AlertDialog(
         content: Row(
           children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Expanded(child: Text('Comprobando expansiones BGG...')),
+            const CircularProgressIndicator(),
+            const SizedBox(width: 20),
+            Expanded(
+              child: ValueListenableBuilder<String>(
+                valueListenable: progreso,
+                builder: (_, mensaje, _) => Text(mensaje),
+              ),
+            ),
           ],
         ),
       ),
     );
 
     try {
-      await BggExpansionScanService().runScan(modo: modo);
+      await BggExpansionScanService().runScan(
+        modo: modo,
+        onProgress: (mensaje) => progreso.value = mensaje,
+      );
       if (mounted) {
+        final messenger = ScaffoldMessenger.of(context);
+        final juegos = context.read<JuegosProvider>();
         Navigator.of(context).pop();
-        await context.read<JuegosProvider>().fetchStats();
-        ScaffoldMessenger.of(context).showSnackBar(
+        await juegos.fetchStats();
+        messenger.showSnackBar(
           const SnackBar(
             content: Text('Comprobación de expansiones completada'),
           ),
@@ -109,10 +123,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al comprobar expansiones: $e')),
+          SnackBar(content: Text(_mensajeErrorEscaneo(e))),
         );
       }
     }
+  }
+
+  String _mensajeErrorEscaneo(Object e) {
+    if (e is DioException) {
+      if (e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        // Cada lote comprobado queda guardado, así que reintentar no repite trabajo.
+        return 'BGG tardó demasiado en responder. Reinténtalo: el escaneo '
+            'continuará donde se quedó.';
+      }
+      if (e.type == DioExceptionType.connectionError) {
+        return 'No se pudo conectar con el servidor.';
+      }
+      final data = e.response?.data;
+      if (data is Map && data['message'] is String) {
+        return data['message'] as String;
+      }
+    }
+    return 'Error al comprobar expansiones: $e';
   }
 
   Future<void> _verifySyncIntegrity() async {

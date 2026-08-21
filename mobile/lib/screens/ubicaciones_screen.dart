@@ -512,6 +512,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
       ),
     );
     if (confirm == true) {
+      if (!mounted) return;
       final repo = context.read<JuegosProvider>().ubicacionRepository;
       await repo.deleteHabitacion(habitacion.localId);
       await _syncIfPossible();
@@ -533,7 +534,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
-                value: habitacionLocalId,
+                initialValue: habitacionLocalId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Habitación *',
@@ -623,6 +624,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
       ),
     );
     if (confirm == true) {
+      if (!mounted) return;
       final repo = context.read<JuegosProvider>().ubicacionRepository;
       await repo.deleteMueble(mueble.localId);
       await _syncIfPossible();
@@ -644,7 +646,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
-                value: muebleLocalId,
+                initialValue: muebleLocalId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Mueble *',
@@ -736,6 +738,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
       ),
     );
     if (confirm == true) {
+      if (!mounted) return;
       final repo = context.read<JuegosProvider>().ubicacionRepository;
       await repo.deleteUbicacion(ubicacion.localId);
       await _syncIfPossible();
