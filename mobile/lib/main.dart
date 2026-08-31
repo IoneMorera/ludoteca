@@ -9,11 +9,15 @@ import 'config/app_environment.dart';
 import 'data/sync_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/bgg_collection_provider.dart';
+import 'providers/eventos_provider.dart';
 import 'providers/juegos_provider.dart';
 import 'providers/sync_provider.dart';
 import 'screens/bgg_screen.dart';
 import 'screens/categorias_screen.dart';
 import 'screens/colecciones_screen.dart';
+import 'screens/evento_detail_screen.dart';
+import 'screens/evento_form_screen.dart';
+import 'screens/eventos_screen.dart';
 import 'screens/fundas_faltantes_screen.dart';
 import 'screens/game_night_screen.dart';
 import 'screens/home_screen.dart';
@@ -49,6 +53,7 @@ class LudotecaApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => JuegosProvider()),
+        ChangeNotifierProvider(create: (_) => EventosProvider()),
         ChangeNotifierProvider(create: (_) => SyncProvider()),
         ChangeNotifierProvider(create: (_) => BggCollectionProvider()),
       ],
@@ -170,6 +175,21 @@ class LudotecaApp extends StatelessWidget {
               return MaterialPageRoute(builder: (_) => const BggScreen());
             case '/profile':
               return MaterialPageRoute(builder: (_) => const ProfileScreen());
+            case '/eventos':
+              final args = settings.arguments;
+              var initialTab = 0;
+              if (args is Map<String, dynamic>) {
+                initialTab = args['initialTab'] as int? ?? 0;
+              }
+              return MaterialPageRoute(
+                  builder: (_) => EventosScreen(initialTab: initialTab));
+            case '/evento':
+              final localId = settings.arguments as int;
+              return MaterialPageRoute(
+                  builder: (_) => EventoDetailScreen(eventoLocalId: localId));
+            case '/evento/nuevo':
+              return MaterialPageRoute(
+                  builder: (_) => const EventoFormScreen());
             default:
               return MaterialPageRoute(builder: (_) => const MainShell());
           }
@@ -240,6 +260,7 @@ class _MainShellState extends State<MainShell> {
     JuegosListScreen(onBack: () => setState(() => _currentIndex = 0)),
     const SizedBox(),
     const ColeccionesScreen(),
+    const EventosScreen(),
     const SettingsScreen(),
   ];
 
@@ -279,6 +300,11 @@ class _MainShellState extends State<MainShell> {
             icon: Icon(Icons.collections_bookmark_outlined),
             selectedIcon: Icon(Icons.collections_bookmark),
             label: 'Colecciones',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month),
+            label: 'Calendario',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

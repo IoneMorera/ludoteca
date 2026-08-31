@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\BggExpansion;
 use App\Models\Categoria;
+use App\Models\Evento;
+use App\Models\EventoJuegoPivot;
 use App\Models\Habitacion;
 use App\Models\Juego;
 use App\Models\JuegoFunda;
@@ -43,6 +45,8 @@ class SyncController extends Controller
             'juego_propietario_fundas' => $this->fetchJuegoPropietarioFundas(null),
             'juego_categoria' => $this->fetchJuegoCategoria(null),
             'bgg_expansiones' => $this->fetchBggExpansiones(null),
+            'eventos' => $this->fetchEventos(null),
+            'evento_juegos' => $this->fetchEventoJuegos(null),
         ];
 
         return response()->json([
@@ -73,6 +77,8 @@ class SyncController extends Controller
             'juego_propietario_fundas' => $this->fetchJuegoPropietarioFundas($since),
             'juego_categoria' => $this->fetchJuegoCategoria($since),
             'bgg_expansiones' => $this->fetchBggExpansiones($since),
+            'eventos' => $this->fetchEventos($since),
+            'evento_juegos' => $this->fetchEventoJuegos($since),
         ];
 
         $deleted = $this->fetchTombstones($since);
@@ -277,6 +283,10 @@ class SyncController extends Controller
             ],
             'juego_categoria' => ['juego_id', 'categoria_id'],
             'bgg_expansiones' => ['ignorada'],
+            'eventos' => [
+                'nombre', 'fecha_inicio', 'fecha_fin', 'localizacion', 'estado',
+            ],
+            'evento_juegos' => ['evento_id', 'juego_id'],
             default => [],
         };
 
@@ -298,6 +308,8 @@ class SyncController extends Controller
             'juego_propietario_fundas' => JuegoPropietarioFunda::class,
             'juego_categoria' => JuegoCategoriaPivot::class,
             'bgg_expansiones' => BggExpansion::class,
+            'eventos' => Evento::class,
+            'evento_juegos' => EventoJuegoPivot::class,
             default => throw new \InvalidArgumentException("Unknown table: {$table}"),
         };
     }
@@ -536,6 +548,37 @@ class SyncController extends Controller
                 'min_jugadores' => $row->min_jugadores !== null ? (int) $row->min_jugadores : null,
                 'max_jugadores' => $row->max_jugadores !== null ? (int) $row->max_jugadores : null,
                 'ignorada' => (bool) $row->ignorada,
+                'created_at' => $row->created_at?->toIso8601String(),
+                'updated_at' => $row->updated_at?->toIso8601String(),
+            ])->all();
+    }
+
+    private function fetchEventos(?Carbon $since): array
+    {
+        return Evento::query()
+            ->when($since, fn ($q) => $q->where('updated_at', '>', $since))
+            ->get()
+            ->map(fn (Evento $e) => [
+                'id' => $e->id,
+                'nombre' => $e->nombre,
+                'fecha_inicio' => $e->fecha_inicio?->toIso8601String(),
+                'fecha_fin' => $e->fecha_fin?->toIso8601String(),
+                'localizacion' => $e->localizacion,
+                'estado' => $e->estado,
+                'created_at' => $e->created_at?->toIso8601String(),
+                'updated_at' => $e->updated_at?->toIso8601String(),
+            ])->all();
+    }
+
+    private function fetchEventoJuegos(?Carbon $since): array
+    {
+        return EventoJuegoPivot::query()
+            ->when($since, fn ($q) => $q->where('updated_at', '>', $since))
+            ->get()
+            ->map(fn (EventoJuegoPivot $row) => [
+                'id' => $row->id,
+                'evento_id' => $row->evento_id,
+                'juego_id' => $row->juego_id,
                 'created_at' => $row->created_at?->toIso8601String(),
                 'updated_at' => $row->updated_at?->toIso8601String(),
             ])->all();

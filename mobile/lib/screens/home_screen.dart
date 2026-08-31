@@ -3,7 +3,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../data/sync_service.dart' show SyncStatus;
 import '../config/app_environment.dart';
+import '../models/evento.dart';
 import '../providers/auth_provider.dart';
+import '../providers/eventos_provider.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
 
@@ -22,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       context.read<JuegosProvider>().fetchStats();
+      context.read<EventosProvider>().fetchEventosResumen();
       _lastSyncStatus = context.read<SyncProvider>().status;
       context.read<SyncProvider>().addListener(_onSyncChanged);
     });
@@ -32,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final syncStatus = context.read<SyncProvider>().status;
     if (_lastSyncStatus == SyncStatus.syncing && syncStatus == SyncStatus.idle) {
       context.read<JuegosProvider>().fetchStats();
+      context.read<EventosProvider>().fetchEventosResumen();
     }
     _lastSyncStatus = syncStatus;
   }
@@ -46,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final juegosProvider = context.watch<JuegosProvider>();
+    final eventosProvider = context.watch<EventosProvider>();
     final syncProvider = context.watch<SyncProvider>();
     final stats = juegosProvider.stats;
     final fundasFaltantes = _asList(
@@ -57,8 +62,11 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: RefreshIndicator(
         onRefresh: () async {
+          final eventos = context.read<EventosProvider>();
           await syncProvider.syncNow();
+          if (!context.mounted) return;
           await juegosProvider.fetchStats();
+          await eventos.fetchEventosResumen();
         },
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -79,6 +87,32 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
             const SizedBox(height: 24),
             _buildStatsGrid(stats, theme),
+            if (eventosProvider.eventosPendientesCount > 0) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Eventos pendientes',
+                subtitulo:
+                    '${eventosProvider.eventosPendientesCount} eventos por colocar',
+                icon: Icons.event_busy,
+                color: Colors.amber,
+                onTap: () => Navigator.of(context).pushNamed(
+                  '/eventos',
+                  arguments: {'initialTab': 1},
+                ),
+              ),
+            ] else if (eventosProvider.proximoEvento != null) ...[
+              const SizedBox(height: 16),
+              _buildAvisoCard(
+                titulo: 'Próximo evento',
+                subtitulo: _proximoEventoSubtitulo(eventosProvider.proximoEvento!),
+                icon: Icons.event,
+                color: Colors.blue,
+                onTap: () => Navigator.of(context).pushNamed(
+                  '/evento',
+                  arguments: eventosProvider.proximoEvento!.localId,
+                ),
+              ),
+            ],
             if (!auth.noEnfundo && fundasFaltantes.isNotEmpty) ...[
               const SizedBox(height: 16),
               _buildFundasFaltantesCard(fundasFaltantes, theme),
@@ -214,12 +248,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  String _proximoEventoSubtitulo(Evento evento) {
+    final inicio = evento.fechaInicio;
+    final fecha =
+        '${inicio.day.toString().padLeft(2, '0')}/${inicio.month.toString().padLeft(2, '0')}/${inicio.year}';
+    return '${evento.nombre} · $fecha';
+  }
+
   Widget _buildAvisoCard({
     required String titulo,
     required String subtitulo,
     required IconData icon,
     required Color color,
-    required String route,
+    String? route,
+    VoidCallback? onTap,
   }) {
     return Card(
       elevation: 0,
@@ -239,7 +281,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         subtitle: Text(subtitulo),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).pushNamed(route),
+        onTap: onTap ??
+            (route != null
+                ? () => Navigator.of(context).pushNamed(route)
+                : null),
       ),
     );
   }

@@ -19,7 +19,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   Database? _db;
-  static const int _schemaVersion = 12;
+  static const int _schemaVersion = 13;
 
   Future<Database> get database async {
     _db ??= await _initDB();
@@ -89,6 +89,9 @@ class DatabaseService {
         }
         if (oldVersion < 12) {
           await _migrateToV12(db);
+        }
+        if (oldVersion < 13) {
+          await _migrateToV13(db);
         }
       },
     );
@@ -349,6 +352,8 @@ class DatabaseService {
     await db.execute(
         'CREATE UNIQUE INDEX idx_bgg_exp_pair ON bgg_expansiones(base_bgg_id, expansion_bgg_id)');
 
+    await _createEventosSchema(db);
+
     // tabla partidas (heredada de v2)
     await db.execute('''
       CREATE TABLE partidas (
@@ -559,6 +564,47 @@ class DatabaseService {
 
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_juegos_nombre_norm ON juegos(nombre_norm)');
+  }
+
+  Future<void> _createEventosSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS eventos (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        nombre TEXT NOT NULL,
+        fecha_inicio TEXT NOT NULL,
+        fecha_fin TEXT NOT NULL,
+        localizacion TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'abierto',
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_eventos_fecha_fin ON eventos(fecha_fin)');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS evento_juegos (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER UNIQUE,
+        evento_local_id INTEGER NOT NULL,
+        evento_server_id INTEGER,
+        juego_local_id INTEGER NOT NULL,
+        juego_server_id INTEGER,
+        updated_at TEXT,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        pending_action TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_ej_evento ON evento_juegos(evento_local_id)');
+    await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_ej_unique ON evento_juegos(evento_local_id, juego_local_id)');
+  }
+
+  Future<void> _migrateToV13(Database db) async {
+    await _createEventosSchema(db);
   }
 
   Future<void> _migrateToV12(Database db) async {
