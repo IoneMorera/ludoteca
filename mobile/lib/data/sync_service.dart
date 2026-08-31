@@ -15,6 +15,7 @@ import '../services/database_service.dart';
 import '../services/phash_service.dart';
 import 'bgg_expansion_repository.dart';
 import 'categoria_repository.dart';
+import 'evento_repository.dart';
 import 'juego_repository.dart';
 import 'outbox_dao.dart';
 import 'propietario_repository.dart';
@@ -75,6 +76,8 @@ class SyncService {
   late final JuegoRepository _juegos = JuegoRepository(_dbService, _outbox);
   late final BggExpansionRepository _bggExpansiones =
       BggExpansionRepository(_dbService, _outbox);
+  late final EventoRepository _eventos =
+      EventoRepository(_dbService, _outbox);
 
   final StreamController<SyncSnapshot> _controller =
       StreamController<SyncSnapshot>.broadcast();
@@ -363,6 +366,29 @@ class SyncService {
           if (c != null) merged['categoria_id'] = c;
         }
         break;
+      case 'eventos':
+        final rows = await db.query('eventos',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final r = rows.first;
+          merged['nombre'] = r['nombre'];
+          merged['fecha_inicio'] = r['fecha_inicio'];
+          merged['fecha_fin'] = r['fecha_fin'];
+          merged['localizacion'] = r['localizacion'];
+          merged['estado'] = r['estado'];
+        }
+        break;
+      case 'evento_juegos':
+        final rows = await db.query('evento_juegos',
+            where: 'local_id = ?', whereArgs: [localId], limit: 1);
+        if (rows.isNotEmpty) {
+          final r = rows.first;
+          final e = r['evento_server_id'] as int?;
+          final j = r['juego_server_id'] as int?;
+          if (e != null) merged['evento_id'] = e;
+          if (j != null) merged['juego_id'] = j;
+        }
+        break;
     }
     return merged;
   }
@@ -413,6 +439,16 @@ class SyncService {
             whereArgs: [jp, tf, localId],
             limit: 1);
         return dup.isNotEmpty;
+      case 'evento_juegos':
+        final e = row['evento_local_id'] as int?;
+        final j = row['juego_local_id'] as int?;
+        if (e == null || j == null) return false;
+        final dup = await db.query('evento_juegos',
+            where: 'evento_local_id = ? AND juego_local_id = ? '
+                'AND local_id != ? AND server_id IS NOT NULL',
+            whereArgs: [e, j, localId],
+            limit: 1);
+        return dup.isNotEmpty;
       default:
         return false;
     }
@@ -425,7 +461,13 @@ class SyncService {
   }) async {
     final db = await _dbService.database;
     final fkMappings = <String, List<String>>{
-      'juegos': ['juego_fundas.juego', 'juego_propietario.juego', 'juego_categoria.juego', 'juegos.juego_base'],
+      'juegos': [
+        'juego_fundas.juego',
+        'juego_propietario.juego',
+        'juego_categoria.juego',
+        'juegos.juego_base',
+        'evento_juegos.juego',
+      ],
       'tipos_funda': ['juego_fundas.tipo_funda', 'juego_propietario_fundas.tipo_funda'],
       'propietarios': ['juego_propietario.propietario'],
       'juego_propietario': ['juego_propietario_fundas.juego_propietario'],
@@ -433,6 +475,7 @@ class SyncService {
       'ubicaciones': ['juegos.ubicacion', 'juego_propietario.ubicacion'],
       'habitaciones': ['muebles.habitacion'],
       'muebles': ['ubicaciones.mueble'],
+      'eventos': ['evento_juegos.evento'],
     };
     final mappings = fkMappings[table] ?? const [];
     for (final mapping in mappings) {
@@ -533,6 +576,16 @@ class SyncService {
     for (final row in bggExp) {
       await _bggExpansiones.upsertFromServer(row);
     }
+    final eventosList =
+        (tables['eventos'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    for (final row in eventosList) {
+      await _eventos.upsertEventoFromServer(row);
+    }
+    final eventoJuegos =
+        (tables['evento_juegos'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    for (final row in eventoJuegos) {
+      await _eventos.upsertEventoJuegoFromServer(row);
+    }
 
     // tombstones (borrados): aplicar después del upsert.
     for (final entry in deleted.entries) {
@@ -563,6 +616,10 @@ class SyncService {
           break;
         case 'bgg_expansiones':
           await _bggExpansiones.deleteByServerIds(ids);
+          break;
+        case 'eventos':
+        case 'evento_juegos':
+          await _eventos.deleteByServerIds(table, ids);
           break;
       }
     }
