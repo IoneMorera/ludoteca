@@ -86,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildSyncBanner(theme),
             ],
             const SizedBox(height: 24),
-            _buildStatsGrid(stats, theme),
+            _buildStatsGrid(stats, theme, eventosProvider.totalEventosResumen),
             if (eventosProvider.eventosPendientesCount > 0) ...[
               const SizedBox(height: 16),
               _buildAvisoCard(
@@ -296,7 +296,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Widget _buildStatsGrid(Map<String, dynamic> stats, ThemeData theme) {
+  Widget _buildStatsGrid(
+    Map<String, dynamic> stats,
+    ThemeData theme,
+    int totalEventos,
+  ) {
     final items = [
       _StatItem('Juegos', '${stats['totalJuegos'] ?? 0}', Icons.casino,
           Colors.blue, () => _navigateToJuegos()),
@@ -308,6 +312,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Icons.money_off, Colors.red, () => _navigateToJuegos(estado: 'vendido')),
       _StatItem('Expansiones', '${stats['totalExpansiones'] ?? 0}',
           Icons.extension, Colors.purple, () => _navigateToJuegos(esExpansion: true)),
+      _StatItem('Eventos', '$totalEventos', Icons.event,
+          Colors.teal, () => Navigator.of(context).pushNamed('/eventos')),
     ];
 
     return GridView.count(

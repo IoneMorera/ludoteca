@@ -41,6 +41,20 @@ class EventoRepository {
     return _hydrateAll(rows);
   }
 
+  /// Eventos futuros (abiertos) + eventos cerrados.
+  Future<int> countFuturosYCerrados() async {
+    final db = await _dbService.database;
+    final now = DateTime.now().toIso8601String();
+    final result = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS c FROM eventos
+      WHERE (estado = ? AND fecha_fin >= ?) OR estado = ?
+      ''',
+      [EventoEstado.abierto, now, EventoEstado.cerrado],
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
   Future<int> countPendientesColocar() async {
     await _promoteExpiredAbiertos();
     final db = await _dbService.database;
