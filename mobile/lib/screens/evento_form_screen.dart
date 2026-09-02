@@ -5,7 +5,9 @@ import '../models/evento.dart';
 import '../providers/eventos_provider.dart';
 
 class EventoFormScreen extends StatefulWidget {
-  const EventoFormScreen({super.key});
+  final int? eventoLocalId;
+
+  const EventoFormScreen({super.key, this.eventoLocalId});
 
   @override
   State<EventoFormScreen> createState() => _EventoFormScreenState();
@@ -18,6 +20,39 @@ class _EventoFormScreenState extends State<EventoFormScreen> {
   DateTime? _fechaInicio;
   DateTime? _fechaFin;
   bool _saving = false;
+  bool _loading = false;
+  Evento? _eventoOriginal;
+
+  bool get _isEditing => widget.eventoLocalId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isEditing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadEvento());
+    }
+  }
+
+  Future<void> _loadEvento() async {
+    setState(() => _loading = true);
+    final evento = await context
+        .read<EventosProvider>()
+        .eventoRepository
+        .getByLocalId(widget.eventoLocalId!);
+    if (!mounted) return;
+
+    if (evento == null) {
+      setState(() => _loading = false);
+      return;
+    }
+
+    _eventoOriginal = evento;
+    _nombreCtrl.text = evento.nombre;
+    _localizacionCtrl.text = evento.localizacion;
+    _fechaInicio = evento.fechaInicio;
+    _fechaFin = evento.fechaFin;
+    setState(() => _loading = false);
+  }
 
   @override
   void dispose() {
@@ -60,14 +95,26 @@ class _EventoFormScreenState extends State<EventoFormScreen> {
       );
       return;
     }
+    if (_fechaFin!.isBefore(_fechaInicio!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La fecha de fin no puede ser anterior a la de inicio'),
+        ),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
     try {
+      final original = _eventoOriginal;
       final evento = Evento(
+        localId: original?.localId,
+        serverId: original?.serverId,
         nombre: _nombreCtrl.text.trim(),
         fechaInicio: _fechaInicio!,
         fechaFin: _fechaFin!,
         localizacion: _localizacionCtrl.text.trim(),
+        estado: original?.estado ?? EventoEstado.abierto,
       );
       await context.read<EventosProvider>().saveEvento(evento);
       if (mounted) Navigator.of(context).pop(true);
@@ -91,9 +138,25 @@ class _EventoFormScreenState extends State<EventoFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(_isEditing ? 'Editar evento' : 'Nuevo evento'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_isEditing && _eventoOriginal == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Editar evento')),
+        body: const Center(child: Text('Evento no encontrado')),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nuevo evento'),
+        title: Text(_isEditing ? 'Editar evento' : 'Nuevo evento'),
       ),
       body: Form(
         key: _formKey,
@@ -146,7 +209,7 @@ class _EventoFormScreenState extends State<EventoFormScreen> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Guardar evento'),
+                  : Text(_isEditing ? 'Guardar cambios' : 'Guardar evento'),
             ),
           ],
         ),

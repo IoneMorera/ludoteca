@@ -190,6 +190,10 @@ class LudotecaApp extends StatelessWidget {
             case '/evento/nuevo':
               return MaterialPageRoute(
                   builder: (_) => const EventoFormScreen());
+            case '/evento/editar':
+              final localId = settings.arguments as int;
+              return MaterialPageRoute(
+                  builder: (_) => EventoFormScreen(eventoLocalId: localId));
             default:
               return MaterialPageRoute(builder: (_) => const MainShell());
           }
