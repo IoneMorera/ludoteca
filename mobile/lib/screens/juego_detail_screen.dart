@@ -409,11 +409,33 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     final total = juego.expansiones.length + _faltantes.length;
     final baseLocalId = juego.localId;
 
-    return _buildSection(
-      'Expansiones ($total)',
-      theme,
-      child: Column(
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Expansiones ($total)',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (_faltantes.isNotEmpty)
+              TextButton(
+                onPressed: () => ExpansionFaltanteActions.ignorarTodas(
+                  context,
+                  expansiones: _faltantes,
+                  onChanged: _loadFaltantes,
+                ),
+                child: const Text('Ignorar todas'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Column(
+          children: [
           ...juego.expansiones.map(
             (exp) => ListTile(
               dense: true,
@@ -471,8 +493,9 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     ),
             ),
           ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 

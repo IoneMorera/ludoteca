@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../data/bgg_expansion_repository.dart';
 import '../data/sync_service.dart';
 import '../providers/juegos_provider.dart';
+import '../utils/bgg_url.dart';
 import 'juego_picker_sheet.dart';
 
 class ExpansionFaltanteActions {
@@ -68,6 +69,58 @@ class ExpansionFaltanteActions {
     await SyncService().syncAll();
     if (context.mounted) {
       await context.read<JuegosProvider>().fetchStats();
+    }
+  }
+
+  static Future<void> ignorarTodas(
+    BuildContext context, {
+    required List<BggExpansionRow> expansiones,
+    VoidCallback? onChanged,
+  }) async {
+    if (expansiones.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ignorar todas las expansiones'),
+        content: Text(
+          '¿Ignorar las ${expansiones.length} expansiones pendientes? '
+          'No volverán a aparecer como faltantes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ignorar todas'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+
+    final repo = context.read<JuegosProvider>().bggExpansionRepository;
+    for (final expansion in expansiones) {
+      await repo.marcarIgnorada(expansion.localId);
+    }
+    await SyncService().syncAll();
+    if (context.mounted) {
+      await context.read<JuegosProvider>().fetchStats();
+      onChanged?.call();
+    }
+  }
+
+  static Future<void> abrirEnBgg(
+    BuildContext context, {
+    required BggExpansionRow expansion,
+  }) async {
+    final opened = await openBggGame(expansion.expansionBggId);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir BoardGameGeek')),
+      );
     }
   }
 

@@ -99,14 +99,10 @@ class _NuevasExpansionesScreenState extends State<NuevasExpansionesScreen> {
                                               onChanged: _load,
                                             ),
                                   ),
-                                  onTap: baseLocalId == null
-                                      ? null
-                                      : () => ExpansionFaltanteActions.showMenu(
-                                            context,
-                                            expansion: exp,
-                                            juegoBaseLocalId: baseLocalId,
-                                            onChanged: _load,
-                                          ),
+                                  onTap: () => ExpansionFaltanteActions.abrirEnBgg(
+                                    context,
+                                    expansion: exp,
+                                  ),
                                 );
                               }),
                             ],
