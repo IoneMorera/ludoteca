@@ -35,13 +35,50 @@ class AuthService {
   Future<Map<String, dynamic>> _persistSession(Map<String, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', data['token']);
-    await prefs.setString('user_name', data['user']['name']);
-    await prefs.setString('user_email', data['user']['email']);
-    if (data['user']['bgg_username'] != null) {
-      await prefs.setString('bgg_username', data['user']['bgg_username']);
-    }
+    final user = data['user'] as Map<String, dynamic>;
+    await _cacheUser(prefs, user);
+    return user;
+  }
 
-    return data['user'] as Map<String, dynamic>;
+  /// Guarda los datos completos del usuario en SharedPreferences para
+  /// poder restaurar la sesión sin llamada de red al arrancar.
+  Future<void> _cacheUser(SharedPreferences prefs, Map<String, dynamic> user) async {
+    await prefs.setString('user_name', user['name'] ?? '');
+    await prefs.setString('user_email', user['email'] ?? '');
+    if (user['bgg_username'] != null) {
+      await prefs.setString('bgg_username', user['bgg_username']);
+    } else {
+      await prefs.remove('bgg_username');
+    }
+    await prefs.setBool('bgg_connected', user['bgg_connected'] == true);
+    await prefs.setBool('no_enfundo', user['no_enfundo'] == true);
+    await prefs.setBool('ocultar_por_estrenar', user['ocultar_por_estrenar'] == true);
+    await prefs.setBool('ocultar_faltan_traduccion', user['ocultar_faltan_traduccion'] == true);
+    await prefs.setBool('ocultar_expansion_otro_idioma', user['ocultar_expansion_otro_idioma'] == true);
+    await prefs.setBool('ocultar_por_colocar', user['ocultar_por_colocar'] == true);
+    await prefs.setBool('ocultar_nuevas_expansiones', user['ocultar_nuevas_expansiones'] == true);
+  }
+
+  /// Reconstruye un mapa de usuario a partir de SharedPreferences
+  /// para poder arrancar sin esperar al servidor.
+  Future<Map<String, dynamic>?> getCachedUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return null;
+    final name = prefs.getString('user_name');
+    if (name == null) return null;
+    return {
+      'name': name,
+      'email': prefs.getString('user_email') ?? '',
+      'bgg_username': prefs.getString('bgg_username'),
+      'bgg_connected': prefs.getBool('bgg_connected') ?? false,
+      'no_enfundo': prefs.getBool('no_enfundo') ?? false,
+      'ocultar_por_estrenar': prefs.getBool('ocultar_por_estrenar') ?? false,
+      'ocultar_faltan_traduccion': prefs.getBool('ocultar_faltan_traduccion') ?? false,
+      'ocultar_expansion_otro_idioma': prefs.getBool('ocultar_expansion_otro_idioma') ?? false,
+      'ocultar_por_colocar': prefs.getBool('ocultar_por_colocar') ?? false,
+      'ocultar_nuevas_expansiones': prefs.getBool('ocultar_nuevas_expansiones') ?? false,
+    };
   }
 
   Future<void> logout() async {
@@ -53,12 +90,24 @@ class AuthService {
     await prefs.remove('user_name');
     await prefs.remove('user_email');
     await prefs.remove('bgg_username');
+    await prefs.remove('bgg_connected');
+    await prefs.remove('no_enfundo');
+    await prefs.remove('ocultar_por_estrenar');
+    await prefs.remove('ocultar_faltan_traduccion');
+    await prefs.remove('ocultar_expansion_otro_idioma');
+    await prefs.remove('ocultar_por_colocar');
+    await prefs.remove('ocultar_nuevas_expansiones');
   }
 
   Future<Map<String, dynamic>?> getUser() async {
     try {
       final response = await _api.get('/user');
-      return response.data['user'];
+      final user = response.data['user'] as Map<String, dynamic>?;
+      if (user != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await _cacheUser(prefs, user);
+      }
+      return user;
     } catch (_) {
       return null;
     }

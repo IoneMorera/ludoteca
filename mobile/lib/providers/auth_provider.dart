@@ -29,12 +29,37 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> checkAuth() async {
     if (!await _authService.isLoggedIn()) return false;
+
+    // Intentar restaurar usuario desde caché local (instantáneo, sin red).
+    final cached = await _authService.getCachedUser();
+    if (cached != null) {
+      _user = cached;
+      notifyListeners();
+      // Refrescar datos del servidor en segundo plano.
+      _refreshUserInBackground();
+      return true;
+    }
+
+    // Sin caché: fallback a llamada de red (primera instalación o tras limpiar datos).
     try {
       _user = await _authService.getUser();
       notifyListeners();
       return _user != null;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Actualiza los datos del usuario desde el servidor sin bloquear la UI.
+  Future<void> _refreshUserInBackground() async {
+    try {
+      final fresh = await _authService.getUser();
+      if (fresh != null) {
+        _user = fresh;
+        notifyListeners();
+      }
+    } catch (_) {
+      // Silenciar: los datos cacheados siguen siendo válidos.
     }
   }
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../services/api_service.dart';
+import '../services/image_cache_manager.dart';
 
 /// Hoja modal para buscar un juego en BGG y devolver el seleccionado.
 ///
@@ -145,12 +147,15 @@ class _BggSearchPickerState extends State<BggSearchPicker> {
                                 (game['thumbnail'] as String).isNotEmpty
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(6),
-                                child: Image.network(
-                                  game['thumbnail'],
+                                child: CachedNetworkImage(
+                                  cacheManager: ImageCacheManager.instance,
+                                  imageUrl: game['thumbnail'],
                                   width: 44,
                                   height: 44,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
+                                  maxWidthDiskCache: 200,
+                                  fadeInDuration: const Duration(milliseconds: 150),
+                                  errorWidget: (_, _, _) =>
                                       const Icon(Icons.casino),
                                 ),
                               )

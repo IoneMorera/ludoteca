@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../data/bgg_expansion_scan_service.dart';
 import '../data/juego_repository.dart';
 import '../data/outbox_dao.dart';
+import '../data/propietario_repository.dart';
 import '../data/sync_service.dart';
 import '../models/juego.dart';
 import '../providers/auth_provider.dart';
@@ -26,8 +27,12 @@ class BggScreen extends StatefulWidget {
 
 class _BggScreenState extends State<BggScreen> {
   final ApiService _api = ApiService();
+  final DatabaseService _dbService = DatabaseService();
+  late final OutboxDao _outbox = OutboxDao(_dbService);
   late final JuegoRepository _juegos =
-      JuegoRepository(DatabaseService(), OutboxDao(DatabaseService()));
+      JuegoRepository(_dbService, _outbox);
+  late final PropietarioRepository _propietarioRepo =
+      PropietarioRepository(_dbService, _outbox);
   List<Propietario> _propietarios = [];
   Propietario? _selectedOwner;
   List<Map<String, dynamic>> _bggGames = [];
@@ -49,12 +54,18 @@ class _BggScreenState extends State<BggScreen> {
     });
   }
 
+  /// Lee propietarios de SQLite local (instantáneo) en vez de la API remota.
   Future<void> _fetchPropietarios() async {
     try {
-      final response = await _api.get('/propietarios');
-      final owners = (response.data as List)
-          .map((p) => Propietario.fromJson(p))
+      final rows = await _propietarioRepo.getAll();
+      final owners = rows
           .where((p) => p.bggUsername != null && p.bggUsername!.isNotEmpty)
+          .map((p) => Propietario(
+                id: p.serverId ?? p.localId,
+                nombre: p.nombre,
+                bggUsername: p.bggUsername,
+                esPrincipal: p.esPrincipal,
+              ))
           .toList();
       setState(() {
         _propietarios = owners;
