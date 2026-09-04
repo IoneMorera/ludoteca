@@ -30,6 +30,8 @@ class GameImage extends StatelessWidget {
         width: width,
         height: height,
         fit: BoxFit.cover,
+        memCacheWidth: (width * 2).toInt(),
+        fadeInDuration: const Duration(milliseconds: 150),
         placeholder: (context, url) => Container(
           width: width,
           height: height,

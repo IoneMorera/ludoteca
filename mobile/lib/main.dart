@@ -37,8 +37,15 @@ import 'services/api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  await AppEnvironment.init();
+
+  // Lanzar inicializaciones independientes en paralelo.
+  await Future.wait([
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
+    ApiService.warmUp(), // Precarga SharedPreferences
+    AppEnvironment.init(),
+  ]);
+
+  // ApiConfig depende de AppEnvironment, por lo que va después.
   await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
   runApp(const LudotecaApp());
@@ -224,16 +231,18 @@ class _AuthGateState extends State<AuthGate> {
     final loggedIn = await auth.checkAuth();
     if (!mounted) return;
 
+    // Mostrar la UI inmediatamente, sin esperar a sync ni BGG.
+    setState(() => _checking = false);
+
     if (loggedIn) {
       // Sincronizaci\u00f3n inicial: full pull si nunca se ha sincronizado.
-      SyncService().syncAll();
-      if (auth.bggConnected) {
-        // ignore: unawaited_futures
-        context.read<BggCollectionProvider>().fetchOwnedIds();
-      }
+      // ignore: unawaited_futures
+      Future.wait([
+        SyncService().syncAll(),
+        if (auth.bggConnected)
+          context.read<BggCollectionProvider>().fetchOwnedIds(),
+      ]);
     }
-
-    setState(() => _checking = false);
   }
 
   @override
