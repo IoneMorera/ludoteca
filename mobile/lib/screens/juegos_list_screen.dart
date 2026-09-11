@@ -11,6 +11,7 @@ import '../models/juego.dart';
 import '../models/evento.dart';
 import '../utils/friendly_error.dart';
 import '../widgets/game_image.dart';
+import '../widgets/scrollable_modal_sheet.dart';
 
 class JuegosListScreen extends StatefulWidget {
   final String? initialEstado;
@@ -42,10 +43,12 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
   int? _categoriaLocalId;
   int? _tipoFundaLocalId;
   int? _ubicacionLocalId;
+  int? _propietarioLocalId;
   List<CategoriaRow> _categorias = [];
   String? _categoriaNombre;
   String? _tipoFundaNombre;
   String? _ubicacionNombre;
+  String? _propietarioNombre;
 
   @override
   void initState() {
@@ -126,6 +129,7 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     final syncStatus = context.read<SyncProvider>().status;
     if (_lastSyncStatus == SyncStatus.syncing && syncStatus == SyncStatus.idle) {
       context.read<JuegosProvider>().fetchJuegos();
+      _loadCategorias();
     }
     _lastSyncStatus = syncStatus;
   }
@@ -138,6 +142,7 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       categoriaLocalId: _categoriaLocalId,
       tipoFundaLocalId: _tipoFundaLocalId,
       ubicacionLocalId: _ubicacionLocalId,
+      propietarioLocalId: _propietarioLocalId,
     );
     provider.fetchJuegos(
       estado: _estadoFilter,
@@ -145,6 +150,7 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       categoriaLocalId: _categoriaLocalId,
       tipoFundaLocalId: _tipoFundaLocalId,
       ubicacionLocalId: _ubicacionLocalId,
+      propietarioLocalId: _propietarioLocalId,
     );
   }
 
@@ -158,6 +164,8 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       _tipoFundaNombre = null;
       _ubicacionLocalId = null;
       _ubicacionNombre = null;
+      _propietarioLocalId = null;
+      _propietarioNombre = null;
     });
     _applyFilters();
   }
@@ -167,7 +175,8 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       _esExpansionFilter != null ||
       _categoriaLocalId != null ||
       _tipoFundaLocalId != null ||
-      _ubicacionLocalId != null;
+      _ubicacionLocalId != null ||
+      _propietarioLocalId != null;
 
   Future<void> _confirmDelete(Juego juego) async {
     if (juego.localId == null) return;
@@ -306,212 +315,239 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     }
   }
 
-  void _showFilterSheet() {
+  Future<void> _showFilterSheet() async {
+    final provider = context.read<JuegosProvider>();
+    final categorias = await provider.categoriaRepository.getAll();
+    final propietarios = await provider.propietarioRepository.getAll();
+    if (!mounted) return;
+
+    setState(() => _categorias = categorias);
+
     String? tempEstado = _estadoFilter;
     bool? tempEsExpansion = _esExpansionFilter;
     int? tempCategoriaId = _categoriaLocalId;
     String? tempCategoriaNombre = _categoriaNombre;
+    int? tempPropietarioId = _propietarioLocalId;
+    String? tempPropietarioNombre = _propietarioNombre;
 
-    showModalBottomSheet(
+    showScrollableModalSheet(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            return SafeArea(
-              child: SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.75,
-                child: Column(
-                  children: [
-                    // Cabecera fija
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Filtros',
-                              style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  )),
-                          TextButton(
-                            onPressed: () {
-                              setSheetState(() {
-                                tempEstado = null;
-                                tempEsExpansion = null;
-                                tempCategoriaId = null;
-                                tempCategoriaNombre = null;
-                              });
-                            },
-                            child: const Text('Limpiar'),
-                          ),
-                        ],
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Filtros',
+                          style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              )),
+                      TextButton(
+                        onPressed: () {
+                          setSheetState(() {
+                            tempEstado = null;
+                            tempEsExpansion = null;
+                            tempCategoriaId = null;
+                            tempCategoriaNombre = null;
+                            tempPropietarioId = null;
+                            tempPropietarioNombre = null;
+                          });
+                        },
+                        child: const Text('Limpiar'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: ClampingScrollPhysics(),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _filterSectionTitle(ctx, 'Estado'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Todos'),
+                                  selected: tempEstado == null,
+                                  onSelected: (_) =>
+                                      setSheetState(() => tempEstado = null),
+                                ),
+                                ChoiceChip(
+                                  label: Text('Disponible',
+                                      style: TextStyle(
+                                          color: tempEstado == 'disponible'
+                                              ? Colors.green[800]
+                                              : null,
+                                          fontWeight: tempEstado == 'disponible'
+                                              ? FontWeight.w600
+                                              : null)),
+                                  selected: tempEstado == 'disponible',
+                                  selectedColor: Colors.green[100],
+                                  avatar: tempEstado == 'disponible'
+                                      ? Icon(Icons.check_circle,
+                                          size: 18, color: Colors.green[700])
+                                      : null,
+                                  onSelected: (_) => setSheetState(
+                                      () => tempEstado = 'disponible'),
+                                ),
+                                ChoiceChip(
+                                  label: Text('En venta',
+                                      style: TextStyle(
+                                          color: tempEstado == 'en_venta'
+                                              ? Colors.orange[900]
+                                              : null,
+                                          fontWeight: tempEstado == 'en_venta'
+                                              ? FontWeight.w600
+                                              : null)),
+                                  selected: tempEstado == 'en_venta',
+                                  selectedColor: Colors.orange[100],
+                                  avatar: tempEstado == 'en_venta'
+                                      ? Icon(Icons.sell,
+                                          size: 18, color: Colors.orange[800])
+                                      : null,
+                                  onSelected: (_) => setSheetState(
+                                      () => tempEstado = 'en_venta'),
+                                ),
+                                ChoiceChip(
+                                  label: Text('Vendido',
+                                      style: TextStyle(
+                                          color: tempEstado == 'vendido'
+                                              ? Colors.red[800]
+                                              : null,
+                                          fontWeight: tempEstado == 'vendido'
+                                              ? FontWeight.w600
+                                              : null)),
+                                  selected: tempEstado == 'vendido',
+                                  selectedColor: Colors.red[100],
+                                  avatar: tempEstado == 'vendido'
+                                      ? Icon(Icons.do_not_disturb_on,
+                                          size: 18, color: Colors.red[700])
+                                      : null,
+                                  onSelected: (_) => setSheetState(
+                                      () => tempEstado = 'vendido'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _filterSectionTitle(ctx, 'Tipo de juego'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Todos'),
+                                  selected: tempEsExpansion == null,
+                                  onSelected: (_) => setSheetState(
+                                      () => tempEsExpansion = null),
+                                ),
+                                ChoiceChip(
+                                  label: Text('Base',
+                                      style: TextStyle(
+                                          color: tempEsExpansion == false
+                                              ? Colors.indigo[800]
+                                              : null,
+                                          fontWeight: tempEsExpansion == false
+                                              ? FontWeight.w600
+                                              : null)),
+                                  selected: tempEsExpansion == false,
+                                  selectedColor: Colors.indigo[100],
+                                  avatar: tempEsExpansion == false
+                                      ? Icon(Icons.casino,
+                                          size: 18, color: Colors.indigo[700])
+                                      : null,
+                                  onSelected: (_) => setSheetState(
+                                      () => tempEsExpansion = false),
+                                ),
+                                ChoiceChip(
+                                  label: Text('Expansión',
+                                      style: TextStyle(
+                                          color: tempEsExpansion == true
+                                              ? Colors.purple[800]
+                                              : null,
+                                          fontWeight: tempEsExpansion == true
+                                              ? FontWeight.w600
+                                              : null)),
+                                  selected: tempEsExpansion == true,
+                                  selectedColor: Colors.purple[100],
+                                  avatar: tempEsExpansion == true
+                                      ? Icon(Icons.extension,
+                                          size: 18, color: Colors.purple[700])
+                                      : null,
+                                  onSelected: (_) => setSheetState(
+                                      () => tempEsExpansion = true),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _filterSectionTitle(
+                              ctx,
+                              'Propietario (${propietarios.length})',
+                            ),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Todos'),
+                                  selected: tempPropietarioId == null,
+                                  onSelected: (_) => setSheetState(() {
+                                    tempPropietarioId = null;
+                                    tempPropietarioNombre = null;
+                                  }),
+                                ),
+                                ...propietarios.map((prop) => ChoiceChip(
+                                      label: Text(prop.nombre),
+                                      selected:
+                                          tempPropietarioId == prop.localId,
+                                      onSelected: (_) => setSheetState(() {
+                                        tempPropietarioId = prop.localId;
+                                        tempPropietarioNombre = prop.nombre;
+                                      }),
+                                    )),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _filterSectionTitle(
+                              ctx,
+                              'Categoría (${categorias.length})',
+                            ),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Todas'),
+                                  selected: tempCategoriaId == null,
+                                  onSelected: (_) => setSheetState(() {
+                                    tempCategoriaId = null;
+                                    tempCategoriaNombre = null;
+                                  }),
+                                ),
+                                ...categorias.map((cat) => ChoiceChip(
+                                      label: Text(cat.nombre),
+                                      selected: tempCategoriaId == cat.localId,
+                                      onSelected: (_) => setSheetState(() {
+                                        tempCategoriaId = cat.localId;
+                                        tempCategoriaNombre = cat.nombre;
+                                      }),
+                                    )),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    // Contenido con scroll libre
-                    Expanded(
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                        children: [
-                          Text('Estado',
-                              style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: [
-                              ChoiceChip(
-                                label: const Text('Todos'),
-                                selected: tempEstado == null,
-                                onSelected: (_) => setSheetState(() => tempEstado = null),
-                              ),
-                              ChoiceChip(
-                                label: Text('Disponible',
-                                    style: TextStyle(
-                                        color: tempEstado == 'disponible'
-                                            ? Colors.green[800]
-                                            : null,
-                                        fontWeight: tempEstado == 'disponible'
-                                            ? FontWeight.w600
-                                            : null)),
-                                selected: tempEstado == 'disponible',
-                                selectedColor: Colors.green[100],
-                                avatar: tempEstado == 'disponible'
-                                    ? Icon(Icons.check_circle,
-                                        size: 18, color: Colors.green[700])
-                                    : null,
-                                onSelected: (_) =>
-                                    setSheetState(() => tempEstado = 'disponible'),
-                              ),
-                              ChoiceChip(
-                                label: Text('En venta',
-                                    style: TextStyle(
-                                        color: tempEstado == 'en_venta'
-                                            ? Colors.orange[900]
-                                            : null,
-                                        fontWeight: tempEstado == 'en_venta'
-                                            ? FontWeight.w600
-                                            : null)),
-                                selected: tempEstado == 'en_venta',
-                                selectedColor: Colors.orange[100],
-                                avatar: tempEstado == 'en_venta'
-                                    ? Icon(Icons.sell,
-                                        size: 18, color: Colors.orange[800])
-                                    : null,
-                                onSelected: (_) =>
-                                    setSheetState(() => tempEstado = 'en_venta'),
-                              ),
-                              ChoiceChip(
-                                label: Text('Vendido',
-                                    style: TextStyle(
-                                        color: tempEstado == 'vendido'
-                                            ? Colors.red[800]
-                                            : null,
-                                        fontWeight: tempEstado == 'vendido'
-                                            ? FontWeight.w600
-                                            : null)),
-                                selected: tempEstado == 'vendido',
-                                selectedColor: Colors.red[100],
-                                avatar: tempEstado == 'vendido'
-                                    ? Icon(Icons.do_not_disturb_on,
-                                        size: 18, color: Colors.red[700])
-                                    : null,
-                                onSelected: (_) =>
-                                    setSheetState(() => tempEstado = 'vendido'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Text('Tipo de juego',
-                              style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: [
-                              ChoiceChip(
-                                label: const Text('Todos'),
-                                selected: tempEsExpansion == null,
-                                onSelected: (_) =>
-                                    setSheetState(() => tempEsExpansion = null),
-                              ),
-                              ChoiceChip(
-                                label: Text('Base',
-                                    style: TextStyle(
-                                        color: tempEsExpansion == false
-                                            ? Colors.indigo[800]
-                                            : null,
-                                        fontWeight: tempEsExpansion == false
-                                            ? FontWeight.w600
-                                            : null)),
-                                selected: tempEsExpansion == false,
-                                selectedColor: Colors.indigo[100],
-                                avatar: tempEsExpansion == false
-                                    ? Icon(Icons.casino,
-                                        size: 18, color: Colors.indigo[700])
-                                    : null,
-                                onSelected: (_) =>
-                                    setSheetState(() => tempEsExpansion = false),
-                              ),
-                              ChoiceChip(
-                                label: Text('Expansión',
-                                    style: TextStyle(
-                                        color: tempEsExpansion == true
-                                            ? Colors.purple[800]
-                                            : null,
-                                        fontWeight: tempEsExpansion == true
-                                            ? FontWeight.w600
-                                            : null)),
-                                selected: tempEsExpansion == true,
-                                selectedColor: Colors.purple[100],
-                                avatar: tempEsExpansion == true
-                                    ? Icon(Icons.extension,
-                                        size: 18, color: Colors.purple[700])
-                                    : null,
-                                onSelected: (_) =>
-                                    setSheetState(() => tempEsExpansion = true),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Text('Categoría',
-                              style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: [
-                              ChoiceChip(
-                                label: const Text('Todas'),
-                                selected: tempCategoriaId == null,
-                                onSelected: (_) => setSheetState(() {
-                                  tempCategoriaId = null;
-                                  tempCategoriaNombre = null;
-                                }),
-                              ),
-                              ..._categorias.map((cat) => ChoiceChip(
-                                    label: Text(cat.nombre),
-                                    selected: tempCategoriaId == cat.localId,
-                                    onSelected: (_) => setSheetState(() {
-                                      tempCategoriaId = cat.localId;
-                                      tempCategoriaNombre = cat.nombre;
-                                    }),
-                                  )),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Botón fijo en la parte inferior
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                       child: SizedBox(
@@ -524,6 +560,8 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                               _esExpansionFilter = tempEsExpansion;
                               _categoriaLocalId = tempCategoriaId;
                               _categoriaNombre = tempCategoriaNombre;
+                              _propietarioLocalId = tempPropietarioId;
+                              _propietarioNombre = tempPropietarioNombre;
                             });
                             _applyFilters();
                           },
@@ -532,12 +570,22 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                       ),
                     ),
                   ],
-                ),
-              ),
+                );
+              },
             );
-          },
-        );
       },
+    );
+  }
+
+  Widget _filterSectionTitle(BuildContext ctx, String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        title,
+        style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+      ),
     );
   }
 
@@ -794,6 +842,26 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
             setState(() {
               _ubicacionLocalId = null;
               _ubicacionNombre = null;
+            });
+            _applyFilters();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+      ));
+    }
+    if (_propietarioLocalId != null) {
+      chips.add(Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InputChip(
+          label: Text(_propietarioNombre ?? 'Propietario',
+              style: TextStyle(
+                  color: Colors.blue[800], fontWeight: FontWeight.w600)),
+          avatar: Icon(Icons.person, size: 16, color: Colors.blue[700]),
+          backgroundColor: Colors.blue[100],
+          onDeleted: () {
+            setState(() {
+              _propietarioLocalId = null;
+              _propietarioNombre = null;
             });
             _applyFilters();
           },

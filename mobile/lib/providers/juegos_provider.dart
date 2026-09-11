@@ -65,6 +65,7 @@ class JuegosProvider extends ChangeNotifier {
   int? _categoriaLocalId;
   int? _tipoFundaLocalId;
   int? _ubicacionLocalId;
+  int? _propietarioLocalId;
 
   String? get estadoFilter => _estadoFilter;
   bool? get esExpansionFilter => _esExpansionFilter;
@@ -75,12 +76,14 @@ class JuegosProvider extends ChangeNotifier {
     int? categoriaLocalId,
     int? tipoFundaLocalId,
     int? ubicacionLocalId,
+    int? propietarioLocalId,
   }) {
     _estadoFilter = estado;
     _esExpansionFilter = esExpansion;
     _categoriaLocalId = categoriaLocalId;
     _tipoFundaLocalId = tipoFundaLocalId;
     _ubicacionLocalId = ubicacionLocalId;
+    _propietarioLocalId = propietarioLocalId;
   }
 
   void resetFilters() {
@@ -89,6 +92,7 @@ class JuegosProvider extends ChangeNotifier {
     _categoriaLocalId = null;
     _tipoFundaLocalId = null;
     _ubicacionLocalId = null;
+    _propietarioLocalId = null;
     _busqueda = '';
   }
 
@@ -100,6 +104,7 @@ class JuegosProvider extends ChangeNotifier {
     int? categoriaLocalId,
     int? tipoFundaLocalId,
     int? ubicacionLocalId,
+    int? propietarioLocalId,
   }) async {
     _loading = true;
     notifyListeners();
@@ -109,6 +114,7 @@ class JuegosProvider extends ChangeNotifier {
     if (categoriaLocalId != null) _categoriaLocalId = categoriaLocalId;
     if (tipoFundaLocalId != null) _tipoFundaLocalId = tipoFundaLocalId;
     if (ubicacionLocalId != null) _ubicacionLocalId = ubicacionLocalId;
+    if (propietarioLocalId != null) _propietarioLocalId = propietarioLocalId;
     try {
       _items = await _juegos.search(
         buscar: _busqueda.isEmpty ? null : _busqueda,
@@ -119,6 +125,7 @@ class JuegosProvider extends ChangeNotifier {
         categoriaLocalId: _categoriaLocalId,
         tipoFundaLocalId: _tipoFundaLocalId,
         ubicacionLocalId: _ubicacionLocalId,
+        propietarioLocalId: _propietarioLocalId,
       );
       _total = await _juegos.count(
         buscar: _busqueda.isEmpty ? null : _busqueda,
@@ -127,6 +134,7 @@ class JuegosProvider extends ChangeNotifier {
         categoriaLocalId: _categoriaLocalId,
         tipoFundaLocalId: _tipoFundaLocalId,
         ubicacionLocalId: _ubicacionLocalId,
+        propietarioLocalId: _propietarioLocalId,
       );
       _currentPage = page;
       _lastPage = ((_total / _perPage).ceil()).clamp(1, 9999);
