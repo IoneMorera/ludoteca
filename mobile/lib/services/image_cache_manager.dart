@@ -6,11 +6,11 @@ class ImageCacheManager {
   static final instance = CacheManager(
     Config(
       'ludotecaImageCache',
-      stalePeriod: const Duration(days: 30),
-      maxNrOfCacheObjects: 1000,
+      stalePeriod: const Duration(days: 60),
+      maxNrOfCacheObjects: 2000,
       fileService: HttpFileService(
         httpClient: IOClient(
-          HttpClient()..maxConnectionsPerHost = 2,
+          HttpClient()..maxConnectionsPerHost = 6,
         ),
       ),
     ),

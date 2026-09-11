@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../data/ubicacion_repository.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
+import '../utils/friendly_error.dart';
 
 class UbicacionesScreen extends StatefulWidget {
   const UbicacionesScreen({super.key});
@@ -153,7 +154,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear la habitación'))));
                         }
                       }
                     },
@@ -246,7 +247,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear el mueble'))));
                         }
                       }
                     },
@@ -341,7 +342,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear el estante'))));
                         }
                       }
                     },
@@ -467,7 +468,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo guardar la habitación'))));
                         }
                       }
                     },
@@ -582,7 +583,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo guardar el mueble'))));
                         }
                       }
                     },
@@ -697,7 +698,7 @@ class _UbicacionesScreenState extends State<UbicacionesScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo guardar el estante'))));
                         }
                       }
                     },

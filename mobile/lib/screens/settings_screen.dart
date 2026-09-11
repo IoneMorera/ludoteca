@@ -15,6 +15,8 @@ import '../config/api_config.dart';
 import '../config/app_environment.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
+import '../services/error_log_service.dart';
+import '../utils/friendly_error.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -87,18 +89,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        content: Row(
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(width: 20),
-            Expanded(
-              child: ValueListenableBuilder<String>(
-                valueListenable: progreso,
-                builder: (_, mensaje, _) => Text(mensaje),
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: CircularProgressIndicator(),
               ),
-            ),
-          ],
+              const SizedBox(width: 20),
+              Expanded(
+                child: ValueListenableBuilder<String>(
+                  valueListenable: progreso,
+                  builder: (_, mensaje, _) => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(mensaje),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Puedes salir de la app o apagar la pantalla: el escaneo '
+                        'sigue en segundo plano. Verás una notificación con el progreso.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -119,13 +143,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stack) {
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(_mensajeErrorEscaneo(e))),
         );
       }
+      ErrorLogService().log(
+        context: 'SettingsScreen.scanBggExpansions',
+        error: e,
+        stackTrace: stack,
+        extra: {'modo': modo},
+      );
+    } finally {
+      progreso.dispose();
     }
   }
 
@@ -138,15 +170,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return 'BGG tardó demasiado en responder. Reinténtalo: el escaneo '
             'continuará donde se quedó.';
       }
-      if (e.type == DioExceptionType.connectionError) {
-        return 'No se pudo conectar con el servidor.';
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.unknown) {
+        return 'Se perdió la conexión durante el escaneo. Vuelve a lanzarlo: '
+            'continuará donde se quedó.';
       }
       final data = e.response?.data;
       if (data is Map && data['message'] is String) {
         return data['message'] as String;
       }
     }
-    return 'Error al comprobar expansiones: $e';
+    return friendlyError(e, contexto: 'Error al comprobar expansiones');
   }
 
   Future<void> _verifySyncIntegrity() async {

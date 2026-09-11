@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,14 +36,46 @@ import 'screens/settings_screen.dart';
 import 'screens/tipos_funda_screen.dart';
 import 'screens/ubicaciones_screen.dart';
 import 'services/api_service.dart';
+import 'services/error_log_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  await AppEnvironment.init();
+
+  // Lanzar inicializaciones independientes en paralelo.
+  await Future.wait([
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
+    ApiService.warmUp(), // Precarga SharedPreferences
+    AppEnvironment.init(),
+  ]);
+
+  // ApiConfig depende de AppEnvironment, por lo que va después.
   await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
-  runApp(const LudotecaApp());
+
+  // Inicializar registro centralizado de errores.
+  unawaited(ErrorLogService().init());
+
+  // Captura errores no manejados de Flutter y de la zona.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    ErrorLogService().log(
+      context: 'FlutterError',
+      error: details.exceptionAsString(),
+      stackTrace: details.stack,
+      extra: {'library': details.library},
+    );
+  };
+
+  runZonedGuarded(
+    () => runApp(const LudotecaApp()),
+    (error, stack) {
+      ErrorLogService().log(
+        context: 'UncaughtZoneError',
+        error: error,
+        stackTrace: stack,
+      );
+    },
+  );
 }
 
 class LudotecaApp extends StatelessWidget {
@@ -190,6 +224,10 @@ class LudotecaApp extends StatelessWidget {
             case '/evento/nuevo':
               return MaterialPageRoute(
                   builder: (_) => const EventoFormScreen());
+            case '/evento/editar':
+              final localId = settings.arguments as int;
+              return MaterialPageRoute(
+                  builder: (_) => EventoFormScreen(eventoLocalId: localId));
             default:
               return MaterialPageRoute(builder: (_) => const MainShell());
           }
@@ -220,16 +258,18 @@ class _AuthGateState extends State<AuthGate> {
     final loggedIn = await auth.checkAuth();
     if (!mounted) return;
 
+    // Mostrar la UI inmediatamente, sin esperar a sync ni BGG.
+    setState(() => _checking = false);
+
     if (loggedIn) {
       // Sincronizaci\u00f3n inicial: full pull si nunca se ha sincronizado.
-      SyncService().syncAll();
-      if (auth.bggConnected) {
-        // ignore: unawaited_futures
-        context.read<BggCollectionProvider>().fetchOwnedIds();
-      }
+      // ignore: unawaited_futures
+      Future.wait([
+        SyncService().syncAll(),
+        if (auth.bggConnected)
+          context.read<BggCollectionProvider>().fetchOwnedIds(),
+      ]);
     }
-
-    setState(() => _checking = false);
   }
 
   @override
@@ -271,7 +311,19 @@ class _MainShellState extends State<MainShell> {
         index: _currentIndex,
         children: _screens,
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: Theme(
+        data: Theme.of(context).copyWith(
+          navigationBarTheme: NavigationBarThemeData(
+            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+              final selected = states.contains(WidgetState.selected);
+              return TextStyle(
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              );
+            }),
+          ),
+        ),
+        child: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           if (index == 2) {
@@ -312,6 +364,7 @@ class _MainShellState extends State<MainShell> {
             label: 'Más',
           ),
         ],
+        ),
       ),
     );
   }

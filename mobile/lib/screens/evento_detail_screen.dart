@@ -59,6 +59,138 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
         );
   }
 
+  Future<void> _showEventoMenu(Evento evento) async {
+    final editable = evento.esEditable;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[400],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                evento.nombre,
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            if (editable)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Editar evento'),
+                onTap: () => Navigator.pop(ctx, 'editar'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text(
+                'Eliminar evento',
+                style: TextStyle(color: Colors.red),
+              ),
+              onTap: () => Navigator.pop(ctx, 'eliminar'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+
+    if (action == 'editar') {
+      await _editarEvento();
+    } else if (action == 'eliminar') {
+      await _eliminarEvento(evento);
+    }
+  }
+
+  Future<void> _showJuegoMenu(EventoJuego ej) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[400],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                ej.juegoNombre,
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
+              title: const Text(
+                'Quitar del evento',
+                style: TextStyle(color: Colors.red),
+              ),
+              onTap: () => Navigator.pop(ctx, 'quitar'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (action == 'quitar') {
+      await _quitarJuego(ej);
+    }
+  }
+
+  Future<void> _quitarJuego(EventoJuego ej) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Quitar juego'),
+        content: Text('¿Quitar "${ej.juegoNombre}" del evento?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Quitar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    await context.read<EventosProvider>().removeJuego(
+          widget.eventoLocalId,
+          ej.juegoLocalId,
+        );
+  }
+
   Future<void> _cerrarEvento() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -83,6 +215,43 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
     if (confirm != true || !mounted) return;
 
     await context.read<EventosProvider>().cerrarEvento(widget.eventoLocalId);
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _editarEvento() async {
+    final updated = await Navigator.of(context).pushNamed(
+      '/evento/editar',
+      arguments: widget.eventoLocalId,
+    );
+    if (updated == true && mounted) {
+      await context.read<EventosProvider>().fetchEvento(widget.eventoLocalId);
+    }
+  }
+
+  Future<void> _eliminarEvento(Evento evento) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar evento'),
+        content: Text(
+          '¿Eliminar "${evento.nombre}"? Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    await context.read<EventosProvider>().deleteEvento(widget.eventoLocalId);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -111,14 +280,6 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(evento.nombre),
-        actions: [
-          if (editable)
-            IconButton(
-              icon: const Icon(Icons.add),
-              tooltip: 'Añadir juego',
-              onPressed: () => _anadirJuego(evento),
-            ),
-        ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -133,48 +294,52 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
                   color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
                 ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.event, color: Theme.of(context).colorScheme.primary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _formatFecha(evento.fechaInicio, evento.fechaFin),
-                            style: Theme.of(context).textTheme.titleMedium,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onLongPress: () => _showEventoMenu(evento),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.event, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _formatFecha(evento.fechaInicio, evento.fechaFin),
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(Icons.place_outlined, color: Colors.grey.shade600),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(evento.localizacion)),
+                        ],
+                      ),
+                      if (soloLectura) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Evento cerrado (solo consulta)',
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ] else if (puedeCerrar) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Pendiente de colocar juegos',
+                          style: TextStyle(
+                            color: Colors.amber.shade800,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(Icons.place_outlined, color: Colors.grey.shade600),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(evento.localizacion)),
-                      ],
-                    ),
-                    if (soloLectura) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Evento cerrado (solo consulta)',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ] else if (puedeCerrar) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Pendiente de colocar juegos',
-                        style: TextStyle(
-                          color: Colors.amber.shade800,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -201,14 +366,39 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
                 : ListView.separated(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: evento.juegos.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 4),
+                    separatorBuilder: (_, _) => const SizedBox(height: 4),
                     itemBuilder: (context, index) {
                       final ej = evento.juegos[index];
+                      final tile = Card(
+                        elevation: 0,
+                        child: ListTile(
+                          leading: GameImage(
+                            juego: Juego(
+                              id: ej.juegoLocalId,
+                              localId: ej.juegoLocalId,
+                              nombre: ej.juegoNombre,
+                              imagen: ej.juegoImagen,
+                            ),
+                            width: 48,
+                            height: 48,
+                          ),
+                          title: Text(ej.juegoNombre),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).pushNamed(
+                            '/juego',
+                            arguments: ej.juegoLocalId,
+                          ),
+                          onLongPress: editable
+                              ? () => _showJuegoMenu(ej)
+                              : null,
+                        ),
+                      );
+
+                      if (!editable) return tile;
+
                       return Dismissible(
                         key: ValueKey('ej_${ej.localId ?? ej.juegoLocalId}'),
-                        direction: editable
-                            ? DismissDirection.endToStart
-                            : DismissDirection.none,
+                        direction: DismissDirection.endToStart,
                         background: Container(
                           alignment: Alignment.centerRight,
                           padding: const EdgeInsets.only(right: 20),
@@ -216,33 +406,10 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
                           child: const Icon(Icons.delete, color: Colors.white),
                         ),
                         confirmDismiss: (_) async {
-                          await context.read<EventosProvider>().removeJuego(
-                                widget.eventoLocalId,
-                                ej.juegoLocalId,
-                              );
-                          return true;
+                          await _quitarJuego(ej);
+                          return false;
                         },
-                        child: Card(
-                          elevation: 0,
-                          child: ListTile(
-                            leading: GameImage(
-                              juego: Juego(
-                                id: ej.juegoLocalId,
-                                localId: ej.juegoLocalId,
-                                nombre: ej.juegoNombre,
-                                imagen: ej.juegoImagen,
-                              ),
-                              width: 48,
-                              height: 48,
-                            ),
-                            title: Text(ej.juegoNombre),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.of(context).pushNamed(
-                              '/juego',
-                              arguments: ej.juegoLocalId,
-                            ),
-                          ),
-                        ),
+                        child: tile,
                       );
                     },
                   ),

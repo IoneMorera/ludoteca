@@ -898,6 +898,106 @@ class BggController extends Controller
     }
 
     /**
+     * Devuelve juegos que tienen bgg_id pero no tienen imagen descargada.
+     * Incluye la URL de la imagen de BGG para que el cliente pueda lanzar
+     * la descarga masiva.
+     */
+    public function missingImages(): JsonResponse
+    {
+        $juegos = Juego::whereNotNull('bgg_id')
+            ->where(function ($q) {
+                $q->whereNull('imagen')
+                  ->orWhere('imagen', '');
+            })
+            ->select('id', 'bgg_id', 'nombre')
+            ->orderBy('nombre')
+            ->get();
+
+        $pending = [];
+        foreach ($juegos as $juego) {
+            $pending[] = [
+                'bgg_id' => $juego->bgg_id,
+                'image_url' => "https://cf.geekdo-images.com/original/img/bgg_{$juego->bgg_id}.jpg",
+            ];
+        }
+
+        // Para obtener las URLs reales necesitamos consultar la API de BGG
+        // Hacemos peticiones en lotes al endpoint /thing
+        $bggIds = $juegos->pluck('bgg_id')->filter()->unique()->values()->all();
+        $imageMap = $this->fetchBggImageUrls($bggIds);
+
+        $result = [];
+        foreach ($juegos as $juego) {
+            $url = $imageMap[$juego->bgg_id] ?? null;
+            if ($url) {
+                $result[] = [
+                    'bgg_id' => $juego->bgg_id,
+                    'image_url' => $url,
+                    'nombre' => $juego->nombre,
+                ];
+            }
+        }
+
+        return response()->json([
+            'total' => count($result),
+            'images' => $result,
+        ]);
+    }
+
+    /**
+     * Consulta en lotes la API de BGG para obtener las URLs de imagen
+     * de un conjunto de bgg_ids.
+     */
+    private function fetchBggImageUrls(array $bggIds): array
+    {
+        $map = [];
+        $chunks = array_chunk($bggIds, self::THING_BATCH_SIZE);
+
+        foreach ($chunks as $chunk) {
+            $ids = implode(',', $chunk);
+            $url = self::BGG_API_URL . "/thing?id={$ids}&type=boardgame,boardgameexpansion";
+
+            for ($retry = 0; $retry <= self::MAX_RETRIES; $retry++) {
+                try {
+                    $response = Http::timeout(30)
+                        ->withHeaders(['User-Agent' => self::IMAGE_USER_AGENT])
+                        ->get($url);
+
+                    if ($response->status() === 202) {
+                        sleep(self::RETRY_DELAY_SECONDS);
+                        continue;
+                    }
+
+                    if (!$response->successful()) break;
+
+                    $xml = @simplexml_load_string($response->body());
+                    if (!$xml) break;
+
+                    foreach ($xml->item as $item) {
+                        $id = (int) $item['id'];
+                        $image = (string) ($item->image ?? '');
+                        if ($image !== '') {
+                            $map[$id] = $image;
+                        }
+                    }
+                    break;
+                } catch (\Throwable $e) {
+                    Log::warning('fetchBggImageUrls failed', [
+                        'chunk' => $chunk,
+                        'retry' => $retry,
+                        'error' => $e->getMessage(),
+                    ]);
+                    if ($retry < self::MAX_RETRIES) {
+                        sleep(self::RETRY_DELAY_SECONDS * ($retry + 1));
+                    }
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    /**
      * Guarda una imagen de juego y devuelve la ruta pública (o URL absoluta si es R2/S3).
      *
      * - Si hay R2 configurado (R2_BUCKET presente), sube a R2 con prefijo por tenant

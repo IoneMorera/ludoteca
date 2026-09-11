@@ -7,6 +7,7 @@ import '../data/sync_service.dart';
 import '../models/juego.dart';
 import '../providers/bgg_collection_provider.dart';
 import '../providers/juegos_provider.dart';
+import '../utils/friendly_error.dart';
 import '../widgets/expansion_faltante_actions.dart';
 import '../widgets/game_image.dart';
 
@@ -340,7 +341,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear la ubicación'))));
                         }
                       }
                     },
@@ -409,11 +410,33 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
     final total = juego.expansiones.length + _faltantes.length;
     final baseLocalId = juego.localId;
 
-    return _buildSection(
-      'Expansiones ($total)',
-      theme,
-      child: Column(
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Expansiones ($total)',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (_faltantes.isNotEmpty)
+              TextButton(
+                onPressed: () => ExpansionFaltanteActions.ignorarTodas(
+                  context,
+                  expansiones: _faltantes,
+                  onChanged: _loadFaltantes,
+                ),
+                child: const Text('Ignorar todas'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Column(
+          children: [
           ...juego.expansiones.map(
             (exp) => ListTile(
               dense: true,
@@ -471,8 +494,9 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                     ),
             ),
           ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 

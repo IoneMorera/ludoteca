@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 import '../data/sync_service.dart';
 import '../data/categoria_repository.dart';
 import '../providers/bgg_collection_provider.dart';
+import '../providers/eventos_provider.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
 import '../models/juego.dart';
+import '../models/evento.dart';
+import '../utils/friendly_error.dart';
 import '../widgets/game_image.dart';
 
 class JuegosListScreen extends StatefulWidget {
@@ -203,7 +206,101 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al eliminar: $e')),
+          SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo eliminar el juego'))),
+        );
+      }
+    }
+  }
+
+  Future<void> _anadirAEvento(Juego juego) async {
+    if (juego.localId == null) return;
+
+    final eventosProvider = context.read<EventosProvider>();
+    await eventosProvider.fetchEventos();
+    if (!mounted) return;
+
+    final eventos = eventosProvider.eventosFuturos;
+    if (eventos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay eventos futuros. Crea uno en Calendario.'),
+        ),
+      );
+      return;
+    }
+
+    final evento = await showModalBottomSheet<Evento>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Añadir a evento',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                juego.nombre,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: eventos.map((e) {
+                  final yaIncluido = e.juegos
+                      .any((ej) => ej.juegoLocalId == juego.localId);
+                  return ListTile(
+                    leading: const Icon(Icons.event),
+                    title: Text(e.nombre),
+                    subtitle: Text(e.localizacion),
+                    enabled: !yaIncluido,
+                    trailing: yaIncluido
+                        ? Text(
+                            'Ya incluido',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          )
+                        : null,
+                    onTap: yaIncluido ? null : () => Navigator.pop(ctx, e),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (evento == null || evento.localId == null || !mounted) return;
+
+    try {
+      await eventosProvider.addJuego(evento.localId!, juego.localId!);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '"${juego.nombre}" añadido a "${evento.nombre}"',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo añadir el juego al evento'))),
         );
       }
     }
@@ -224,18 +321,15 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            return DraggableScrollableSheet(
-              initialChildSize: 0.6,
-              minChildSize: 0.4,
-              maxChildSize: 0.85,
-              expand: false,
-              builder: (_, scrollController) {
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                  child: ListView(
-                    controller: scrollController,
-                    children: [
-                      Row(
+            return SafeArea(
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.75,
+                child: Column(
+                  children: [
+                    // Cabecera fija
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text('Filtros',
@@ -255,177 +349,191 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      Text('Estado',
-                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              )),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
+                    ),
+                    const SizedBox(height: 8),
+                    // Contenido con scroll libre
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                         children: [
-                          ChoiceChip(
-                            label: const Text('Todos'),
-                            selected: tempEstado == null,
-                            onSelected: (_) => setSheetState(() => tempEstado = null),
+                          Text('Estado',
+                              style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Todos'),
+                                selected: tempEstado == null,
+                                onSelected: (_) => setSheetState(() => tempEstado = null),
+                              ),
+                              ChoiceChip(
+                                label: Text('Disponible',
+                                    style: TextStyle(
+                                        color: tempEstado == 'disponible'
+                                            ? Colors.green[800]
+                                            : null,
+                                        fontWeight: tempEstado == 'disponible'
+                                            ? FontWeight.w600
+                                            : null)),
+                                selected: tempEstado == 'disponible',
+                                selectedColor: Colors.green[100],
+                                avatar: tempEstado == 'disponible'
+                                    ? Icon(Icons.check_circle,
+                                        size: 18, color: Colors.green[700])
+                                    : null,
+                                onSelected: (_) =>
+                                    setSheetState(() => tempEstado = 'disponible'),
+                              ),
+                              ChoiceChip(
+                                label: Text('En venta',
+                                    style: TextStyle(
+                                        color: tempEstado == 'en_venta'
+                                            ? Colors.orange[900]
+                                            : null,
+                                        fontWeight: tempEstado == 'en_venta'
+                                            ? FontWeight.w600
+                                            : null)),
+                                selected: tempEstado == 'en_venta',
+                                selectedColor: Colors.orange[100],
+                                avatar: tempEstado == 'en_venta'
+                                    ? Icon(Icons.sell,
+                                        size: 18, color: Colors.orange[800])
+                                    : null,
+                                onSelected: (_) =>
+                                    setSheetState(() => tempEstado = 'en_venta'),
+                              ),
+                              ChoiceChip(
+                                label: Text('Vendido',
+                                    style: TextStyle(
+                                        color: tempEstado == 'vendido'
+                                            ? Colors.red[800]
+                                            : null,
+                                        fontWeight: tempEstado == 'vendido'
+                                            ? FontWeight.w600
+                                            : null)),
+                                selected: tempEstado == 'vendido',
+                                selectedColor: Colors.red[100],
+                                avatar: tempEstado == 'vendido'
+                                    ? Icon(Icons.do_not_disturb_on,
+                                        size: 18, color: Colors.red[700])
+                                    : null,
+                                onSelected: (_) =>
+                                    setSheetState(() => tempEstado = 'vendido'),
+                              ),
+                            ],
                           ),
-                          ChoiceChip(
-                            label: Text('Disponible',
-                                style: TextStyle(
-                                    color: tempEstado == 'disponible'
-                                        ? Colors.green[800]
-                                        : null,
-                                    fontWeight: tempEstado == 'disponible'
-                                        ? FontWeight.w600
-                                        : null)),
-                            selected: tempEstado == 'disponible',
-                            selectedColor: Colors.green[100],
-                            avatar: tempEstado == 'disponible'
-                                ? Icon(Icons.check_circle,
-                                    size: 18, color: Colors.green[700])
-                                : null,
-                            onSelected: (_) =>
-                                setSheetState(() => tempEstado = 'disponible'),
+                          const SizedBox(height: 20),
+                          Text('Tipo de juego',
+                              style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Todos'),
+                                selected: tempEsExpansion == null,
+                                onSelected: (_) =>
+                                    setSheetState(() => tempEsExpansion = null),
+                              ),
+                              ChoiceChip(
+                                label: Text('Base',
+                                    style: TextStyle(
+                                        color: tempEsExpansion == false
+                                            ? Colors.indigo[800]
+                                            : null,
+                                        fontWeight: tempEsExpansion == false
+                                            ? FontWeight.w600
+                                            : null)),
+                                selected: tempEsExpansion == false,
+                                selectedColor: Colors.indigo[100],
+                                avatar: tempEsExpansion == false
+                                    ? Icon(Icons.casino,
+                                        size: 18, color: Colors.indigo[700])
+                                    : null,
+                                onSelected: (_) =>
+                                    setSheetState(() => tempEsExpansion = false),
+                              ),
+                              ChoiceChip(
+                                label: Text('Expansión',
+                                    style: TextStyle(
+                                        color: tempEsExpansion == true
+                                            ? Colors.purple[800]
+                                            : null,
+                                        fontWeight: tempEsExpansion == true
+                                            ? FontWeight.w600
+                                            : null)),
+                                selected: tempEsExpansion == true,
+                                selectedColor: Colors.purple[100],
+                                avatar: tempEsExpansion == true
+                                    ? Icon(Icons.extension,
+                                        size: 18, color: Colors.purple[700])
+                                    : null,
+                                onSelected: (_) =>
+                                    setSheetState(() => tempEsExpansion = true),
+                              ),
+                            ],
                           ),
-                          ChoiceChip(
-                            label: Text('En venta',
-                                style: TextStyle(
-                                    color: tempEstado == 'en_venta'
-                                        ? Colors.orange[900]
-                                        : null,
-                                    fontWeight: tempEstado == 'en_venta'
-                                        ? FontWeight.w600
-                                        : null)),
-                            selected: tempEstado == 'en_venta',
-                            selectedColor: Colors.orange[100],
-                            avatar: tempEstado == 'en_venta'
-                                ? Icon(Icons.sell,
-                                    size: 18, color: Colors.orange[800])
-                                : null,
-                            onSelected: (_) =>
-                                setSheetState(() => tempEstado = 'en_venta'),
-                          ),
-                          ChoiceChip(
-                            label: Text('Vendido',
-                                style: TextStyle(
-                                    color: tempEstado == 'vendido'
-                                        ? Colors.red[800]
-                                        : null,
-                                    fontWeight: tempEstado == 'vendido'
-                                        ? FontWeight.w600
-                                        : null)),
-                            selected: tempEstado == 'vendido',
-                            selectedColor: Colors.red[100],
-                            avatar: tempEstado == 'vendido'
-                                ? Icon(Icons.do_not_disturb_on,
-                                    size: 18, color: Colors.red[700])
-                                : null,
-                            onSelected: (_) =>
-                                setSheetState(() => tempEstado = 'vendido'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Text('Tipo de juego',
-                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              )),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          ChoiceChip(
-                            label: const Text('Todos'),
-                            selected: tempEsExpansion == null,
-                            onSelected: (_) =>
-                                setSheetState(() => tempEsExpansion = null),
-                          ),
-                          ChoiceChip(
-                            label: Text('Base',
-                                style: TextStyle(
-                                    color: tempEsExpansion == false
-                                        ? Colors.indigo[800]
-                                        : null,
-                                    fontWeight: tempEsExpansion == false
-                                        ? FontWeight.w600
-                                        : null)),
-                            selected: tempEsExpansion == false,
-                            selectedColor: Colors.indigo[100],
-                            avatar: tempEsExpansion == false
-                                ? Icon(Icons.casino,
-                                    size: 18, color: Colors.indigo[700])
-                                : null,
-                            onSelected: (_) =>
-                                setSheetState(() => tempEsExpansion = false),
-                          ),
-                          ChoiceChip(
-                            label: Text('Expansión',
-                                style: TextStyle(
-                                    color: tempEsExpansion == true
-                                        ? Colors.purple[800]
-                                        : null,
-                                    fontWeight: tempEsExpansion == true
-                                        ? FontWeight.w600
-                                        : null)),
-                            selected: tempEsExpansion == true,
-                            selectedColor: Colors.purple[100],
-                            avatar: tempEsExpansion == true
-                                ? Icon(Icons.extension,
-                                    size: 18, color: Colors.purple[700])
-                                : null,
-                            onSelected: (_) =>
-                                setSheetState(() => tempEsExpansion = true),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Text('Categoría',
-                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              )),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          ChoiceChip(
-                            label: const Text('Todas'),
-                            selected: tempCategoriaId == null,
-                            onSelected: (_) => setSheetState(() {
-                              tempCategoriaId = null;
-                              tempCategoriaNombre = null;
-                            }),
-                          ),
-                          ..._categorias.map((cat) => ChoiceChip(
-                                label: Text(cat.nombre),
-                                selected: tempCategoriaId == cat.localId,
+                          const SizedBox(height: 20),
+                          Text('Categoría',
+                              style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Todas'),
+                                selected: tempCategoriaId == null,
                                 onSelected: (_) => setSheetState(() {
-                                  tempCategoriaId = cat.localId;
-                                  tempCategoriaNombre = cat.nombre;
+                                  tempCategoriaId = null;
+                                  tempCategoriaNombre = null;
                                 }),
-                              )),
+                              ),
+                              ..._categorias.map((cat) => ChoiceChip(
+                                    label: Text(cat.nombre),
+                                    selected: tempCategoriaId == cat.localId,
+                                    onSelected: (_) => setSheetState(() {
+                                      tempCategoriaId = cat.localId;
+                                      tempCategoriaNombre = cat.nombre;
+                                    }),
+                                  )),
+                            ],
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 24),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          setState(() {
-                            _estadoFilter = tempEstado;
-                            _esExpansionFilter = tempEsExpansion;
-                            _categoriaLocalId = tempCategoriaId;
-                            _categoriaNombre = tempCategoriaNombre;
-                          });
-                          _applyFilters();
-                        },
-                        child: const Text('Aplicar filtros'),
+                    ),
+                    // Botón fijo en la parte inferior
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            setState(() {
+                              _estadoFilter = tempEstado;
+                              _esExpansionFilter = tempEsExpansion;
+                              _categoriaLocalId = tempCategoriaId;
+                              _categoriaNombre = tempCategoriaNombre;
+                            });
+                            _applyFilters();
+                          },
+                          child: const Text('Aplicar filtros'),
+                        ),
                       ),
-                    ],
-                  ),
-                );
-              },
+                    ),
+                  ],
+                ),
+              ),
             );
           },
         );
@@ -827,9 +935,17 @@ class _JuegosListScreenState extends State<JuegosListScreen> {
               ),
               PopupMenuButton<String>(
                 onSelected: (action) {
-                  if (action == 'delete') _confirmDelete(juego);
+                  if (action == 'add_event') {
+                    _anadirAEvento(juego);
+                  } else if (action == 'delete') {
+                    _confirmDelete(juego);
+                  }
                 },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'add_event',
+                    child: Text('Añadir a evento'),
+                  ),
                   PopupMenuItem(
                     value: 'delete',
                     child: Text('Eliminar'),

@@ -7,8 +7,8 @@ class ApiConfig {
   static const String _prodServerUrl = 'https://ludoteca.up.railway.app';
   static const String _prefsKey = 'server_url';
 
-  static const Duration connectTimeout = Duration(seconds: 30);
-  static const Duration receiveTimeout = Duration(seconds: 60);
+  static const Duration connectTimeout = Duration(seconds: 15);
+  static const Duration receiveTimeout = Duration(seconds: 30);
 
   static String _serverUrl = _devServerUrl;
 
@@ -20,7 +20,7 @@ class ApiConfig {
   static String get serverUrl => _serverUrl;
 
   static Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance(); // ya cacheado por warmUp
     var saved = prefs.getString(_prefsKey);
 
     // En prod, corrige URLs de emulador guardadas por error en builds anteriores.

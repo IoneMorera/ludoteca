@@ -138,9 +138,10 @@ class JuegosProvider extends ChangeNotifier {
   }
 
   Future<void> fetchJuego(int localOrServerId, {bool isServerId = false}) async {
-    _loading = true;
-    _juegoDetalle = null;
-    notifyListeners();
+    // No resetear _juegoDetalle a null: la lectura SQLite es casi instantánea
+    // y poner null causa un flash blanco innecesario en la pantalla.
+    _loading = _juegoDetalle == null;
+    if (_loading) notifyListeners();
     try {
       if (isServerId) {
         _juegoDetalle = await _juegos.getByServerId(localOrServerId);

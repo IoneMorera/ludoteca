@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../data/propietario_repository.dart';
 import '../data/sync_service.dart';
 import '../providers/juegos_provider.dart';
+import '../utils/friendly_error.dart';
 
 class PropietariosScreen extends StatefulWidget {
   const PropietariosScreen({super.key});
@@ -109,7 +110,7 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
+                            SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo guardar el propietario'))),
                           );
                         }
                       }
@@ -172,7 +173,7 @@ class _PropietariosScreenState extends State<PropietariosScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error al eliminar: $e')),
+            SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo eliminar el propietario'))),
           );
         }
       }

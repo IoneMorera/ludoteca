@@ -6,6 +6,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/recognition_service.dart';
+import '../utils/friendly_error.dart';
 
 class RecognizeScreen extends StatefulWidget {
   const RecognizeScreen({super.key});
@@ -50,7 +51,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
     } on DioException catch (e) {
       setState(() => _error = _friendlyDioError(e));
     } catch (e) {
-      setState(() => _error = 'Error al procesar la imagen: $e');
+      setState(() => _error = friendlyError(e, contexto: 'No se pudo procesar la imagen'));
     } finally {
       if (mounted) setState(() => _processing = false);
     }
@@ -94,7 +95,7 @@ class _RecognizeScreenState extends State<RecognizeScreen> {
       final result = await _service.searchByText(text);
       _applyResult(result, manual: true);
     } catch (e) {
-      setState(() => _error = 'Error al buscar: $e');
+      setState(() => _error = friendlyError(e, contexto: 'No se encontraron resultados'));
     } finally {
       if (mounted) setState(() => _processing = false);
     }

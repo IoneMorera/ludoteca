@@ -18,6 +18,7 @@ class EventosProvider extends ChangeNotifier {
   Evento? _eventoDetalle;
   Evento? _proximoEvento;
   int _eventosPendientesCount = 0;
+  int _totalEventosResumen = 0;
   bool _loading = false;
 
   List<Evento> get eventosFuturos => _eventosFuturos;
@@ -25,6 +26,7 @@ class EventosProvider extends ChangeNotifier {
   Evento? get eventoDetalle => _eventoDetalle;
   Evento? get proximoEvento => _proximoEvento;
   int get eventosPendientesCount => _eventosPendientesCount;
+  int get totalEventosResumen => _totalEventosResumen;
   bool get loading => _loading;
 
   EventoRepository get eventoRepository => _eventos;
@@ -45,6 +47,7 @@ class EventosProvider extends ChangeNotifier {
   Future<void> fetchEventosResumen() async {
     try {
       _eventosPendientesCount = await _eventos.countPendientesColocar();
+      _totalEventosResumen = await _eventos.countFuturosYCerrados();
       _proximoEvento = await _eventos.getProximoEvento();
     } catch (e) {
       debugPrint('fetchEventosResumen error: $e');

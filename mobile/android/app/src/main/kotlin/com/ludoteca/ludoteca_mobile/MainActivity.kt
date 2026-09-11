@@ -31,6 +31,32 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            FOREGROUND_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    val title = call.argument<String>("title") ?: "Comprobando expansiones"
+                    val text = call.argument<String>("text") ?: "El escaneo continúa en segundo plano"
+                    BggScanForegroundService.start(this, title, text)
+                    result.success(null)
+                }
+                "update" -> {
+                    val text = call.argument<String>("text")
+                    if (!text.isNullOrEmpty()) {
+                        BggScanForegroundService.update(this, text)
+                    }
+                    result.success(null)
+                }
+                "stop" -> {
+                    BggScanForegroundService.stop(this)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun cloneFromProd(context: Context) {
@@ -59,6 +85,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val CHANNEL = "com.ludoteca.ludoteca_mobile/db_clone"
+        const val FOREGROUND_CHANNEL = "com.ludoteca.ludoteca_mobile/foreground"
         private const val PROD_AUTHORITY = "com.ludoteca.ludoteca_mobile.localdb"
         private const val DB_NAME = "ludoteca.db"
     }

@@ -109,6 +109,93 @@ class _EventosList extends StatelessWidget {
     return '${fmt(inicio)} - ${fmt(fin)}';
   }
 
+  Future<void> _showEventoMenu(BuildContext context, Evento evento) async {
+    final editable = evento.esEditable;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[400],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                evento.nombre,
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            if (editable)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Editar evento'),
+                onTap: () => Navigator.pop(ctx, 'editar'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text(
+                'Eliminar evento',
+                style: TextStyle(color: Colors.red),
+              ),
+              onTap: () => Navigator.pop(ctx, 'eliminar'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted || action == null) return;
+
+    final provider = context.read<EventosProvider>();
+    if (action == 'editar' && evento.localId != null) {
+      final updated = await Navigator.of(context).pushNamed(
+        '/evento/editar',
+        arguments: evento.localId,
+      );
+      if (updated == true && context.mounted) {
+        await provider.fetchEventos();
+      }
+    } else if (action == 'eliminar' && evento.localId != null) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Eliminar evento'),
+          content: Text(
+            '¿Eliminar "${evento.nombre}"? Esta acción no se puede deshacer.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        ),
+      );
+      if (confirm == true && context.mounted) {
+        await provider.deleteEvento(evento.localId!);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (eventos.isEmpty) {
@@ -131,7 +218,7 @@ class _EventosList extends StatelessWidget {
       child: ListView.separated(
         padding: const EdgeInsets.all(12),
         itemCount: eventos.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final evento = eventos[index];
           final estado = evento.effectiveEstado;
@@ -202,6 +289,7 @@ class _EventosList extends StatelessWidget {
                   await context.read<EventosProvider>().fetchEventos();
                 }
               },
+              onLongPress: () => _showEventoMenu(context, evento),
             ),
           );
         },

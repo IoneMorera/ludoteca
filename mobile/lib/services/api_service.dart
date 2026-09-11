@@ -8,6 +8,16 @@ class ApiService {
 
   late final Dio dio;
 
+  /// Instancia cacheada de SharedPreferences para evitar llamar
+  /// getInstance() en cada request HTTP.
+  static SharedPreferences? _prefs;
+
+  /// Precarga SharedPreferences para que el interceptor sea síncrono.
+  /// Llamar una vez en main() antes de cualquier petición HTTP.
+  static Future<void> warmUp() async {
+    _prefs = await SharedPreferences.getInstance();
+  }
+
   ApiService._internal() {
     dio = Dio(BaseOptions(
       baseUrl: ApiConfig.baseUrl,
@@ -21,7 +31,8 @@ class ApiService {
 
     dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final prefs = await SharedPreferences.getInstance();
+        final prefs = _prefs ?? await SharedPreferences.getInstance();
+        _prefs = prefs;
         final token = prefs.getString('auth_token');
         if (token != null) {
           options.headers['Authorization'] = 'Bearer $token';
@@ -29,9 +40,37 @@ class ApiService {
         handler.next(options);
       },
       onError: (error, handler) {
-        handler.next(error);
+        if (_shouldRetry(error)) {
+          _retryRequest(error, handler);
+        } else {
+          handler.next(error);
+        }
       },
     ));
+  }
+
+  /// Determina si un error es transitorio y merece reintento.
+  static bool _shouldRetry(DioException error) {
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout) {
+      return true;
+    }
+    final statusCode = error.response?.statusCode;
+    return statusCode != null && (statusCode >= 500 || statusCode == 429);
+  }
+
+  /// Reintenta la petición una vez tras un breve delay.
+  Future<void> _retryRequest(
+      DioException error, ErrorInterceptorHandler handler) async {
+    try {
+      await Future.delayed(const Duration(milliseconds: 800));
+      final opts = error.requestOptions;
+      final response = await dio.fetch(opts);
+      handler.resolve(response);
+    } on DioException catch (e) {
+      handler.next(e);
+    }
   }
 
   void updateBaseUrl(String serverUrl) {

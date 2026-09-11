@@ -3,6 +3,10 @@
         android:name="com.ludoteca.ludoteca_mobile.permission.CLONE_LOCAL_DB"
         android:protectionLevel="signature" />
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="com.ludoteca.ludoteca_mobile.permission.CLONE_LOCAL_DB" />
     <application
         android:label="@string/app_name"
@@ -44,6 +48,11 @@
             android:authorities="${applicationId}.localdb"
             android:exported="true"
             android:permission="com.ludoteca.ludoteca_mobile.permission.CLONE_LOCAL_DB" />
+        <service
+            android:name=".BggScanForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="true" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -55,6 +64,10 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 </manifest>
