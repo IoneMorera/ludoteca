@@ -186,6 +186,11 @@ class _BggSearchPickerState extends State<BggSearchPicker> {
                       subtitle: Text([
                         if (game['year'] != null && game['year'] != 0)
                           '${game['year']}',
+                        if (game['es_expansion'] == true ||
+                            game['type'] == 'boardgameexpansion')
+                          'Expansión'
+                        else
+                          'Juego base',
                         'BGG #${game['bgg_id'] ?? '-'}',
                       ].join(' \u00b7 ')),
                       onTap: () => Navigator.of(context).pop(game),

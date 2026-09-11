@@ -2461,7 +2461,12 @@ class BggController extends Controller
         }
 
         $light = $request->boolean('light');
-        $limit = max(1, min((int) $request->input('limit', $light ? 8 : 10), 15));
+        // OCR usa pocas coincidencias; el buscador de la ficha necesita más
+        // porque BGG no ordena por relevancia y un título como Munchkin
+        // arrastra decenas de expansiones delante del juego base.
+        $defaultLimit = $light ? 8 : 40;
+        $maxLimit = $light ? 15 : 50;
+        $limit = max(1, min((int) $request->input('limit', $defaultLimit), $maxLimit));
         $exact = $request->boolean('exact');
 
         $apiKey = config('services.bgg.api_key');
@@ -2502,7 +2507,8 @@ class BggController extends Controller
             ], $response->status());
         }
 
-        $games = array_slice($this->parseSearchXml($response->body()), 0, $limit);
+        $ranked = $this->rankBggSearchResults($query, $this->parseSearchXml($response->body()));
+        $games = array_slice($ranked, 0, $limit);
 
         if (!empty($games)) {
             // En modo light pedimos menos detalles (miniaturas) para ganar velocidad.
@@ -2513,6 +2519,7 @@ class BggController extends Controller
                 if (isset($details[$game['bgg_id']])) {
                     $game = array_merge($game, $details[$game['bgg_id']]);
                 }
+                $game['es_expansion'] = ($game['type'] ?? '') === 'boardgameexpansion';
             }
             unset($game);
         }
@@ -2716,6 +2723,66 @@ class BggController extends Controller
         }
 
         return $games;
+    }
+
+    /**
+     * BGG /search no rankea por popularidad: el XML llega en un orden poco útil.
+     * Ponemos primero la coincidencia exacta y los juegos base.
+     *
+     * @param  list<array{bgg_id: int, name: string, year: int, type: string}>  $games
+     * @return list<array{bgg_id: int, name: string, year: int, type: string}>
+     */
+    private function rankBggSearchResults(string $query, array $games): array
+    {
+        if (count($games) < 2) {
+            return $games;
+        }
+
+        $normalizedQuery = $this->normalizeGameName($query);
+
+        usort($games, function (array $a, array $b) use ($normalizedQuery) {
+            $scoreA = $this->bggSearchRelevanceScore($normalizedQuery, $a);
+            $scoreB = $this->bggSearchRelevanceScore($normalizedQuery, $b);
+            if ($scoreA !== $scoreB) {
+                return $scoreB <=> $scoreA;
+            }
+
+            $yearA = (int) ($a['year'] ?? 0);
+            $yearB = (int) ($b['year'] ?? 0);
+            if (($yearA === 0) !== ($yearB === 0)) {
+                return $yearA === 0 ? 1 : -1;
+            }
+
+            return $yearA <=> $yearB;
+        });
+
+        return $games;
+    }
+
+    /**
+     * @param  array{bgg_id?: int, name?: string, year?: int, type?: string}  $game
+     */
+    private function bggSearchRelevanceScore(string $normalizedQuery, array $game): int
+    {
+        $name = $this->normalizeGameName((string) ($game['name'] ?? ''));
+        $isExpansion = ($game['type'] ?? '') === 'boardgameexpansion';
+        $score = 0;
+
+        if ($name === $normalizedQuery) {
+            $score += 1000;
+        } elseif ($normalizedQuery !== '' && str_starts_with($name, $normalizedQuery)) {
+            $score += 400;
+            $score += max(0, 80 - mb_strlen($name));
+        } elseif ($normalizedQuery !== '' && str_contains($name, $normalizedQuery)) {
+            $score += 150;
+            $score += max(0, 40 - mb_strlen($name));
+        }
+
+        if (!$isExpansion) {
+            $score += 80;
+        }
+
+        return $score;
     }
 
     private function fetchThingDetails(array $bggIds, ?string $apiKey): array
