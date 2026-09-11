@@ -3,15 +3,17 @@ import 'package:cached_network_image/cached_network_image.dart';
 
 import '../services/api_service.dart';
 import '../services/image_cache_manager.dart';
+import '../utils/friendly_error.dart';
 
 /// Hoja modal para buscar un juego en BGG y devolver el seleccionado.
 ///
 /// Devuelve un mapa con las claves: bgg_id, name, year, image, thumbnail,
 /// min_players, max_players, description, playing_time.
 class BggSearchPicker extends StatefulWidget {
-  const BggSearchPicker({super.key, this.initialQuery});
+  const BggSearchPicker({super.key, this.initialQuery, this.scrollController});
 
   final String? initialQuery;
+  final ScrollController? scrollController;
 
   static Future<Map<String, dynamic>?> show(BuildContext context,
       {String? initialQuery}) {
@@ -21,8 +23,12 @@ class BggSearchPicker extends StatefulWidget {
       builder: (_) => DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.85,
+        minChildSize: 0.4,
         maxChildSize: 0.95,
-        builder: (_, controller) => BggSearchPicker(initialQuery: initialQuery),
+        builder: (_, controller) => BggSearchPicker(
+          initialQuery: initialQuery,
+          scrollController: controller,
+        ),
       ),
     );
   }
@@ -66,7 +72,7 @@ class _BggSearchPickerState extends State<BggSearchPicker> {
           (response.data['games'] as List?)?.cast<Map<String, dynamic>>() ?? [];
       setState(() => _results = games);
     } catch (e) {
-      setState(() => _error = 'Error al buscar en BGG: $e');
+      setState(() => _error = friendlyError(e, contexto: 'No se pudo buscar en BGG'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -136,6 +142,7 @@ class _BggSearchPickerState extends State<BggSearchPicker> {
                     ),
                   )
                 : ListView.separated(
+                    controller: widget.scrollController,
                     padding: const EdgeInsets.all(8),
                     itemCount: _results.length,
                     separatorBuilder: (_, _) =>

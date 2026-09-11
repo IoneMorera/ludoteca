@@ -51,6 +51,7 @@ dependencies:
   image_cropper: ^12.2.1
   image: ^4.5.4
   package_info_plus: ^8.3.0
+  device_info_plus: ^11.5.0
   webview_flutter: ^4.13.0
   webview_flutter_android: ^4.10.11
   url_launcher: ^6.3.2

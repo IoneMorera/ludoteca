@@ -15,6 +15,7 @@ import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../services/api_service.dart';
+import '../utils/friendly_error.dart';
 import '../widgets/juego_picker_sheet.dart';
 import 'bgg_search_picker.dart';
 
@@ -508,7 +509,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear la ubicación'))));
                         }
                       }
                     },
@@ -807,7 +808,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       if (mounted) {
         final message = e is StateError
             ? e.message
-            : 'Error al guardar: $e';
+            : friendlyError(e, contexto: 'No se pudo guardar el juego');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message)),
         );
@@ -840,9 +841,11 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
           _buildImage(),
           const SizedBox(height: 16),
           TextField(
@@ -988,6 +991,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             label: Text(_existing == null ? 'Crear juego' : 'Guardar cambios'),
           ),
         ],
+        ),
       ),
     );
   }
@@ -1202,7 +1206,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
+                            SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear la categoría'))),
                           );
                         }
                       }
@@ -2030,7 +2034,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
+                            SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear el tipo de funda'))),
                           );
                         }
                       }

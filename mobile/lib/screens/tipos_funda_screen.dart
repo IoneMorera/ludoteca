@@ -5,6 +5,7 @@ import '../data/juego_repository.dart';
 import '../data/sync_service.dart';
 import '../data/tipo_funda_repository.dart';
 import '../providers/juegos_provider.dart';
+import '../utils/friendly_error.dart';
 
 class TiposFundaScreen extends StatefulWidget {
   const TiposFundaScreen({super.key});
@@ -143,7 +144,7 @@ class _TiposFundaScreenState extends State<TiposFundaScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
+                            SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo guardar el tipo de funda'))),
                           );
                         }
                       }
@@ -201,7 +202,7 @@ class _TiposFundaScreenState extends State<TiposFundaScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error al eliminar: $e')),
+            SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo eliminar el tipo de funda'))),
           );
         }
       }

@@ -6,6 +6,7 @@ import '../data/propietario_repository.dart';
 import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../providers/sync_provider.dart';
+import '../utils/text_normalize.dart';
 import '../widgets/game_image.dart';
 
 class ColeccionesScreen extends StatefulWidget {
@@ -31,6 +32,10 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
   List<Juego> _coleccionConjunta = [];
   bool _loadingConjunta = false;
   final List<int> _propietariosConjuntaIds = [];
+  final _searchPersonal = TextEditingController();
+  final _searchConjunta = TextEditingController();
+  String _queryPersonal = '';
+  String _queryConjunta = '';
 
   @override
   void initState() {
@@ -42,6 +47,8 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchPersonal.dispose();
+    _searchConjunta.dispose();
     super.dispose();
   }
 
@@ -137,6 +144,43 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
     }
   }
 
+  List<Juego> _filtrar(List<Juego> juegos, String query) {
+    final q = normalizeText(query.trim());
+    if (q.isEmpty) return juegos;
+    return juegos
+        .where((j) => normalizeText(j.nombre).contains(q))
+        .toList();
+  }
+
+  Widget _buildSearchField({
+    required TextEditingController controller,
+    required String hint,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          hintText: hint,
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: controller.text.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                )
+              : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -163,6 +207,7 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
   }
 
   Widget _buildPersonalTab() {
+    final filtrados = _filtrar(_coleccionPersonal, _queryPersonal);
     return Column(
       children: [
         Padding(
@@ -189,27 +234,40 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
             },
           ),
         ),
+        _buildSearchField(
+          controller: _searchPersonal,
+          hint: 'Buscar en esta colección...',
+          onChanged: (v) => setState(() => _queryPersonal = v),
+        ),
         if (!_loadingPersonal && _coleccionPersonal.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('${_coleccionPersonal.length} juegos',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+              child: Text(
+                _queryPersonal.trim().isEmpty
+                    ? '${_coleccionPersonal.length} juegos'
+                    : '${filtrados.length} de ${_coleccionPersonal.length} juegos',
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              ),
             ),
           ),
         Expanded(
           child: _loadingPersonal
               ? const Center(child: CircularProgressIndicator())
-              : _coleccionPersonal.isEmpty
+              : filtrados.isEmpty
                   ? RefreshIndicator(
                       onRefresh: _sincronizarYRecargar,
                       child: ListView(
-                        children: const [
-                          SizedBox(height: 120),
+                        children: [
+                          const SizedBox(height: 120),
                           Center(
-                            child: Text('No hay juegos en esta colección',
-                                style: TextStyle(color: Colors.grey)),
+                            child: Text(
+                              _coleccionPersonal.isEmpty
+                                  ? 'No hay juegos en esta colección'
+                                  : 'Ningún juego coincide con la búsqueda',
+                              style: const TextStyle(color: Colors.grey),
+                            ),
                           ),
                         ],
                       ),
@@ -217,9 +275,9 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
                   : RefreshIndicator(
                       onRefresh: _sincronizarYRecargar,
                       child: ListView.builder(
-                        itemCount: _coleccionPersonal.length,
+                        itemCount: filtrados.length,
                         itemBuilder: (ctx, i) =>
-                            _buildJuegoTile(_coleccionPersonal[i]),
+                            _buildJuegoTile(filtrados[i]),
                       ),
                     ),
         ),
@@ -228,6 +286,7 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
   }
 
   Widget _buildConjuntaTab() {
+    final filtrados = _filtrar(_coleccionConjunta, _queryConjunta);
     return Column(
       children: [
         Padding(
@@ -253,13 +312,22 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
             }).toList(),
           ),
         ),
+        _buildSearchField(
+          controller: _searchConjunta,
+          hint: 'Buscar en la colección conjunta...',
+          onChanged: (v) => setState(() => _queryConjunta = v),
+        ),
         if (!_loadingConjunta && _coleccionConjunta.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('${_coleccionConjunta.length} juegos únicos',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+              child: Text(
+                _queryConjunta.trim().isEmpty
+                    ? '${_coleccionConjunta.length} juegos únicos'
+                    : '${filtrados.length} de ${_coleccionConjunta.length} juegos',
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              ),
             ),
           ),
         Expanded(
@@ -271,16 +339,21 @@ class _ColeccionesScreenState extends State<ColeccionesScreen>
                           'Selecciona propietarios para ver la colección conjunta',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.grey)))
-                  : _coleccionConjunta.isEmpty
-                      ? const Center(
-                          child: Text('No hay juegos en la colección conjunta',
-                              style: TextStyle(color: Colors.grey)))
+                  : filtrados.isEmpty
+                      ? Center(
+                          child: Text(
+                            _coleccionConjunta.isEmpty
+                                ? 'No hay juegos en la colección conjunta'
+                                : 'Ningún juego coincide con la búsqueda',
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                        )
                       : RefreshIndicator(
                           onRefresh: _sincronizarYRecargar,
                           child: ListView.builder(
-                            itemCount: _coleccionConjunta.length,
+                            itemCount: filtrados.length,
                             itemBuilder: (ctx, i) =>
-                                _buildJuegoTile(_coleccionConjunta[i]),
+                                _buildJuegoTile(filtrados[i]),
                           ),
                         ),
         ),

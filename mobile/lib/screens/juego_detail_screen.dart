@@ -7,6 +7,7 @@ import '../data/sync_service.dart';
 import '../models/juego.dart';
 import '../providers/bgg_collection_provider.dart';
 import '../providers/juegos_provider.dart';
+import '../utils/friendly_error.dart';
 import '../widgets/expansion_faltante_actions.dart';
 import '../widgets/game_image.dart';
 
@@ -340,7 +341,7 @@ class _JuegoDetailScreenState extends State<JuegoDetailScreen> {
                         setDialogState(() => saving = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
+                              SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo crear la ubicación'))));
                         }
                       }
                     },

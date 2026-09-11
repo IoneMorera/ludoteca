@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/evento.dart';
 import '../providers/eventos_provider.dart';
+import '../utils/friendly_error.dart';
 
 class EventoFormScreen extends StatefulWidget {
   final int? eventoLocalId;
@@ -121,7 +122,7 @@ class _EventoFormScreenState extends State<EventoFormScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al guardar: $e')),
+          SnackBar(content: Text(friendlyError(e, contexto: 'No se pudo guardar el evento'))),
         );
       }
     } finally {

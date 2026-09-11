@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BggController;
 use App\Http\Controllers\Api\CategoriaController;
+use App\Http\Controllers\Api\ErrorLogController;
 use App\Http\Controllers\Api\HabitacionController;
 use App\Http\Controllers\Api\JuegoController;
 use App\Http\Controllers\Api\MuebleController;
@@ -30,6 +31,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('mobile/logout', [AuthController::class, 'mobileLogout']);
     Route::get('user', [AuthController::class, 'user']);
     Route::put('user', [AuthController::class, 'updateUser']);
+
+    // Logs de error desde la app móvil (sin tenancy, tabla central)
+    Route::post('error-logs', [ErrorLogController::class, 'store']);
 
     // --- Rutas con tenancy (BBDD del usuario) ---
     Route::middleware([InitializeTenancyByUser::class, SubstituteBindings::class])->group(function () {
@@ -88,6 +92,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('bgg/import', [BggController::class, 'import']);
         Route::post('bgg/import-expansions', [BggController::class, 'importExpansions']);
         Route::post('bgg/import-images', [BggController::class, 'importImages']);
+        Route::get('bgg/missing-images', [BggController::class, 'missingImages']);
         Route::post('bgg/expansions/scan', [BggController::class, 'scanExpansions']);
         Route::patch('bgg/expansiones/{bggExpansion}', [BggController::class, 'updateExpansion']);
 

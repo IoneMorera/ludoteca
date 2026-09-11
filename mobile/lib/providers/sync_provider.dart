@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/bgg_expansion_scan_service.dart';
 import '../data/sync_service.dart';
+import '../services/error_log_service.dart';
 
 /// Provider que expone el estado de sincronizaci\u00f3n a la UI.
 ///
@@ -35,12 +36,14 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       unawaited(_service.syncAll());
       unawaited(_maybeRunIncrementalExpansionScan());
+      unawaited(ErrorLogService().flush());
     }
   }
 
   Future<void> _maybeRunIncrementalExpansionScan() async {
     try {
       if (!await _service.isOnline()) return;
+      if (BggExpansionScanService.isRunning) return;
       final prefs = await SharedPreferences.getInstance();
       final last = prefs.getString('last_expansion_scan_at');
       if (last != null) {
@@ -55,7 +58,13 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
         'last_expansion_scan_at',
         DateTime.now().toIso8601String(),
       );
-    } catch (_) {}
+    } catch (e, stack) {
+      ErrorLogService().log(
+        context: 'SyncProvider.incrementalExpansionScan',
+        error: e,
+        stackTrace: stack,
+      );
+    }
   }
 
   @override

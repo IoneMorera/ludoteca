@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +36,7 @@ import 'screens/settings_screen.dart';
 import 'screens/tipos_funda_screen.dart';
 import 'screens/ubicaciones_screen.dart';
 import 'services/api_service.dart';
+import 'services/error_log_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,7 +51,31 @@ void main() async {
   // ApiConfig depende de AppEnvironment, por lo que va después.
   await ApiConfig.init();
   ApiService().updateBaseUrl(ApiConfig.serverUrl);
-  runApp(const LudotecaApp());
+
+  // Inicializar registro centralizado de errores.
+  unawaited(ErrorLogService().init());
+
+  // Captura errores no manejados de Flutter y de la zona.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    ErrorLogService().log(
+      context: 'FlutterError',
+      error: details.exceptionAsString(),
+      stackTrace: details.stack,
+      extra: {'library': details.library},
+    );
+  };
+
+  runZonedGuarded(
+    () => runApp(const LudotecaApp()),
+    (error, stack) {
+      ErrorLogService().log(
+        context: 'UncaughtZoneError',
+        error: error,
+        stackTrace: stack,
+      );
+    },
+  );
 }
 
 class LudotecaApp extends StatelessWidget {

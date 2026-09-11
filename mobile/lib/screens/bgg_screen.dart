@@ -16,7 +16,10 @@ import '../providers/sync_provider.dart';
 import '../services/api_service.dart';
 import '../services/bgg_write_service.dart';
 import '../services/database_service.dart';
+import '../services/bgg_export_ignore_store.dart';
+import '../services/error_log_service.dart';
 import '../services/image_cache_manager.dart';
+import '../utils/friendly_error.dart';
 
 class BggScreen extends StatefulWidget {
   const BggScreen({super.key});
@@ -40,18 +43,42 @@ class _BggScreenState extends State<BggScreen> {
   bool _loadingCollection = false;
   bool _importing = false;
   bool _exportPreviewLoading = false;
+  bool _downloadingMissingImages = false;
+  String? _missingImagesMessage;
   String? _importMessage;
+  int _ignoredExportCount = 0;
 
   @override
   void initState() {
     super.initState();
     _fetchPropietarios();
+    _refreshIgnoredCount();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       if (auth.bggConnected) {
         context.read<BggCollectionProvider>().fetchOwnedIds();
       }
     });
+  }
+
+  Future<void> _showIgnoredGames() async {
+    await BggExportIgnoreStore().load();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _IgnoredExportGamesDialog(
+        store: BggExportIgnoreStore(),
+        onChanged: _refreshIgnoredCount,
+      ),
+    );
+    await _refreshIgnoredCount();
+  }
+
+  Future<void> _refreshIgnoredCount() async {
+    await BggExportIgnoreStore().load();
+    if (mounted) {
+      setState(() => _ignoredExportCount = BggExportIgnoreStore().ids.length);
+    }
   }
 
   /// Lee propietarios de SQLite local (instantáneo) en vez de la API remota.
@@ -90,7 +117,7 @@ class _BggScreenState extends State<BggScreen> {
           : (data as List).cast<Map<String, dynamic>>();
       setState(() => _bggGames = games);
     } catch (e) {
-      setState(() => _importMessage = 'Error al cargar colecci\u00f3n: $e');
+      setState(() => _importMessage = friendlyError(e, contexto: 'No se pudo cargar la colección de BGG'));
     }
     setState(() => _loadingCollection = false);
   }
@@ -98,25 +125,95 @@ class _BggScreenState extends State<BggScreen> {
   /// Descarga en el servidor las im\u00e1genes de los juegos importados desde BGG.
   /// El backend expone `/bgg/import-images` (m\u00e1x. 30 por lote), que baja cada
   /// imagen y actualiza el campo `imagen` del juego.
+  ///
+  /// Reintenta lotes fallidos hasta 2 veces antes de darlos por perdidos.
   Future<Map<String, int>> _downloadPendingImages(List<dynamic> pending) async {
     const batchSize = 30;
+    const maxRetries = 2;
     var ok = 0;
     var fail = 0;
+
     for (var i = 0; i < pending.length; i += batchSize) {
       final end =
           (i + batchSize) < pending.length ? i + batchSize : pending.length;
       final batch = pending.sublist(i, end);
-      try {
-        final res =
-            await _api.post('/bgg/import-images', data: {'images': batch});
-        final d = res.data;
-        ok += (d['succeeded'] as num?)?.toInt() ?? 0;
-        fail += (d['failed'] as num?)?.toInt() ?? 0;
-      } catch (_) {
-        fail += batch.length;
+
+      for (var attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          final res =
+              await _api.post('/bgg/import-images', data: {'images': batch});
+          final d = res.data;
+          ok += (d['succeeded'] as num?)?.toInt() ?? 0;
+          fail += (d['failed'] as num?)?.toInt() ?? 0;
+          break;
+        } catch (e, stack) {
+          if (attempt == maxRetries) {
+            fail += batch.length;
+            ErrorLogService().log(
+              context: 'BggImportImages',
+              error: e,
+              stackTrace: stack,
+              extra: {
+                'batch_start': i,
+                'batch_size': batch.length,
+                'attempts': attempt + 1,
+              },
+            );
+          } else {
+            await Future.delayed(Duration(seconds: 3 * (attempt + 1)));
+          }
+        }
       }
     }
     return {'ok': ok, 'fail': fail};
+  }
+
+  /// Descarga portadas de BGG para todos los juegos que no tengan imagen.
+  /// Consulta al backend qué juegos les falta y luego usa el mismo
+  /// endpoint de import-images para descargarlas en lotes.
+  Future<void> _downloadMissingImages() async {
+    setState(() {
+      _downloadingMissingImages = true;
+      _missingImagesMessage = 'Buscando juegos sin portada...';
+    });
+    try {
+      final response = await _api.get('/bgg/missing-images');
+      final data = response.data;
+      final images = (data['images'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final total = (data['total'] as num?)?.toInt() ?? images.length;
+
+      if (images.isEmpty) {
+        if (mounted) {
+          setState(() => _missingImagesMessage = 'Todos los juegos ya tienen portada.');
+        }
+        return;
+      }
+
+      if (mounted) {
+        setState(() => _missingImagesMessage = 'Descargando $total portadas...');
+      }
+
+      final imgRes = await _downloadPendingImages(images);
+      final ok = imgRes['ok'] ?? 0;
+      final fail = imgRes['fail'] ?? 0;
+      var msg = 'Portadas descargadas: $ok';
+      if (fail > 0) msg += ', fallidas: $fail';
+
+      if (mounted) {
+        setState(() => _missingImagesMessage = msg);
+        context.read<SyncProvider>().syncNow(fullPull: false);
+      }
+    } catch (e, stack) {
+      if (mounted) {
+        setState(() => _missingImagesMessage = friendlyError(e, contexto: 'No se pudieron descargar las portadas'));
+      }
+      ErrorLogService().log(
+        context: 'BggDownloadMissingImages',
+        error: e,
+        stackTrace: stack,
+      );
+    }
+    if (mounted) setState(() => _downloadingMissingImages = false);
   }
 
   Future<void> _importGames() async {
@@ -150,8 +247,13 @@ class _BggScreenState extends State<BggScreen> {
       } else {
         SyncService().syncAll();
       }
-    } catch (e) {
-      if (mounted) setState(() => _importMessage = 'Error al importar');
+    } catch (e, stack) {
+      if (mounted) setState(() => _importMessage = friendlyError(e, contexto: 'No se pudieron importar los juegos'));
+      ErrorLogService().log(
+        context: 'BggImportGames',
+        error: e,
+        stackTrace: stack,
+      );
     }
     if (mounted) setState(() => _importing = false);
   }
@@ -198,10 +300,15 @@ class _BggScreenState extends State<BggScreen> {
       } else {
         SyncService().syncAll();
       }
-    } catch (e) {
+    } catch (e, stack) {
       if (mounted) {
-        setState(() => _importMessage = 'Error al importar expansiones: $e');
+        setState(() => _importMessage = friendlyError(e, contexto: 'No se pudieron importar las expansiones'));
       }
+      ErrorLogService().log(
+        context: 'BggImportExpansions',
+        error: e,
+        stackTrace: stack,
+      );
     }
     if (mounted) setState(() => _importing = false);
   }
@@ -251,6 +358,11 @@ class _BggScreenState extends State<BggScreen> {
         Map<String, dynamic>.from(response.data as Map),
         bgg,
       );
+      await BggExportIgnoreStore().load();
+      preview = _excludeIgnoredFromPreview(
+        preview,
+        BggExportIgnoreStore().ids,
+      );
     } catch (e) {
       error = 'No se pudo preparar la exportación';
       try {
@@ -276,7 +388,10 @@ class _BggScreenState extends State<BggScreen> {
       builder: (ctx) => _ExportPreviewDialog(preview: preview!),
     );
 
-    if (result == null || !result.accepted || !mounted) return;
+    if (result == null || !result.accepted || !mounted) {
+      await _refreshIgnoredCount();
+      return;
+    }
 
     final ignored = result.ignoredIds;
     int? asInt(dynamic v) {
@@ -313,6 +428,60 @@ class _BggScreenState extends State<BggScreen> {
     }
 
     await _runExport(queue);
+    await _refreshIgnoredCount();
+  }
+
+  Map<String, dynamic> _excludeIgnoredFromPreview(
+    Map<String, dynamic> preview,
+    Set<int> ignoredIds,
+  ) {
+    if (ignoredIds.isEmpty) return preview;
+
+    int? asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '');
+    }
+
+    List<Map<String, dynamic>> asMaps(dynamic raw) {
+      if (raw is! List) return [];
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+
+    bool isIgnored(Map<String, dynamic> item) {
+      final id = asInt(item['id']);
+      return id != null && ignoredIds.contains(id);
+    }
+
+    final toUpload =
+        asMaps(preview['to_upload']).where((e) => !isIgnored(e)).toList();
+    final toPrev =
+        asMaps(preview['to_prev_owned']).where((e) => !isIgnored(e)).toList();
+
+    var byName = 0;
+    for (final item in [...toUpload, ...toPrev]) {
+      if (item['match_by_name'] == true || asInt(item['bgg_id']) == null) {
+        byName++;
+      }
+    }
+
+    final counts = preview['counts'] is Map
+        ? Map<String, dynamic>.from(preview['counts'] as Map)
+        : <String, dynamic>{};
+    preview['to_upload'] = toUpload;
+    preview['to_prev_owned'] = toPrev;
+    preview['counts'] = {
+      ...counts,
+      'to_upload': toUpload.length,
+      'to_prev_owned': toPrev.length,
+      'match_by_name': byName,
+      'total_changes': toUpload.length + toPrev.length,
+      'ignored': ignoredIds.length,
+    };
+    return preview;
   }
 
   /// La XML API de BGG no refleja altas inmediatas; el preview del servidor
@@ -781,6 +950,75 @@ class _BggScreenState extends State<BggScreen> {
                                 : 'Exportar colección a la BGG',
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _showIgnoredGames,
+                          icon: const Icon(Icons.visibility_off_outlined),
+                          label: Text(
+                            _ignoredExportCount == 0
+                                ? 'Juegos ignorados'
+                                : 'Juegos ignorados ($_ignoredExportCount)',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Portadas faltantes',
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Descarga desde BGG las portadas de todos los juegos que no tengan imagen.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.tonalIcon(
+                          onPressed: _downloadingMissingImages
+                              ? null
+                              : _downloadMissingImages,
+                          icon: _downloadingMissingImages
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.image),
+                          label: Text(
+                            _downloadingMissingImages
+                                ? 'Descargando...'
+                                : 'Descargar portadas faltantes',
+                          ),
+                        ),
+                        if (_missingImagesMessage != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _missingImagesMessage!,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: _missingImagesMessage!.startsWith('Error')
+                                  ? theme.colorScheme.error
+                                  : Colors.green[700],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -997,7 +1235,16 @@ class _ExportPreviewDialogState extends State<_ExportPreviewDialog> {
               if (ignoredCount > 0) ...[
                 const SizedBox(height: 4),
                 Text(
-                  '$ignoredCount ignorados (no se exportarán)',
+                  '$ignoredCount ignorados en esta revisión (no se exportarán)',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                ),
+              ],
+              if ((counts['ignored'] as num?)?.toInt() != null &&
+                  ((counts['ignored'] as num).toInt()) > 0 &&
+                  ignoredCount == 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '${(counts['ignored'] as num).toInt()} en la lista de ignorados (no se muestran)',
                   style: TextStyle(fontSize: 13, color: Colors.grey[700]),
                 ),
               ],
@@ -1161,13 +1408,16 @@ class _ExportChangesListDialogState extends State<_ExportChangesListDialog> {
     _ignored = Set<int>.from(widget.ignoredIds);
   }
 
-  void _toggle(int? id) {
+  void _toggle(Map<String, dynamic> item) {
+    final id = _itemId(item);
     if (id == null) return;
     setState(() {
       if (_ignored.contains(id)) {
         _ignored.remove(id);
+        BggExportIgnoreStore().restore(id);
       } else {
         _ignored.add(id);
+        BggExportIgnoreStore().ignore(BggIgnoredGame.fromPreview(item));
       }
     });
     widget.onIgnoredChanged(Set<int>.from(_ignored));
@@ -1300,7 +1550,7 @@ class _ChangesList extends StatelessWidget {
   final String emptyLabel;
   final String Function(Map<String, dynamic> item) subtitleFor;
   final Set<int> ignoredIds;
-  final ValueChanged<int?> onToggleIgnore;
+  final ValueChanged<Map<String, dynamic>> onToggleIgnore;
 
   int? _itemId(Map<String, dynamic> item) {
     final id = item['id'];
@@ -1351,7 +1601,7 @@ class _ChangesList extends StatelessWidget {
             ),
           ),
           trailing: TextButton(
-            onPressed: () => onToggleIgnore(id),
+            onPressed: () => onToggleIgnore(item),
             child: Text(ignored ? 'Incluir' : 'Ignorar'),
           ),
         );
@@ -1513,6 +1763,94 @@ class _ExportProgressDialog extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _IgnoredExportGamesDialog extends StatefulWidget {
+  const _IgnoredExportGamesDialog({
+    required this.store,
+    required this.onChanged,
+  });
+
+  final BggExportIgnoreStore store;
+  final VoidCallback onChanged;
+
+  @override
+  State<_IgnoredExportGamesDialog> createState() =>
+      _IgnoredExportGamesDialogState();
+}
+
+class _IgnoredExportGamesDialogState extends State<_IgnoredExportGamesDialog> {
+  late List<BggIgnoredGame> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.store.items;
+  }
+
+  Future<void> _restore(BggIgnoredGame game) async {
+    await widget.store.restore(game.id);
+    setState(() => _items = widget.store.items);
+    widget.onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Juegos ignorados'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: _items.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'No hay juegos en la lista de ignorados. '
+                  'Cuando ignores uno al exportar, aparecerá aquí.',
+                ),
+              )
+            : SizedBox(
+                height: MediaQuery.of(context).size.height * 0.5,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Estos juegos no se proponen al exportar a BGG. '
+                      'Sácalos de la lista para que vuelvan a aparecer.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: _items.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final game = _items[index];
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(game.nombre),
+                            subtitle: game.bggId != null
+                                ? Text('BGG #${game.bggId}')
+                                : const Text('Sin ID de BGG'),
+                            trailing: TextButton(
+                              onPressed: () => _restore(game),
+                              child: const Text('Incluir'),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cerrar'),
+        ),
+      ],
     );
   }
 }
