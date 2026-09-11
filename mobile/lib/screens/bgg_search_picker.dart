@@ -4,32 +4,22 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../services/api_service.dart';
 import '../services/image_cache_manager.dart';
 import '../utils/friendly_error.dart';
+import '../widgets/scrollable_modal_sheet.dart';
 
 /// Hoja modal para buscar un juego en BGG y devolver el seleccionado.
 ///
 /// Devuelve un mapa con las claves: bgg_id, name, year, image, thumbnail,
 /// min_players, max_players, description, playing_time.
 class BggSearchPicker extends StatefulWidget {
-  const BggSearchPicker({super.key, this.initialQuery, this.scrollController});
+  const BggSearchPicker({super.key, this.initialQuery});
 
   final String? initialQuery;
-  final ScrollController? scrollController;
 
   static Future<Map<String, dynamic>?> show(BuildContext context,
       {String? initialQuery}) {
-    return showModalBottomSheet<Map<String, dynamic>>(
+    return showScrollableModalSheet<Map<String, dynamic>>(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.85,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (_, controller) => BggSearchPicker(
-          initialQuery: initialQuery,
-          scrollController: controller,
-        ),
-      ),
+      builder: (_) => BggSearchPicker(initialQuery: initialQuery),
     );
   }
 
@@ -81,105 +71,129 @@ class _BggSearchPickerState extends State<BggSearchPicker> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Buscar en BGG',
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 4, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Buscar en BGG',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ],
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: TextField(
+            controller: _ctrl,
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Nombre del juego',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              suffixIcon: _loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.search),
+                      onPressed: _search,
+                    ),
+            ),
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _search(),
+          ),
+        ),
+        if (_error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _ctrl,
-              decoration: InputDecoration(
-                hintText: 'Nombre del juego',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                suffixIcon: _loading
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : null,
-              ),
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _search(),
+            child: Text(
+              _error!,
+              style: TextStyle(color: theme.colorScheme.error),
             ),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+        if (_results.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              '${_results.length} resultados',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.grey[600],
+              ),
             ),
-          Expanded(
-            child: _results.isEmpty && !_loading
-                ? Center(
+          ),
+        Expanded(
+          child: _results.isEmpty && !_loading
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
                     child: Text(
-                      'Escribe un nombre y pulsa enter para buscar.',
+                      'Escribe un nombre y pulsa buscar.',
+                      textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.grey[600]),
                     ),
-                  )
-                : ListView.separated(
-                    controller: widget.scrollController,
-                    padding: const EdgeInsets.all(8),
-                    itemCount: _results.length,
-                    separatorBuilder: (_, _) =>
-                        const Divider(height: 1),
-                    itemBuilder: (_, idx) {
-                      final game = _results[idx];
-                      return ListTile(
-                        leading: game['thumbnail'] != null &&
-                                (game['thumbnail'] as String).isNotEmpty
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
-                                child: CachedNetworkImage(
-                                  cacheManager: ImageCacheManager.instance,
-                                  imageUrl: game['thumbnail'],
-                                  width: 44,
-                                  height: 44,
-                                  fit: BoxFit.cover,
-                                  maxWidthDiskCache: 200,
-                                  fadeInDuration: const Duration(milliseconds: 150),
-                                  errorWidget: (_, _, _) =>
-                                      const Icon(Icons.casino),
-                                ),
-                              )
-                            : const Icon(Icons.casino),
-                        title: Text(game['name'] ?? 'Sin nombre'),
-                        subtitle: Text([
-                          if (game['year'] != null && game['year'] != 0)
-                            '${game['year']}',
-                          'BGG #${game['bgg_id'] ?? '-'}',
-                        ].join(' \u00b7 ')),
-                        onTap: () => Navigator.of(context).pop(game),
-                      );
-                    },
                   ),
-          ),
-        ],
-      ),
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: ClampingScrollPhysics(),
+                  ),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
+                  itemCount: _results.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (_, idx) {
+                    final game = _results[idx];
+                    return ListTile(
+                      dense: true,
+                      leading: game['thumbnail'] != null &&
+                              (game['thumbnail'] as String).isNotEmpty
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: CachedNetworkImage(
+                                cacheManager: ImageCacheManager.instance,
+                                imageUrl: game['thumbnail'],
+                                width: 44,
+                                height: 44,
+                                fit: BoxFit.cover,
+                                maxWidthDiskCache: 200,
+                                fadeInDuration:
+                                    const Duration(milliseconds: 150),
+                                errorWidget: (_, _, _) =>
+                                    const Icon(Icons.casino),
+                              ),
+                            )
+                          : const Icon(Icons.casino),
+                      title: Text(game['name'] ?? 'Sin nombre'),
+                      subtitle: Text([
+                        if (game['year'] != null && game['year'] != 0)
+                          '${game['year']}',
+                        'BGG #${game['bgg_id'] ?? '-'}',
+                      ].join(' \u00b7 ')),
+                      onTap: () => Navigator.of(context).pop(game),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
