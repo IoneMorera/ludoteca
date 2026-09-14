@@ -1,4 +1,4 @@
-import '../config/api_config.dart';
+import '../utils/game_image_url.dart';
 
 class Juego {
   /// `id` legacy: cuando viene del servidor es `serverId`. Para registros
@@ -205,7 +205,12 @@ class Juego {
       serverId: json['id'] is int ? json['id'] as int : null,
       nombre: json['nombre'] ?? '',
       descripcion: json['descripcion'],
-      imagen: json['imagen'],
+      imagen: GameImageUrl.canonicalize(
+        json['imagen'] as String?,
+        json['bgg_id'] is int
+            ? json['bgg_id'] as int
+            : int.tryParse('${json['bgg_id'] ?? ''}'),
+      ),
       edadMinima: json['edad_minima'],
       edadMaxima: json['edad_maxima'],
       numJugadoresMin: json['num_jugadores_min'],
@@ -298,14 +303,7 @@ class Juego {
       '${numJugadoresMin ?? '?'}\u2013${numJugadoresMax ?? '?'}';
   String get edadTexto => '${edadMinima ?? '?'}+';
 
-  String? get imagenUrl {
-    if (imagen == null || imagen!.isEmpty) return null;
-    if (imagen!.startsWith('http://') || imagen!.startsWith('https://')) {
-      return imagen;
-    }
-    final path = imagen!.startsWith('/') ? imagen! : '/$imagen';
-    return '${ApiConfig.storageUrl}$path';
-  }
+  String? get imagenUrl => GameImageUrl.resolve(imagen, bggId);
 }
 
 class JuegoFunda {

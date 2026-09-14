@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/juego.dart';
 import '../services/database_service.dart';
+import '../utils/game_image_url.dart';
 import '../utils/text_normalize.dart' as tn;
 import 'outbox_dao.dart';
 import 'ubicacion_repository.dart';
@@ -827,7 +828,10 @@ class JuegoRepository {
       'ubicacion_local_id': ubicacionLocalId,
       'estado': data['estado'],
       'fecha_compra': data['fecha_compra'],
-      'imagen': data['imagen'],
+      'imagen': GameImageUrl.canonicalize(
+        data['imagen'] as String?,
+        _asInt(data['bgg_id']),
+      ),
       'bgg_id': data['bgg_id'],
       'juego_base_server_id': data['juego_base_id'],
       'juego_base_local_id': juegoBaseLocalId,
@@ -1156,11 +1160,27 @@ class JuegoRepository {
     required int localId,
     required String? phash,
     required String? imageLocalPath,
+  }) {
+    return setCoverLocal(
+      localId: localId,
+      imageLocalPath: imageLocalPath,
+      phash: phash,
+    );
+  }
+
+  Future<void> setCoverLocal({
+    required int localId,
+    required String? imageLocalPath,
+    String? phash,
   }) async {
     final db = await _dbService.database;
+    final values = <String, Object?>{
+      'image_local_path': imageLocalPath,
+    };
+    if (phash != null) values['phash'] = phash;
     await db.update(
       'juegos',
-      {'phash': phash, 'image_local_path': imageLocalPath},
+      values,
       where: 'local_id = ?',
       whereArgs: [localId],
     );
@@ -1171,6 +1191,40 @@ class JuegoRepository {
     return db.rawQuery(
       'SELECT local_id, server_id, nombre, phash, image_local_path, imagen FROM juegos',
     );
+  }
+
+  /// Reescribe URLs de Geekdo guardadas en SQLite a `/storage/juegos/bgg_{id}`.
+  Future<void> canonicalizeStoredImageUrls() async {
+    final db = await _dbService.database;
+    final rows = await db.rawQuery(
+      "SELECT local_id, imagen, bgg_id FROM juegos "
+      "WHERE imagen IS NOT NULL AND imagen != ''",
+    );
+    final batch = db.batch();
+    var changed = 0;
+    for (final row in rows) {
+      final current = row['imagen'] as String?;
+      final next = GameImageUrl.canonicalize(current, _asInt(row['bgg_id']));
+      if (next != current) {
+        batch.update(
+          'juegos',
+          {'imagen': next},
+          where: 'local_id = ?',
+          whereArgs: [row['local_id']],
+        );
+        changed++;
+      }
+    }
+    if (changed > 0) {
+      await batch.commit(noResult: true);
+    }
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
   }
 
   // ---------- privados ----------
@@ -1319,7 +1373,10 @@ class JuegoRepository {
         serverId: serverId,
         nombre: r['nombre'] as String,
         descripcion: r['descripcion'] as String?,
-        imagen: r['imagen'] as String?,
+        imagen: GameImageUrl.canonicalize(
+          r['imagen'] as String?,
+          r['bgg_id'] as int?,
+        ),
         edadMinima: r['edad_minima'] as int?,
         edadMaxima: r['edad_maxima'] as int?,
         numJugadoresMin: r['num_jugadores_min'] as int?,
@@ -1478,7 +1535,7 @@ class JuegoRepository {
       'ubicacion_server_id': ubicacionServerId,
       'estado': juego.estado ?? 'disponible',
       'fecha_compra': juego.fechaCompra,
-      'imagen': juego.imagen,
+      'imagen': GameImageUrl.canonicalize(juego.imagen, juego.bggId),
       'bgg_id': juego.bggId,
       'juego_base_local_id': juegoBaseLocalId,
       'juego_base_server_id': juegoBaseServerId,
@@ -1521,7 +1578,10 @@ class JuegoRepository {
       'ubicacion_id': values['ubicacion_server_id'],
       'estado': values['estado'],
       'fecha_compra': values['fecha_compra'],
-      'imagen': values['imagen'],
+      'imagen': GameImageUrl.canonicalize(
+        values['imagen'] as String?,
+        _asInt(values['bgg_id']),
+      ),
       'bgg_id': values['bgg_id'],
       'juego_base_id': values['juego_base_server_id'],
       'no_enfundar': values['no_enfundar'] == 1,

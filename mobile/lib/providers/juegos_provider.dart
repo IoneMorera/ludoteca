@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/bgg_expansion_repository.dart';
@@ -11,7 +13,9 @@ import '../data/sync_service.dart';
 import '../data/tipo_funda_repository.dart';
 import '../data/ubicacion_repository.dart';
 import '../models/juego.dart';
+import '../services/cover_store.dart';
 import '../services/database_service.dart';
+import '../services/phash_service.dart';
 
 /// Provider que centraliza el acceso a los juegos para la UI.
 ///
@@ -198,6 +202,7 @@ class JuegosProvider extends ChangeNotifier {
     List<int> categoriaLocalIds = const [],
     Map<int, int?> propietarioUbicaciones = const {},
     Map<int, CopiaPropietarioDraft>? copiasData,
+    File? coverFile,
   }) async {
     final localId = await _juegos.save(
       juego,
@@ -207,6 +212,19 @@ class JuegosProvider extends ChangeNotifier {
       propietarioUbicaciones: propietarioUbicaciones,
       copiasData: copiasData,
     );
+    if (coverFile != null) {
+      try {
+        final stored = await CoverStore.saveFile(localId, coverFile);
+        final hash = await PhashService.hashFile(stored);
+        await _juegos.setCoverLocal(
+          localId: localId,
+          imageLocalPath: stored.path,
+          phash: hash,
+        );
+      } catch (e) {
+        debugPrint('cover save failed juego=$localId: $e');
+      }
+    }
     unawaited(SyncService().syncAll());
     await fetchJuegos(page: _currentPage);
     return localId;

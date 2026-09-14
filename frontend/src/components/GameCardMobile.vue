@@ -34,7 +34,7 @@ function fundaTexto(funda) {
     <div class="gcm__header">
       <img
         v-if="juego.imagen"
-        :src="resolveImageUrl(juego.imagen)"
+        :src="resolveImageUrl(juego.imagen, juego.bgg_id)"
         :alt="juego.nombre"
         class="gcm__thumb"
       />

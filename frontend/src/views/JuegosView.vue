@@ -301,7 +301,7 @@ function normalizeFundas(fundas = []) {
               <td class="td-imagen">
                 <img
                   v-if="juego.imagen"
-                  :src="resolveImageUrl(juego.imagen)"
+                  :src="resolveImageUrl(juego.imagen, juego.bgg_id)"
                   :alt="juego.nombre"
                   class="juego-thumb"
                 />
