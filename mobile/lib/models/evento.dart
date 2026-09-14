@@ -107,6 +107,7 @@ class EventoJuego {
   final int? juegoServerId;
   final String juegoNombre;
   final String? juegoImagen;
+  final int? juegoBggId;
 
   const EventoJuego({
     this.localId,
@@ -117,6 +118,7 @@ class EventoJuego {
     this.juegoServerId,
     required this.juegoNombre,
     this.juegoImagen,
+    this.juegoBggId,
   });
 
   factory EventoJuego.fromMap(Map<String, dynamic> map) {
@@ -129,6 +131,7 @@ class EventoJuego {
       juegoServerId: map['juego_server_id'] as int?,
       juegoNombre: map['juego_nombre'] as String? ?? '',
       juegoImagen: map['juego_imagen'] as String?,
+      juegoBggId: map['juego_bgg_id'] as int?,
     );
   }
 }

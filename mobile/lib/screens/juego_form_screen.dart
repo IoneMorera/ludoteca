@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -16,6 +17,7 @@ import '../models/juego.dart';
 import '../providers/juegos_provider.dart';
 import '../services/api_service.dart';
 import '../utils/friendly_error.dart';
+import '../utils/game_image_url.dart';
 import '../widgets/juego_picker_sheet.dart';
 import 'bgg_search_picker.dart';
 
@@ -60,6 +62,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
   String? _fechaCompra;
   String? _estado;
   String? _imagenPath;
+  String? _pendingBggImageUrl;
   File? _newImageFile;
   int? _bggId;
   bool _noEnfundar = false;
@@ -299,10 +302,18 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     if (minP != null && minP != 0) _jugMin.text = '$minP';
     if (maxP != null && maxP != 0) _jugMax.text = '$maxP';
     if (game['bgg_id'] != null) _bggId = game['bgg_id'] as int;
-    if (game['image'] != null && (game['image'] as String).isNotEmpty) {
-      _imagenPath = game['image'];
-    } else if (game['thumbnail'] != null) {
-      _imagenPath = game['thumbnail'];
+    final bggImage = (game['image'] as String?)?.trim();
+    final bggThumb = (game['thumbnail'] as String?)?.trim();
+    if (bggImage != null && bggImage.isNotEmpty) {
+      _pendingBggImageUrl = bggImage;
+    } else if (bggThumb != null && bggThumb.isNotEmpty) {
+      _pendingBggImageUrl = bggThumb;
+    }
+    if (_bggId != null && _pendingBggImageUrl != null) {
+      _imagenPath = GameImageUrl.storagePath(
+        bggId: _bggId!,
+        sourceUrl: _pendingBggImageUrl,
+      );
     }
     if (game['es_expansion'] == true) {
       _esExpansion = true;
@@ -310,6 +321,24 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
     final baseLocalId = game['juego_base_local_id'];
     if (baseLocalId is int) {
       _juegoBaseLocalId = baseLocalId;
+    }
+  }
+
+  String? get _previewImageUrl =>
+      GameImageUrl.resolve(_imagenPath, _bggId);
+
+  Future<void> _importBggCoverIfNeeded() async {
+    final bggId = _bggId;
+    final source = _pendingBggImageUrl;
+    if (bggId == null || source == null || source.isEmpty) return;
+    try {
+      await ApiService().post('/bgg/import-images', data: {
+        'images': [
+          {'bgg_id': bggId, 'image_url': source},
+        ],
+      });
+    } catch (e) {
+      debugPrint('BGG cover import failed (storage path already saved): $e');
     }
   }
 
@@ -761,7 +790,7 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       precio: precioToUse,
       fechaCompra: fechaCompraToUse,
       bggId: _bggId,
-      imagen: _imagenPath,
+      imagen: GameImageUrl.canonicalize(_imagenPath, _bggId) ?? _imagenPath,
       noEnfundar: noEnfundarToUse,
       esExpansionFlag: _esExpansion,
       autojugable: _esExpansion && _autojugable,
@@ -793,7 +822,9 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
         categoriaLocalIds: _categoriaLocalIds.toList(),
         propietarioUbicaciones: _propietarioUbicaciones,
         copiasData: copiasData,
+        coverFile: _newImageFile,
       );
+      unawaited(_importBggCoverIfNeeded());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1010,8 +1041,8 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             clipBehavior: Clip.antiAlias,
             child: _newImageFile != null
                 ? Image.file(_newImageFile!, fit: BoxFit.cover)
-                : (_imagenPath != null && _imagenPath!.isNotEmpty
-                    ? Image.network(_imagenPath!,
+                : (_previewImageUrl != null
+                    ? Image.network(_previewImageUrl!,
                         fit: BoxFit.cover,
                         errorBuilder: (_, _, _) =>
                             const Icon(Icons.image_not_supported, size: 40))

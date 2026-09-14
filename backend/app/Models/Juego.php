@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\RecordsTombstone;
+use App\Support\GameImageUrl;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -63,6 +64,26 @@ class Juego extends Model
         'sin_abrir' => 'boolean',
         'print_and_play' => 'boolean',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Juego $juego) {
+            $raw = $juego->attributes['imagen'] ?? null;
+            $bggId = isset($juego->attributes['bgg_id']) && $juego->attributes['bgg_id'] !== null
+                ? (int) $juego->attributes['bgg_id']
+                : null;
+            $juego->attributes['imagen'] = GameImageUrl::canonicalize($raw, $bggId);
+        });
+    }
+
+    public function getImagenAttribute(?string $value): ?string
+    {
+        $bggId = isset($this->attributes['bgg_id']) && $this->attributes['bgg_id'] !== null
+            ? (int) $this->attributes['bgg_id']
+            : null;
+
+        return GameImageUrl::canonicalize($value, $bggId);
+    }
 
     public function categoria()
     {

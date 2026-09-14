@@ -36,6 +36,7 @@ import 'screens/settings_screen.dart';
 import 'screens/tipos_funda_screen.dart';
 import 'screens/ubicaciones_screen.dart';
 import 'services/api_service.dart';
+import 'services/cover_store.dart';
 import 'services/error_log_service.dart';
 
 void main() async {
@@ -46,6 +47,7 @@ void main() async {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
     ApiService.warmUp(), // Precarga SharedPreferences
     AppEnvironment.init(),
+    CoverStore.init(),
   ]);
 
   // ApiConfig depende de AppEnvironment, por lo que va después.

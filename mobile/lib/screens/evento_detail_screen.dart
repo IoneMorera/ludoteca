@@ -378,6 +378,7 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
                               localId: ej.juegoLocalId,
                               nombre: ej.juegoNombre,
                               imagen: ej.juegoImagen,
+                              bggId: ej.juegoBggId,
                             ),
                             width: 48,
                             height: 48,

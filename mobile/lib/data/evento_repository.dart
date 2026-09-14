@@ -458,7 +458,8 @@ class EventoRepository {
 
     final juegosByEvento = <int, List<EventoJuego>>{};
     final ejRows = await db.rawQuery('''
-      SELECT ej.*, j.nombre AS juego_nombre, j.imagen AS juego_imagen
+      SELECT ej.*, j.nombre AS juego_nombre, j.imagen AS juego_imagen,
+             j.bgg_id AS juego_bgg_id
       FROM evento_juegos ej
       INNER JOIN juegos j ON j.local_id = ej.juego_local_id
       WHERE ej.evento_local_id IN ($placeholders)

@@ -1,18 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../config/api_config.dart';
 import '../services/api_service.dart';
+import '../services/cover_store.dart';
 import '../services/database_service.dart';
 import '../services/phash_service.dart';
+import '../utils/game_image_url.dart';
 import 'bgg_expansion_repository.dart';
 import 'categoria_repository.dart';
 import 'evento_repository.dart';
@@ -112,8 +109,8 @@ class SyncService {
         if (count == null || count == 0) fullPull = true;
       }
       await _pull(fullPull: fullPull);
-      // Tras sincronizar metadatos, calcular pHashes que falten.
-      unawaited(_indexPendingPhashes());
+      await _juegos.canonicalizeStoredImageUrls();
+      unawaited(_prefetchCovers());
       final pending = await _outbox.count();
       _emit(_current.copyWith(
         status: SyncStatus.idle,
@@ -634,57 +631,66 @@ class SyncService {
     _controller.add(s);
   }
 
-  /// Itera por los juegos que tienen imagen pero no pHash y los calcula en
-  /// segundo plano (download + hash + persist). No bloquea la sincronizaci\u00f3n.
-  Future<void> _indexPendingPhashes() async {
+  /// Descarga portadas a disco persistente y calcula pHash en segundo plano.
+  Future<void> _prefetchCovers() async {
     final db = await _dbService.database;
     final rows = await db.rawQuery(
-      "SELECT local_id, imagen FROM juegos "
-      "WHERE imagen IS NOT NULL AND imagen != '' AND phash IS NULL "
-      "LIMIT 25",
+      "SELECT local_id, imagen, bgg_id, image_local_path, phash FROM juegos "
+      "WHERE imagen IS NOT NULL AND imagen != ''",
     );
     if (rows.isEmpty) return;
-    final cacheDir = await _phashCacheDir();
-    for (final row in rows) {
-      final localId = row['local_id'] as int;
-      final imagen = row['imagen'] as String;
-      try {
-        final url = _resolveImageUrl(imagen);
-        if (url == null) continue;
-        final file = File(p.join(cacheDir.path, 'juego_$localId.bin'));
-        if (!await file.exists()) {
-          final response = await http.get(Uri.parse(url));
-          if (response.statusCode != 200) continue;
-          await file.writeAsBytes(response.bodyBytes);
-        }
-        final hash = await PhashService.hashFile(file);
-        if (hash != null) {
-          await _juegos.setPhash(
-            localId: localId,
-            phash: hash,
-            imageLocalPath: file.path,
-          );
-        }
-      } catch (e) {
-        debugPrint('phash error juego=$localId: $e');
+
+    const concurrency = 3;
+    var next = 0;
+    Future<void> worker() async {
+      while (true) {
+        final index = next++;
+        if (index >= rows.length) return;
+        await _ensureCover(rows[index]);
       }
     }
+
+    await Future.wait(List.generate(concurrency, (_) => worker()));
   }
 
-  Future<Directory> _phashCacheDir() async {
-    final base = await getTemporaryDirectory();
-    final dir = Directory(p.join(base.path, 'ludoteca_phash'));
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
+  Future<void> _ensureCover(Map<String, dynamic> row) async {
+    final localId = row['local_id'] as int;
+    try {
+      var file = await CoverStore.existingFile(
+        localId: localId,
+        storedPath: row['image_local_path'] as String?,
+      );
+      if (file != null && !CoverStore.isCanonicalPath(file.path)) {
+        file = await CoverStore.saveFile(localId, file);
+      }
+      if (file == null) {
+        final url = GameImageUrl.resolve(
+          row['imagen'] as String?,
+          _asInt(row['bgg_id']),
+        );
+        if (url == null) return;
+        file = await CoverStore.download(localId, url);
+      }
+      if (file == null) return;
+
+      var hash = row['phash'] as String?;
+      hash ??= await PhashService.hashFile(file);
+      if (row['image_local_path'] != file.path || row['phash'] != hash) {
+        await _juegos.setCoverLocal(
+          localId: localId,
+          imageLocalPath: file.path,
+          phash: hash,
+        );
+      }
+    } catch (e) {
+      debugPrint('cover prefetch juego=$localId: $e');
     }
-    return dir;
   }
 
-  String? _resolveImageUrl(String imagen) {
-    if (imagen.startsWith('http://') || imagen.startsWith('https://')) {
-      return imagen;
-    }
-    final path = imagen.startsWith('/') ? imagen : '/$imagen';
-    return '${ApiConfig.storageUrl}$path';
+  static int? _asInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
   }
 }

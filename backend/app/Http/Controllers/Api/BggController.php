@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Support\GameImageUrl;
 
 class BggController extends Controller
 {
@@ -869,7 +870,7 @@ class BggController extends Controller
                 continue;
             }
 
-            $extension = pathinfo(parse_url($item['image_url'], PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'jpg';
+            $extension = GameImageUrl::extensionOf($item['image_url']);
 
             try {
                 $publicPath = $this->storeImage($item['bgg_id'], $extension, $response->body());
@@ -907,22 +908,13 @@ class BggController extends Controller
         $juegos = Juego::whereNotNull('bgg_id')
             ->where(function ($q) {
                 $q->whereNull('imagen')
-                  ->orWhere('imagen', '');
+                  ->orWhere('imagen', '')
+                  ->orWhere('imagen', 'like', '%geekdo%');
             })
             ->select('id', 'bgg_id', 'nombre')
             ->orderBy('nombre')
             ->get();
 
-        $pending = [];
-        foreach ($juegos as $juego) {
-            $pending[] = [
-                'bgg_id' => $juego->bgg_id,
-                'image_url' => "https://cf.geekdo-images.com/original/img/bgg_{$juego->bgg_id}.jpg",
-            ];
-        }
-
-        // Para obtener las URLs reales necesitamos consultar la API de BGG
-        // Hacemos peticiones en lotes al endpoint /thing
         $bggIds = $juegos->pluck('bgg_id')->filter()->unique()->values()->all();
         $imageMap = $this->fetchBggImageUrls($bggIds);
 
@@ -1022,9 +1014,9 @@ class BggController extends Controller
             return Storage::disk('r2')->url($key);
         }
 
-        $filename = "juegos/bgg_{$bggId}.{$extension}";
+        $filename = 'juegos/bgg_' . $bggId . '.' . $extension;
         Storage::disk('public')->put($filename, $body);
-        return "/storage/{$filename}";
+        return GameImageUrl::storagePath($bggId, 'file.' . $extension);
     }
 
     private function attachPropietarioBulk(int $propietarioId, array $bggIds): void
