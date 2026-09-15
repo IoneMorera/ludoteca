@@ -18,6 +18,7 @@ import '../providers/juegos_provider.dart';
 import '../services/api_service.dart';
 import '../utils/friendly_error.dart';
 import '../utils/game_image_url.dart';
+import '../widgets/game_image.dart';
 import '../widgets/juego_picker_sheet.dart';
 import 'bgg_search_picker.dart';
 
@@ -323,9 +324,6 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
       _juegoBaseLocalId = baseLocalId;
     }
   }
-
-  String? get _previewImageUrl =>
-      GameImageUrl.resolve(_imagenPath, _bggId);
 
   Future<void> _importBggCoverIfNeeded() async {
     final bggId = _bggId;
@@ -1041,11 +1039,23 @@ class _JuegoFormScreenState extends State<JuegoFormScreen> {
             clipBehavior: Clip.antiAlias,
             child: _newImageFile != null
                 ? Image.file(_newImageFile!, fit: BoxFit.cover)
-                : (_previewImageUrl != null
-                    ? Image.network(_previewImageUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            const Icon(Icons.image_not_supported, size: 40))
+                : (_existing != null ||
+                        (_imagenPath != null && _imagenPath!.isNotEmpty)
+                    ? GameImage(
+                        juego: Juego(
+                          id: _existing?.id ?? _bggId ?? 0,
+                          localId: _existing?.localId,
+                          nombre: _nombre.text.trim().isEmpty
+                              ? (_existing?.nombre ?? '')
+                              : _nombre.text.trim(),
+                          imagen: _imagenPath ?? _existing?.imagen,
+                          bggId: _bggId,
+                          imageLocalPath: _existing?.imageLocalPath,
+                        ),
+                        width: 140,
+                        height: 140,
+                        borderRadius: BorderRadius.circular(16),
+                      )
                     : const Icon(Icons.casino, size: 40, color: Colors.grey)),
           ),
           Positioned(
